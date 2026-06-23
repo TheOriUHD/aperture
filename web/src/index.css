@@ -1,0 +1,109 @@
+@import "@fontsource-variable/inter";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-ink-900 text-fg font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+  * {
+    border-color: theme("colors.line.DEFAULT");
+  }
+  /* Slim, dark scrollbars to match the surface. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2a3038;
+    border-radius: 8px;
+    border: 2px solid theme("colors.ink.900");
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #353c45;
+  }
+  ::selection {
+    background: rgba(27, 157, 240, 0.32);
+  }
+}
+
+@layer components {
+  /* Buttons -------------------------------------------------------------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 h-9 text-sm font-medium
+      transition-colors duration-150 select-none disabled:opacity-50 disabled:pointer-events-none
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60;
+  }
+  .btn-primary {
+    @apply btn bg-brand text-white hover:bg-[#2aa6f5] active:bg-[#1789d6];
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-fg-muted border border-line-strong hover:bg-ink-700 hover:text-fg;
+  }
+  .btn-subtle {
+    @apply btn bg-ink-700 text-fg hover:bg-ink-650;
+  }
+  .btn-danger {
+    @apply btn bg-rec/90 text-white hover:bg-rec;
+  }
+  .btn-icon {
+    @apply inline-flex items-center justify-center h-9 w-9 rounded-md text-fg-muted
+      hover:bg-ink-700 hover:text-fg transition-colors duration-150;
+  }
+
+  /* Surfaces ------------------------------------------------------------- */
+  .card {
+    @apply bg-ink-800 border border-line rounded-lg;
+  }
+  .panel {
+    @apply bg-ink-800 border border-line rounded-lg p-4;
+  }
+
+  /* Pills / badges ------------------------------------------------------- */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none;
+  }
+  .pill-rec {
+    @apply pill bg-black/55 text-[#ffd6d7];
+  }
+  .pill-motion {
+    @apply pill bg-motion text-[#412402];
+  }
+  .pill-online {
+    @apply pill bg-online/15 text-online;
+  }
+  .pill-offline {
+    @apply pill bg-ink-700 text-fg-faint;
+  }
+
+  /* Inputs --------------------------------------------------------------- */
+  .input {
+    @apply h-9 w-full rounded-md bg-ink-850 border border-line-strong px-3 text-sm text-fg
+      placeholder:text-fg-faint focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30
+      transition-colors;
+  }
+  .label {
+    @apply block text-xs font-medium text-fg-muted mb-1.5;
+  }
+
+  /* Nav rail item -------------------------------------------------------- */
+  .nav-item {
+    @apply relative flex items-center justify-center h-10 w-10 rounded-lg text-fg-muted
+      hover:text-fg hover:bg-ink-700 transition-colors duration-150;
+  }
+  .nav-item-active {
+    @apply text-white bg-brand/15 hover:bg-brand/20;
+  }
+}
