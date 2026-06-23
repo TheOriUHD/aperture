@@ -124,30 +124,33 @@ func (p *Publisher) connected() bool {
 // Connected reports whether the MQTT client is currently connected.
 func (p *Publisher) Connected() bool { return p.connected() }
 
-// Reconcile (re)connects when settings change or the connection dropped.
+// Reconcile (re)connects only when settings change or no client exists yet.
+// It must NOT recreate a client that already exists — paho handles transient
+// reconnects itself, and a duplicate client ID would make the broker kick the
+// existing connection (a flap loop).
 func (p *Publisher) Reconcile() {
 	s := p.LoadSettings()
 	p.mu.Lock()
 	changed := s != p.current
-	connected := p.client != nil && p.client.IsConnected()
+	hasClient := p.client != nil
+	p.current = s
 	p.mu.Unlock()
 
 	if !s.Enabled {
-		if connected || changed {
+		if hasClient {
 			p.disconnect()
 		}
-		p.mu.Lock()
-		p.current = s
-		p.mu.Unlock()
-		return
-	}
-	if connected && !changed {
 		return
 	}
 	if changed {
 		p.disconnect()
+		p.connect(s)
+		return
 	}
-	p.connect(s)
+	if !hasClient {
+		p.connect(s)
+	}
+	// else: a client already exists; let paho auto-reconnect as needed.
 }
 
 func (p *Publisher) connect(s Settings) {

@@ -91,6 +91,10 @@ export function HomeAssistant() {
         <div>
           <label className="label">Discovery prefix</label>
           <input className="input" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+          <p className="text-xs text-fg-faint mt-1.5">
+            Must match Home Assistant&apos;s MQTT discovery prefix — almost always{" "}
+            <code className="text-fg-muted">homeassistant</code>.
+          </p>
         </div>
 
         <div className="flex items-center gap-3">
