@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 type ctxKey int
@@ -11,11 +12,16 @@ type ctxKey int
 const claimsKey ctxKey = iota
 
 // Context injects the verified session (if any) into the request context so
-// downstream handlers can read it. It never rejects requests itself.
+// downstream handlers can read it. It never rejects requests itself. A valid
+// CLI bearer token authenticates as a synthetic admin (for nvrctl).
 func (m *Manager) Context(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if claims, err := m.SessionFromRequest(r); err == nil {
 			r = r.WithContext(context.WithValue(r.Context(), claimsKey, claims))
+		} else if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+			if claims := m.CLISession(bearer); claims != nil {
+				r = r.WithContext(context.WithValue(r.Context(), claimsKey, claims))
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

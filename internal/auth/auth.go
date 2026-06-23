@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"time"
@@ -17,12 +18,25 @@ const sessionCookie = "aperture_session"
 type Manager struct {
 	jwtSecret    []byte
 	streamSecret []byte
+	cliToken     []byte
 	secure       bool // mark cookies Secure (set when served over HTTPS)
 }
 
 // NewManager builds a Manager from the configured secrets.
-func NewManager(jwtSecret, streamSecret []byte, secureCookies bool) *Manager {
-	return &Manager{jwtSecret: jwtSecret, streamSecret: streamSecret, secure: secureCookies}
+func NewManager(jwtSecret, streamSecret, cliToken []byte, secureCookies bool) *Manager {
+	return &Manager{jwtSecret: jwtSecret, streamSecret: streamSecret, cliToken: cliToken, secure: secureCookies}
+}
+
+// CLISession returns synthetic admin claims if the bearer token matches the
+// local CLI token, or nil.
+func (m *Manager) CLISession(bearer string) *SessionClaims {
+	if len(m.cliToken) == 0 || bearer == "" {
+		return nil
+	}
+	if subtle.ConstantTimeCompare([]byte(bearer), m.cliToken) != 1 {
+		return nil
+	}
+	return &SessionClaims{UserID: "cli", Email: "cli@local", Name: "nvrctl", Role: "admin"}
 }
 
 // SessionClaims is the payload carried in the session cookie.

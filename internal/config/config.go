@@ -29,7 +29,11 @@ type Config struct {
 	// Secrets (auto-generated + persisted if unset).
 	JWTSecret    []byte
 	StreamSecret []byte
+	CLIToken     []byte // local admin token for nvrctl (also written to cli.token)
 }
+
+// CLITokenPath returns where the CLI token is written for nvrctl to read.
+func (c *Config) CLITokenPath() string { return filepath.Join(c.DataDir, "cli.token") }
 
 // DBPath returns the SQLite database path under the data directory.
 func (c *Config) DBPath() string { return filepath.Join(c.DataDir, "aperture.db") }
@@ -73,6 +77,7 @@ func Load() (*Config, error) {
 type secretsFile struct {
 	JWTSecret    string `json:"jwt_secret"`
 	StreamSecret string `json:"stream_secret"`
+	CLIToken     string `json:"cli_token"`
 }
 
 // loadSecrets resolves JWT and stream-signing secrets, preferring environment
@@ -87,6 +92,7 @@ func (c *Config) loadSecrets() error {
 
 	jwt := env("APERTURE_JWT_SECRET", sf.JWTSecret)
 	stream := env("APERTURE_STREAM_SECRET", sf.StreamSecret)
+	cli := sf.CLIToken
 
 	if jwt == "" {
 		jwt = randHex(32)
@@ -94,10 +100,13 @@ func (c *Config) loadSecrets() error {
 	if stream == "" {
 		stream = randHex(32)
 	}
+	if cli == "" {
+		cli = randHex(24)
+	}
 
 	// Persist if anything was newly generated and not pinned via env.
-	if sf.JWTSecret != jwt || sf.StreamSecret != stream {
-		out, _ := json.MarshalIndent(secretsFile{JWTSecret: jwt, StreamSecret: stream}, "", "  ")
+	if sf.JWTSecret != jwt || sf.StreamSecret != stream || sf.CLIToken != cli {
+		out, _ := json.MarshalIndent(secretsFile{JWTSecret: jwt, StreamSecret: stream, CLIToken: cli}, "", "  ")
 		if err := os.WriteFile(path, out, 0o600); err != nil {
 			return fmt.Errorf("persist secrets: %w", err)
 		}
@@ -105,6 +114,10 @@ func (c *Config) loadSecrets() error {
 
 	c.JWTSecret = []byte(jwt)
 	c.StreamSecret = []byte(stream)
+	c.CLIToken = []byte(cli)
+
+	// Mirror the CLI token to a plain file so nvrctl can read it locally.
+	_ = os.WriteFile(c.CLITokenPath(), []byte(cli), 0o600)
 	return nil
 }
 

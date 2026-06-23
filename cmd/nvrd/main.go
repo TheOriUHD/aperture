@@ -44,7 +44,7 @@ func main() {
 	defer st.Close()
 
 	secureCookies := strings.HasPrefix(cfg.PublicURL, "https://")
-	am := auth.NewManager(cfg.JWTSecret, cfg.StreamSecret, secureCookies)
+	am := auth.NewManager(cfg.JWTSecret, cfg.StreamSecret, cfg.CLIToken, secureCookies)
 
 	sm, err := stream.NewManager(cfg.Go2RTCURL, cfg.Go2RTCRTSP)
 	if err != nil {
