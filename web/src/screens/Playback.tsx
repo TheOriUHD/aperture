@@ -120,6 +120,7 @@ export function Playback() {
 
   const scrubbing = useRef(false);
   const snapAnim = useRef(0);
+  const allowSnap = useRef(true);
   const nowRef = useRef(nowMs);
   nowRef.current = nowMs;
 
@@ -152,7 +153,7 @@ export function Playback() {
     window.clearTimeout(seekTimer.current);
     seekTimer.current = window.setTimeout(() => {
       const snapMs = clamp(windowMs * 0.04, 5000, 90_000);
-      if (selectedRef.current >= nowRef.current - snapMs) {
+      if (allowSnap.current && selectedRef.current >= nowRef.current - snapMs) {
         animateToLive();
         return;
       }
@@ -165,9 +166,9 @@ export function Playback() {
     }, 150);
   }
 
-  // Single entry point for any scrub (drag, wheel, click, skip).
-  function scrubToTime(ms: number) {
+  function applyScrub(ms: number, snap: boolean) {
     cancelAnimationFrame(snapAnim.current);
+    allowSnap.current = snap;
     const c = clamp(ms, nowMs - MONTH_MS, nowMs);
     scrubbing.current = true;
     setFollowing(false);
@@ -176,8 +177,22 @@ export function Playback() {
     scheduleSettle();
   }
 
+  // Drag / wheel scrubbing: snaps to live when settling near the edge.
+  function scrubToTime(ms: number) {
+    applyScrub(ms, true);
+  }
+  // Explicit seeks (skip buttons, timeline click): never snap; only go live if
+  // the target is essentially the present.
+  function seekToTime(ms: number) {
+    if (ms >= nowMs - 1500) {
+      goLive();
+      return;
+    }
+    applyScrub(ms, false);
+  }
+
   function shiftDay(dir: number) {
-    scrubToTime(selectedMs + dir * DAY_MS);
+    seekToTime(selectedMs + dir * DAY_MS);
   }
   function goLive() {
     if (!following) animateToLive();
@@ -266,6 +281,7 @@ export function Playback() {
             events={motion}
             live={following}
             onScrubTo={scrubToTime}
+            onSeekAbs={seekToTime}
           />
           {!following && (
             <button
@@ -328,11 +344,11 @@ export function Playback() {
                 {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
               </BarBtn>
             )}
-            <BarBtn onClick={() => scrubToTime((isLive ? nowMs : selectedMs) - 30_000)} label="Back 30 seconds">
+            <BarBtn onClick={() => seekToTime((isLive ? nowMs : selectedMs) - 30_000)} label="Back 30 seconds">
               <Rewind className="h-4 w-4" />
             </BarBtn>
             {!isLive && (
-              <BarBtn onClick={() => scrubToTime(selectedMs + 30_000)} label="Forward 30 seconds">
+              <BarBtn onClick={() => seekToTime(selectedMs + 30_000)} label="Forward 30 seconds">
                 <FastForward className="h-4 w-4" />
               </BarBtn>
             )}

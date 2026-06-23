@@ -4,9 +4,13 @@ import { api } from "../lib/api";
 import { LiveStream, type LiveState } from "../lib/livestream";
 import type { Camera, StreamToken } from "../lib/types";
 
-// Bare live player: always fills its (relative, sized) parent. While connecting
-// it shows a blurred full-size snapshot of the camera's current frame with an
-// animated dot loader, instead of a black box.
+type FrameVideo = HTMLVideoElement & {
+  requestVideoFrameCallback?: (cb: () => void) => number;
+};
+
+// Bare live player: always fills its (relative, sized) parent. A blurred full
+// frame + dot loader is shown until the video actually presents a frame, then
+// it fades out — so the live image is never a black flash.
 export function LiveVideo({
   camera,
   muted = true,
@@ -21,8 +25,10 @@ export function LiveVideo({
   const innerRef = useRef<HTMLVideoElement>(null);
   const videoRef = externalRef ?? innerRef;
   const [state, setState] = useState<LiveState>("connecting");
+  const [revealed, setRevealed] = useState(false);
   const [snapOk, setSnapOk] = useState(true);
 
+  // Live stream lifecycle.
   useEffect(() => {
     if (!camera.enabled) {
       setState("error");
@@ -49,6 +55,31 @@ export function LiveVideo({
     };
   }, [camera.id, camera.enabled, videoRef]);
 
+  // Reveal only once a real frame is presented (no black flash).
+  useEffect(() => {
+    setRevealed(false);
+    setSnapOk(true);
+    const v = videoRef.current as FrameVideo | null;
+    if (!v) return;
+    let cancelled = false;
+    const reveal = () => {
+      if (!cancelled) setRevealed(true);
+    };
+    if (typeof v.requestVideoFrameCallback === "function") {
+      v.requestVideoFrameCallback(reveal);
+    }
+    const onData = () => window.setTimeout(reveal, 80);
+    v.addEventListener("loadeddata", onData);
+    v.addEventListener("playing", onData);
+    return () => {
+      cancelled = true;
+      v.removeEventListener("loadeddata", onData);
+      v.removeEventListener("playing", onData);
+    };
+  }, [camera.id, videoRef]);
+
+  const loaded = revealed && state === "playing";
+
   return (
     <div className="absolute inset-0 overflow-hidden bg-black">
       <video
@@ -59,34 +90,36 @@ export function LiveVideo({
         className={`h-full w-full bg-black ${fit === "cover" ? "object-cover" : "object-contain"}`}
       />
 
-      {state !== "playing" && (
-        <div className="absolute inset-0">
-          {camera.enabled && snapOk ? (
-            <img
-              src={`/api/cameras/${camera.id}/snapshot.jpg`}
-              alt=""
-              className="absolute inset-0 h-full w-full object-cover scale-105 blur-2xl brightness-[0.7]"
-              onError={() => setSnapOk(false)}
-            />
+      <div
+        className={`absolute inset-0 transition-opacity duration-300 ${
+          loaded ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
+      >
+        {camera.enabled && snapOk ? (
+          <img
+            src={`/api/cameras/${camera.id}/snapshot.jpg`}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover scale-105 blur-2xl brightness-[0.7]"
+            onError={() => setSnapOk(false)}
+          />
+        ) : (
+          <div className="absolute inset-0 bg-ink-850" />
+        )}
+        <div className="absolute inset-0 grid place-items-center">
+          {state === "error" ? (
+            <div className="flex flex-col items-center gap-1 text-white/70">
+              <VideoOff className="h-6 w-6" />
+              <span className="text-xs">{camera.enabled ? "No signal" : "Disabled"}</span>
+            </div>
           ) : (
-            <div className="absolute inset-0 bg-ink-850" />
+            <div className="flex items-center gap-1.5">
+              <span className="cdot" style={{ animationDelay: "0ms" }} />
+              <span className="cdot" style={{ animationDelay: "160ms" }} />
+              <span className="cdot" style={{ animationDelay: "320ms" }} />
+            </div>
           )}
-          <div className="absolute inset-0 grid place-items-center">
-            {state === "connecting" ? (
-              <div className="flex items-center gap-1.5">
-                <span className="cdot" style={{ animationDelay: "0ms" }} />
-                <span className="cdot" style={{ animationDelay: "160ms" }} />
-                <span className="cdot" style={{ animationDelay: "320ms" }} />
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-1 text-white/70">
-                <VideoOff className="h-6 w-6" />
-                <span className="text-xs">{camera.enabled ? "No signal" : "Disabled"}</span>
-              </div>
-            )}
-          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

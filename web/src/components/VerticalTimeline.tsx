@@ -36,6 +36,7 @@ export function VerticalTimeline({
   live,
   playheadFrac = 0.16,
   onScrubTo,
+  onSeekAbs,
 }: {
   selectedMs: number;
   windowMs: number;
@@ -45,6 +46,7 @@ export function VerticalTimeline({
   live: boolean;
   playheadFrac?: number;
   onScrubTo: (ms: number) => void;
+  onSeekAbs: (ms: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const selRef = useRef(selectedMs);
@@ -104,7 +106,7 @@ export function VerticalTimeline({
     }
     if (d && !d.moved && ref.current) {
       const rect = ref.current.getBoundingClientRect();
-      onScrubTo(topTime - ((e.clientY - rect.top) / rect.height) * windowMs);
+      onSeekAbs(topTime - ((e.clientY - rect.top) / rect.height) * windowMs);
     }
   }
 
