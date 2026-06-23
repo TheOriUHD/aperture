@@ -149,6 +149,8 @@ func (s *Server) syncStreams() {
 		if err := s.sm.Sync(ctx, cams); err != nil {
 			s.log.Error("sync streams", "err", err)
 		}
+		// Pick up recording-mode / enabled changes promptly.
+		s.rec.Reconcile()
 	}()
 }
 

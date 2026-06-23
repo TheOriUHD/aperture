@@ -17,6 +17,8 @@ import (
 	"github.com/TheOriUHD/aperture/internal/api"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/record"
+	"github.com/TheOriUHD/aperture/internal/retention"
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
 	"github.com/TheOriUHD/aperture/internal/version"
@@ -48,9 +50,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Background services share a context cancelled on shutdown.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+
 	// Best-effort initial reconciliation of go2rtc streams with stored cameras.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(bgCtx, 15*time.Second)
 		defer cancel()
 		cams, err := st.ListCameras()
 		if err != nil {
@@ -62,7 +68,13 @@ func main() {
 		}
 	}()
 
-	srv := api.NewServer(cfg, st, am, sm, log)
+	// Recorder (supervised ffmpeg + segment indexing) and retention janitor.
+	rec := record.New(cfg, st, sm, log)
+	go rec.Run(bgCtx)
+	janitor := retention.New(cfg, st, log)
+	go janitor.Run(bgCtx)
+
+	srv := api.NewServer(cfg, st, am, sm, rec, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

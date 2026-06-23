@@ -10,6 +10,7 @@ import (
 
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
 )
@@ -22,13 +23,14 @@ type Server struct {
 	st     *store.Store
 	am     *auth.Manager
 	sm     *stream.Manager
+	rec    *record.Recorder
 	log    *slog.Logger
 	router http.Handler
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, log: log}
 	s.router = s.routes()
 	return s
 }
@@ -62,6 +64,10 @@ func (s *Server) routes() http.Handler {
 			r.Get("/cameras", s.handleListCameras)
 			r.Get("/cameras/{id}", s.handleGetCamera)
 			r.Get("/cameras/{id}/stream-token", s.handleStreamToken)
+			r.Get("/cameras/{id}/segments", s.handleSegmentsList)
+			r.Get("/cameras/{id}/hls", s.handleHLS)
+			r.Get("/cameras/{id}/seg/{seg}", s.handleSegmentFile)
+			r.Get("/system/storage", s.handleStorage)
 		})
 
 		// Admin-only.
