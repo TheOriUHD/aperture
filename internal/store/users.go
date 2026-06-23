@@ -42,6 +42,18 @@ func (s *Store) GetUserByEmail(email string) (*User, error) {
          FROM users WHERE email = ?`, email))
 }
 
+// GetUserByOIDCSub looks up an account by its linked OIDC subject.
+func (s *Store) GetUserByOIDCSub(sub string) (*User, error) {
+	return s.scanUser(s.db.QueryRow(
+		`SELECT id, email, name, password_hash, role, oidc_sub, disabled, created_at
+         FROM users WHERE oidc_sub = ?`, sub))
+}
+
+// SetUserOIDC links an account to an OIDC subject.
+func (s *Store) SetUserOIDC(id, sub string) error {
+	return affected(s.db.Exec(`UPDATE users SET oidc_sub = ? WHERE id = ?`, sub, id))
+}
+
 // GetUserByID looks up an account by id.
 func (s *Store) GetUserByID(id string) (*User, error) {
 	return s.scanUser(s.db.QueryRow(

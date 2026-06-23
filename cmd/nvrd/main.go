@@ -19,6 +19,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/motion"
+	"github.com/TheOriUHD/aperture/internal/oidc"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/retention"
 	"github.com/TheOriUHD/aperture/internal/store"
@@ -112,7 +113,8 @@ func main() {
 		}
 	}()
 
-	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, log)
+	oidcAuth := oidc.New(cfg, st)
+	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

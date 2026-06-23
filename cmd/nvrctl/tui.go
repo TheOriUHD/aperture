@@ -25,14 +25,14 @@ func tuiCmd() *cobra.Command {
 }
 
 type model struct {
-	c       *Client
-	v       verInfo
-	s       storageInfo
-	cams    []cameraInfo
-	evs     []eventInfo
-	loaded  bool
-	err     error
-	w, h    int
+	c      *Client
+	v      verInfo
+	s      storageInfo
+	cams   []cameraInfo
+	evs    []eventInfo
+	loaded bool
+	err    error
+	w, h   int
 }
 
 type dataMsg struct {

@@ -1,13 +1,26 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "../lib/auth";
+import { api } from "../lib/api";
 import { AuthLayout } from "./AuthLayout";
 
 export function Login() {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(
+    new URLSearchParams(window.location.search).get("error") === "sso"
+      ? "Single sign-on failed. Try again or use your password."
+      : "",
+  );
   const [busy, setBusy] = useState(false);
+  const [sso, setSso] = useState<{ enabled: boolean; name: string }>({ enabled: false, name: "" });
+
+  useEffect(() => {
+    api
+      .get<{ enabled: boolean; name: string }>("/api/auth/oidc/status")
+      .then(setSso)
+      .catch(() => {});
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -57,6 +70,19 @@ export function Login() {
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>
+
+      {sso.enabled && (
+        <>
+          <div className="my-5 flex items-center gap-3 text-fg-faint">
+            <span className="h-px flex-1 bg-line" />
+            <span className="text-xs uppercase tracking-wide">or</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+          <a href="/api/auth/oidc/login" className="btn-secondary w-full justify-center">
+            Sign in with {sso.name}
+          </a>
+        </>
+      )}
     </AuthLayout>
   );
 }

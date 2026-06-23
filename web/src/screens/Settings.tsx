@@ -5,6 +5,7 @@ import { TopBar } from "../components/TopBar";
 import { UserModal } from "../components/UserModal";
 import { StorageManager } from "../components/StorageManager";
 import { HomeAssistant } from "../components/HomeAssistant";
+import { OidcSettings } from "../components/OidcSettings";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUsers, type ManagedUser } from "../hooks/useUsers";
@@ -31,6 +32,7 @@ export function Settings() {
 
           {isAdmin && <SiteSection />}
           {isAdmin && <UsersSection currentUserId={user?.id} />}
+          {isAdmin && <OidcSettings />}
           {isAdmin && <StorageManager />}
           {isAdmin && <HomeAssistant />}
 

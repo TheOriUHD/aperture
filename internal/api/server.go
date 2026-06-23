@@ -12,6 +12,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/motion"
+	"github.com/TheOriUHD/aperture/internal/oidc"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
@@ -28,13 +29,14 @@ type Server struct {
 	rec    *record.Recorder
 	det    *motion.Detector
 	ha     *ha.Publisher
+	oidc   *oidc.Authenticator
 	log    *slog.Logger
 	router http.Handler
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, log: log}
 	s.router = s.routes()
 	return s
 }
@@ -57,6 +59,9 @@ func (s *Server) routes() http.Handler {
 		r.Post("/setup", s.handleSetup)
 		r.Post("/auth/login", s.handleLogin)
 		r.Post("/auth/logout", s.handleLogout)
+		r.Get("/auth/oidc/status", s.handleOIDCStatus)
+		r.Get("/auth/oidc/login", s.handleOIDCLogin)
+		r.Get("/auth/oidc/callback", s.handleOIDCCallback)
 
 		// Live stream WebSocket (authorized via short-lived stream token in query).
 		r.Get("/cameras/{id}/ws", s.handleStreamWS)
@@ -96,6 +101,8 @@ func (s *Server) routes() http.Handler {
 			r.Post("/system/purge", s.handlePurge)
 			r.Get("/system/ha", s.handleGetHA)
 			r.Put("/system/ha", s.handleSetHA)
+			r.Get("/system/oidc", s.handleGetOIDC)
+			r.Put("/system/oidc", s.handleSetOIDC)
 		})
 	})
 

@@ -60,6 +60,41 @@ export function useSetHA() {
   });
 }
 
+export interface OIDCConfig {
+  enabled: boolean;
+  issuer: string;
+  clientId: string;
+  domain: string;
+  autoCreate: boolean;
+  name: string;
+  hasSecret: boolean;
+  redirectUrl: string;
+}
+
+export function useOIDC() {
+  return useQuery({
+    queryKey: ["oidc"],
+    queryFn: () => api.get<OIDCConfig>("/api/system/oidc"),
+    staleTime: 30_000,
+  });
+}
+
+export function useSetOIDC() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      enabled: boolean;
+      issuer: string;
+      clientId: string;
+      clientSecret?: string;
+      domain: string;
+      autoCreate: boolean;
+      name: string;
+    }) => api.put<OIDCConfig>("/api/system/oidc", input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["oidc"] }),
+  });
+}
+
 export function usePurge() {
   const qc = useQueryClient();
   return useMutation({
