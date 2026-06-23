@@ -10,7 +10,7 @@ import {
   Camera as CameraIcon,
   ChevronLeft,
   ChevronRight,
-  Radio,
+  ArrowUp,
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
 import { VerticalTimeline, type TR } from "../components/VerticalTimeline";
@@ -18,7 +18,7 @@ import { EventStrip } from "../components/EventStrip";
 import { LiveVideo } from "../components/LiveVideo";
 import { useCameras } from "../hooks/useCameras";
 import { api } from "../lib/api";
-import { wallToOffset, offsetToWall, type Seg } from "../lib/playlist";
+import { wallToOffset, offsetToWall, mergeRanges, type Seg } from "../lib/playlist";
 
 interface Segment extends Seg {
   id: string;
@@ -26,13 +26,16 @@ interface Segment extends Seg {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const ZOOMS = [10, 30, 60, 180, 360, 720].map((m) => m * 60_000);
+const MONTH_MS = 30 * DAY_MS;
+// Largest window first so the zoom slider reads left = out, right (+) = in.
+const ZOOMS = [720, 360, 180, 60, 30, 10].map((m) => m * 60_000);
 
 const startOfDay = (ms: number) => {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 };
+const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
 const fmtClock = (ms: number) =>
   new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const fmtDate = (ms: number) =>
@@ -45,30 +48,29 @@ export function Playback() {
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [following, setFollowing] = useState(true);
-  const [viewTopFrozen, setViewTopFrozen] = useState<number | null>(null);
-  const [playheadMs, setPlayheadMs] = useState<number | undefined>();
-  const [zoomIdx, setZoomIdx] = useState(1);
+  const [selectedState, setSelectedState] = useState(() => Date.now());
+  const [zoomIdx, setZoomIdx] = useState(4); // 30 min
   const [paused, setPaused] = useState(false);
 
   const playerVideoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const playheadRef = useRef<number | undefined>(undefined);
-  playheadRef.current = playheadMs;
+  const selectedRef = useRef<number>(selectedState);
+  const segmentsRef = useRef<Segment[]>([]);
+  const seekTimer = useRef<number | undefined>(undefined);
 
   const windowMs = ZOOMS[zoomIdx];
-  const isLive = playheadMs === undefined; // player shows live when no playhead
-  const viewTopMs = following ? nowMs : viewTopFrozen ?? nowMs;
-  const dayStart = startOfDay(viewTopMs);
+  const isLive = following;
+  const selectedMs = following ? nowMs : selectedState;
+  selectedRef.current = selectedMs;
+  const dayStart = startOfDay(selectedMs);
   const dayEnd = dayStart + DAY_MS;
 
-  // live clock
   useEffect(() => {
     const i = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(i);
   }, []);
 
-  // initial / deep-link camera selection
   useEffect(() => {
     if (!cameras?.length) return;
     const q = params.get("camera");
@@ -85,27 +87,25 @@ export function Playback() {
     enabled: !!selectedId,
     refetchInterval: dayStart === startOfDay(nowMs) ? 15000 : false,
   });
+  segmentsRef.current = segments;
 
-  const recorded: TR[] = segments.map((s) => ({ start: s.startTs, end: s.endTs }));
-  const motion: TR[] = segments.filter((s) => s.hasMotion).map((s) => ({ start: s.startTs, end: s.endTs }));
+  const recorded: TR[] = mergeRanges(segments);
+  const motion: TR[] = mergeRanges(segments.filter((s) => s.hasMotion));
 
-  // Attach HLS in playback mode for the active day.
+  // HLS playback for the active day.
   useEffect(() => {
     if (isLive || !selected || segments.length === 0) return;
     const video = playerVideoRef.current;
     if (!video) return;
     const url = `/api/cameras/${selected.id}/hls?from=${dayStart}&to=${dayEnd}`;
-    const segs = segments;
     if (Hls.isSupported()) {
       const hls = new Hls({ maxBufferLength: 30, enableWorker: true });
       hlsRef.current = hls;
       hls.loadSource(url);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (playheadRef.current !== undefined) {
-          video.currentTime = wallToOffset(segs, playheadRef.current);
-          void video.play().catch(() => undefined);
-        }
+        video.currentTime = wallToOffset(segmentsRef.current, selectedRef.current);
+        void video.play().catch(() => undefined);
       });
       return () => {
         hls.destroy();
@@ -117,36 +117,41 @@ export function Playback() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive, selected?.id, dayStart, segments.length > 0]);
 
+  function requestSeek() {
+    window.clearTimeout(seekTimer.current);
+    seekTimer.current = window.setTimeout(() => {
+      const v = playerVideoRef.current;
+      if (v && hlsRef.current) {
+        v.currentTime = wallToOffset(segmentsRef.current, selectedRef.current);
+        void v.play().catch(() => undefined);
+      }
+    }, 110);
+  }
+
+  function setSelected(ms: number) {
+    const c = clamp(ms, nowMs - MONTH_MS, nowMs);
+    setFollowing(false);
+    setSelectedState(c);
+    selectedRef.current = c;
+  }
+
+  function onScrub(deltaMs: number) {
+    setSelected(selectedMs + deltaMs);
+    requestSeek();
+  }
+  function onSeekTo(ms: number) {
+    setSelected(ms);
+    setPaused(false);
+    requestSeek();
+  }
+  function shiftDay(dir: number) {
+    setSelected(selectedMs + dir * DAY_MS);
+    requestSeek();
+  }
   function goLive() {
     setFollowing(true);
-    setPlayheadMs(undefined);
     setPaused(false);
-  }
-
-  function seekTo(wallMs: number) {
-    if (segments.length === 0) return;
-    const clamped = Math.min(wallMs, nowMs);
-    setFollowing(false);
-    setViewTopFrozen(viewTopMs);
-    setPlayheadMs(clamped);
-    setPaused(false);
-    const video = playerVideoRef.current;
-    if (video && hlsRef.current) {
-      video.currentTime = wallToOffset(segments, clamped);
-      void video.play().catch(() => undefined);
-    }
-  }
-
-  function pan(deltaMs: number) {
-    const base = following ? nowMs : viewTopFrozen ?? nowMs;
-    setFollowing(false);
-    setViewTopFrozen(Math.min(nowMs, base - deltaMs));
-  }
-
-  function shiftDay(dir: number) {
-    const base = following ? nowMs : viewTopFrozen ?? nowMs;
-    setFollowing(false);
-    setViewTopFrozen(Math.min(nowMs, base + dir * DAY_MS));
+    selectedRef.current = nowMs;
   }
 
   function togglePlay() {
@@ -158,7 +163,6 @@ export function Playback() {
       setPaused(true);
     }
   }
-
   function snapshot() {
     const v = playerVideoRef.current;
     if (!v || !v.videoWidth) return;
@@ -180,66 +184,70 @@ export function Playback() {
       0.95,
     );
   }
-
   function fullscreen() {
     if (!document.fullscreenElement) void containerRef.current?.requestFullscreen?.();
     else void document.exitFullscreen();
   }
 
-  const overlayTime = isLive ? nowMs : playheadMs ?? viewTopMs;
+  const overlayTime = selectedMs;
+  const atToday = dayStart >= startOfDay(nowMs);
 
   return (
     <div className="flex h-full min-h-0">
       <CameraRail cameras={cameras ?? []} selectedId={selectedId} onSelect={setSelectedId} />
 
       {/* timeline column */}
-      <div className="w-[112px] shrink-0 border-r border-line flex flex-col bg-ink-900">
-        <div className="flex items-center justify-between px-2 pt-2.5 pb-2 border-b border-line">
-          <button className="btn-icon h-6 w-6" onClick={() => shiftDay(-1)}>
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
-          <span className="text-[11px] font-medium text-fg-muted">{fmtDate(viewTopMs)}</span>
-          <button
-            className="btn-icon h-6 w-6"
-            onClick={() => shiftDay(1)}
-            disabled={dayStart >= startOfDay(nowMs)}
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
+      <div className="w-[208px] shrink-0 border-r border-line flex flex-col bg-ink-900">
+        <div className="px-3 pt-3 pb-2.5 border-b border-line space-y-2.5">
+          <div className="flex items-center justify-between">
+            <button className="btn-icon h-6 w-6" onClick={() => shiftDay(-1)} aria-label="Previous day">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-xs font-medium text-fg">{fmtDate(selectedMs)}</span>
+            <button
+              className="btn-icon h-6 w-6"
+              onClick={() => shiftDay(1)}
+              disabled={atToday}
+              aria-label="Next day"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-fg-faint leading-none">−</span>
+            <input
+              type="range"
+              min={0}
+              max={ZOOMS.length - 1}
+              step={1}
+              value={zoomIdx}
+              onChange={(e) => setZoomIdx(Number(e.target.value))}
+              className="flex-1 min-w-0"
+            />
+            <span className="text-sm text-fg-faint leading-none">+</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 px-2 py-2 border-b border-line">
-          <span className="text-[10px] text-fg-faint">−</span>
-          <input
-            type="range"
-            min={0}
-            max={ZOOMS.length - 1}
-            step={1}
-            value={ZOOMS.length - 1 - zoomIdx}
-            onChange={(e) => setZoomIdx(ZOOMS.length - 1 - Number(e.target.value))}
-            className="flex-1"
-          />
-          <span className="text-[10px] text-fg-faint">+</span>
-        </div>
-        <button
-          onClick={goLive}
-          className={`mx-2 my-2 h-7 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 ${
-            following && isLive ? "bg-brand text-white" : "bg-ink-700 text-fg-muted hover:text-fg"
-          }`}
-        >
-          <Radio className="h-3.5 w-3.5" />
-          LIVE
-        </button>
-        <div className="flex-1 min-h-0 px-1 pb-2">
+
+        <div className="relative flex-1 min-h-0 py-2">
           <VerticalTimeline
-            topMs={viewTopMs}
+            selectedMs={selectedMs}
             windowMs={windowMs}
             nowMs={nowMs}
             segments={recorded}
             events={motion}
-            playheadMs={playheadMs}
-            onSeek={seekTo}
-            onPan={pan}
+            following={following}
+            onScrub={onScrub}
+            onSeekTo={onSeekTo}
           />
+          {!following && (
+            <button
+              onClick={goLive}
+              className="absolute bottom-3 right-3 h-9 w-9 rounded-full bg-brand text-white grid place-items-center shadow-pop hover:bg-[#2aa6f5]"
+              aria-label="Jump to live"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -261,12 +269,10 @@ export function Playback() {
                 playsInline
                 className="absolute inset-0 h-full w-full object-contain bg-black"
                 onTimeUpdate={(e) => {
-                  const wall = offsetToWall(segments, e.currentTarget.currentTime);
+                  const wall = offsetToWall(segmentsRef.current, e.currentTarget.currentTime);
                   if (wall) {
-                    setPlayheadMs(wall);
-                    if (!e.currentTarget.paused) {
-                      setViewTopFrozen(Math.min(nowMs, wall + windowMs / 2));
-                    }
+                    setSelectedState(wall);
+                    selectedRef.current = wall;
                   }
                 }}
                 onPlay={() => setPaused(false)}
@@ -274,12 +280,9 @@ export function Playback() {
               />
             )
           ) : (
-            <div className="absolute inset-0 grid place-items-center text-sm text-fg-faint">
-              No cameras
-            </div>
+            <div className="absolute inset-0 grid place-items-center text-sm text-fg-faint">No cameras</div>
           )}
 
-          {/* top overlay */}
           {selected && (
             <div className="absolute top-3 left-4 flex items-center gap-2 text-white drop-shadow">
               <span className="text-sm font-mono tabular-nums">
@@ -290,7 +293,6 @@ export function Playback() {
             </div>
           )}
 
-          {/* transport controls */}
           {selected && (
             <>
               <div className="absolute bottom-0 inset-x-0 h-16 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
@@ -305,7 +307,7 @@ export function Playback() {
                     <CtlBtn onClick={togglePlay} label={paused ? "Play" : "Pause"}>
                       {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
                     </CtlBtn>
-                    <CtlBtn onClick={() => playheadMs && seekTo(playheadMs - 30_000)} label="Back 30s">
+                    <CtlBtn onClick={() => onSeekTo(selectedMs - 30_000)} label="Back 30s">
                       <Rewind className="h-4 w-4" />
                     </CtlBtn>
                     <button onClick={goLive} className="pill bg-black/55 text-white/90 hover:bg-black/75">
@@ -313,9 +315,7 @@ export function Playback() {
                     </button>
                   </>
                 )}
-                <span className="text-xs font-mono text-white/90 tabular-nums ml-1">
-                  {fmtClock(overlayTime)}
-                </span>
+                <span className="text-xs font-mono text-white/90 tabular-nums ml-1">{fmtClock(overlayTime)}</span>
                 <div className="ml-auto flex items-center gap-1.5">
                   <CtlBtn onClick={snapshot} label="Snapshot">
                     <CameraIcon className="h-4 w-4" />
@@ -329,7 +329,7 @@ export function Playback() {
           )}
         </div>
 
-        <EventStrip dateLabel={fmtDate(viewTopMs)} />
+        <EventStrip dateLabel={fmtDate(selectedMs)} />
       </div>
     </div>
   );

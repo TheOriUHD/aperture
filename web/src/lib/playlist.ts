@@ -20,6 +20,27 @@ export function wallToOffset(segs: Seg[], wallMs: number): number {
   return acc; // past the end
 }
 
+export interface Range {
+  start: number;
+  end: number;
+}
+
+/** Merge contiguous/overlapping segments into solid spans (gaps <= gapMs join). */
+export function mergeRanges(segs: { startTs: number; endTs: number }[], gapMs = 2000): Range[] {
+  if (segs.length === 0) return [];
+  const sorted = [...segs].sort((a, b) => a.startTs - b.startTs);
+  const out: Range[] = [{ start: sorted[0].startTs, end: sorted[0].endTs }];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = out[out.length - 1];
+    if (sorted[i].startTs - last.end <= gapMs) {
+      last.end = Math.max(last.end, sorted[i].endTs);
+    } else {
+      out.push({ start: sorted[i].startTs, end: sorted[i].endTs });
+    }
+  }
+  return out;
+}
+
 /** Wall-clock time (ms) for a playlist offset (seconds). */
 export function offsetToWall(segs: Seg[], offsetSec: number): number | null {
   let acc = 0;
