@@ -19,25 +19,27 @@ services:
       APERTURE_HTTP_ADDR: ":8080"         # internal container port (do not change)
       APERTURE_DATA_DIR: "/data"
       APERTURE_RECORDINGS_DIR: "/recordings"
-      APERTURE_GO2RTC_URL: "http://go2rtc:1984"
-      APERTURE_GO2RTC_RTSP: "rtsp://go2rtc:8554"
+      # go2rtc runs on the host network (so WebRTC advertises real LAN IPs);
+      # nvrd reaches it through the Docker host gateway.
+      APERTURE_GO2RTC_URL: "http://host.docker.internal:1984"
+      APERTURE_GO2RTC_RTSP: "rtsp://host.docker.internal:8554"
       APERTURE_MQTT_URL: "tcp://mosquitto:1883"
       # Public base URL used to build stream URLs handed to browsers / Home Assistant.
       APERTURE_PUBLIC_URL: "${APERTURE_PUBLIC_URL:-http://localhost:8971}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks: [aperture]
 
   go2rtc:
     image: alexxit/go2rtc:latest
     container_name: aperture-go2rtc
     restart: unless-stopped
-    ports:
-      - "1984:1984"           # API / MSE / HLS / signaling
-      - "8554:8554"           # RTSP restream (consumed by recorders + Home Assistant)
-      - "8555:8555/tcp"       # WebRTC
-      - "8555:8555/udp"       # WebRTC
+    # Host networking lets go2rtc's WebRTC offer the server's real LAN address,
+    # which browsers and Home Assistant on the network can actually reach.
+    # Publishes 1984 (API/MSE/HLS), 8554 (RTSP restream), 8555 (WebRTC) on the host.
+    network_mode: host
     volumes:
       - ./go2rtc.yaml:/config/go2rtc.yaml
-    networks: [aperture]
 
   mosquitto:
     image: eclipse-mosquitto:2

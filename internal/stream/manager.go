@@ -159,5 +159,9 @@ func (m *Manager) ProxyWS(w http.ResponseWriter, r *http.Request, streamName str
 	r.URL.Path = "/api/ws"
 	r.URL.RawQuery = "src=" + url.QueryEscape(streamName)
 	r.Host = m.proxyHost
+	// go2rtc's WebSocket upgrader rejects cross-origin requests. We are a
+	// trusted, authenticated reverse proxy in front of go2rtc, so strip the
+	// browser Origin and present the request as same-origin to go2rtc.
+	r.Header.Del("Origin")
 	m.proxy.ServeHTTP(w, r)
 }
