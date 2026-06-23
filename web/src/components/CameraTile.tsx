@@ -36,8 +36,8 @@ export function CameraTile({ camera, onOpen }: { camera: Camera; onOpen?: (c: Ca
       )}
 
       {/* Bottom gradient + name */}
-      <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
-      <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between">
+      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
+      <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
         <span className="text-[13px] font-medium text-white drop-shadow">{camera.name}</span>
       </div>
     </div>

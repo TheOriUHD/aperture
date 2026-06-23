@@ -253,7 +253,7 @@ export function Playback() {
 
       {/* player + events */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <div ref={containerRef} className="flex-1 relative bg-black min-h-0">
+        <div ref={containerRef} className="group flex-1 relative bg-black min-h-0">
           {selected ? (
             isLive ? (
               <LiveVideo
@@ -284,19 +284,17 @@ export function Playback() {
           )}
 
           {selected && (
-            <div className="absolute top-3 left-4 flex items-center gap-2 text-white drop-shadow">
-              <span className="text-sm font-mono tabular-nums">
-                {fmtDate(overlayTime)} {fmtClock(overlayTime)}
-              </span>
-              <span className="text-fg-faint">|</span>
-              <span className="text-sm font-medium">{selected.name}</span>
+            <div className="absolute top-3 left-3 flex items-center gap-2 rounded-md bg-black/35 px-2.5 py-1 text-white backdrop-blur-sm">
+              <span className="text-xs font-mono tabular-nums text-white/90">{fmtClock(overlayTime)}</span>
+              <span className="text-white/30">|</span>
+              <span className="text-xs font-medium">{selected.name}</span>
             </div>
           )}
 
           {selected && (
-            <>
-              <div className="absolute bottom-0 inset-x-0 h-16 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
-              <div className="absolute bottom-3 inset-x-4 flex items-center gap-2">
+            <div className="absolute inset-x-0 bottom-0 opacity-0 pointer-events-none transition-opacity duration-200 group-hover:opacity-100 group-hover:pointer-events-auto">
+              <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+              <div className="relative flex items-center gap-2 px-4 pb-3 pt-10">
                 {isLive ? (
                   <span className="pill bg-online/20 text-online">
                     <span className="h-1.5 w-1.5 rounded-full bg-online" />
@@ -325,7 +323,7 @@ export function Playback() {
                   </CtlBtn>
                 </div>
               </div>
-            </>
+            </div>
           )}
         </div>
 
