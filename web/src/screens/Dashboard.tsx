@@ -3,9 +3,12 @@ import type { LucideIcon } from "lucide-react";
 import { TopBar } from "../components/TopBar";
 import { CameraTile } from "../components/CameraTile";
 import { useCameras } from "../hooks/useCameras";
+import { useStorage } from "../hooks/useStorage";
+import { formatBytes } from "../lib/format";
 
 export function Dashboard() {
   const { data: cameras } = useCameras();
+  const { data: storage } = useStorage();
   const list = cameras ?? [];
   const online = list.filter((c) => c.enabled).length;
   const recording = list.filter((c) => c.enabled && c.recordMode !== "never").length;
@@ -16,7 +19,12 @@ export function Dashboard() {
       <div className="flex-1 overflow-auto p-4">
         <div className="max-w-6xl mx-auto space-y-4">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Metric icon={HardDrive} label="Storage used" value="1.4 TB" sub="of 4.0 TB" />
+            <Metric
+              icon={HardDrive}
+              label="Recordings"
+              value={storage ? formatBytes(storage.recordedBytes) : "…"}
+              sub={storage ? `${formatBytes(storage.diskFreeBytes)} free` : ""}
+            />
             <Metric icon={Cctv} label="Cameras online" value={`${online}`} sub={`of ${list.length}`} />
             <Metric icon={Video} label="Recording" value={`${recording}`} sub="cameras" />
             <Metric icon={Activity} label="Events today" value="0" sub="motion" />

@@ -18,20 +18,34 @@ export function Timeline({
   segments,
   events,
   playheadMs,
+  onSeek,
 }: {
   dayStart: number;
   segments: TimeRange[];
   events: TimeRange[];
   playheadMs?: number;
+  onSeek?: (wallMs: number) => void;
 }) {
   const spans = useMemo(() => toSpans(segments, dayStart), [segments, dayStart]);
   const motion = useMemo(() => toSpans(events, dayStart), [events, dayStart]);
   const playPct = playheadMs !== undefined ? clampPct(((playheadMs - dayStart) / DAY_MS) * 100) : undefined;
   const empty = spans.length === 0 && motion.length === 0;
 
+  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (!onSeek) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    onSeek(dayStart + frac * DAY_MS);
+  }
+
   return (
     <div>
-      <div className="relative h-10 rounded-md bg-ink-850 border border-line overflow-hidden">
+      <div
+        onClick={handleClick}
+        className={`relative h-10 rounded-md bg-ink-850 border border-line overflow-hidden ${
+          onSeek ? "cursor-pointer" : ""
+        }`}
+      >
         {/* hour gridlines */}
         {HOURS.slice(1, -1).map((h) => (
           <div

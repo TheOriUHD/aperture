@@ -1,9 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown, LogOut, HardDrive } from "lucide-react";
 import { useAuth } from "../lib/auth";
+import { useStorage } from "../hooks/useStorage";
+import { formatBytes } from "../lib/format";
 
 export function TopBar({ title, right }: { title: ReactNode; right?: ReactNode }) {
   const { user, logout } = useAuth();
+  const { data: storage } = useStorage();
   const [menu, setMenu] = useState(false);
 
   const initials = (user?.name || user?.email || "?")
@@ -24,10 +27,14 @@ export function TopBar({ title, right }: { title: ReactNode; right?: ReactNode }
 
       <div className="ml-auto flex items-center gap-2">
         {right}
-        <div className="hidden sm:flex items-center gap-1.5 text-xs text-fg-faint px-2">
-          <HardDrive className="h-3.5 w-3.5" />
-          <span>1.4 / 4.0 TB</span>
-        </div>
+        {storage && (
+          <div className="hidden sm:flex items-center gap-1.5 text-xs text-fg-faint px-2">
+            <HardDrive className="h-3.5 w-3.5" />
+            <span>
+              {formatBytes(storage.recordedBytes)} / {formatBytes(storage.diskTotalBytes)}
+            </span>
+          </div>
+        )}
         <div className="relative">
           <button
             onClick={() => setMenu((m) => !m)}
