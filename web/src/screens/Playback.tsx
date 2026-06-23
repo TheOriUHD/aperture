@@ -14,12 +14,13 @@ import {
   ArrowUp,
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
-import { VerticalTimeline, type TR } from "../components/VerticalTimeline";
+import { VerticalTimeline, type TR, type TLEvent } from "../components/VerticalTimeline";
 import { EventStrip } from "../components/EventStrip";
 import { LiveVideo } from "../components/LiveVideo";
 import { useCameras } from "../hooks/useCameras";
 import { api } from "../lib/api";
 import { wallToOffset, offsetToWall, mergeRanges, type Seg } from "../lib/playlist";
+import type { MotionEvent } from "../lib/types";
 
 interface Segment extends Seg {
   id: string;
@@ -80,18 +81,46 @@ export function Playback() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameras]);
 
+  // Deep link: ?t=<unix ms> opens playback at that moment (e.g. from Alarms).
+  const didInitT = useRef(false);
+  useEffect(() => {
+    if (didInitT.current) return;
+    const t = Number(params.get("t"));
+    if (t > 0) {
+      didInitT.current = true;
+      setFollowing(false);
+      setSelectedState(t);
+      selectedRef.current = t;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
+
   const selected = cameras?.find((c) => c.id === selectedId) ?? null;
+
+  const followingToday = dayStart === startOfDay(nowMs);
 
   const { data: segments = [] } = useQuery({
     queryKey: ["segments", selectedId, dayStart],
     queryFn: () => api.get<Segment[]>(`/api/cameras/${selectedId}/segments?from=${dayStart}&to=${dayEnd}`),
     enabled: !!selectedId,
-    refetchInterval: dayStart === startOfDay(nowMs) ? 15000 : false,
+    refetchInterval: followingToday ? 15000 : false,
   });
   segmentsRef.current = segments;
 
+  const { data: events = [] } = useQuery({
+    queryKey: ["events", selectedId, dayStart],
+    queryFn: () => api.get<MotionEvent[]>(`/api/cameras/${selectedId}/events?from=${dayStart}&to=${dayEnd}`),
+    enabled: !!selectedId,
+    refetchInterval: followingToday ? 15000 : false,
+  });
+
   const recorded: TR[] = mergeRanges(segments);
-  const motion: TR[] = mergeRanges(segments.filter((s) => s.hasMotion));
+  const tlEvents: TLEvent[] = events.map((e) => ({
+    id: e.id,
+    start: e.startTs,
+    end: e.endTs,
+    thumbUrl: e.thumbUrl,
+  }));
 
   // HLS playback for the active day.
   useEffect(() => {
@@ -278,10 +307,11 @@ export function Playback() {
             windowMs={windowMs}
             nowMs={nowMs}
             segments={recorded}
-            events={motion}
+            events={tlEvents}
             live={following}
             onScrubTo={scrubToTime}
             onSeekAbs={seekToTime}
+            onEventClick={seekToTime}
           />
           {!following && (
             <button
@@ -369,7 +399,11 @@ export function Playback() {
           </div>
         )}
 
-        <EventStrip dateLabel={fmtDate(selectedMs)} />
+        <EventStrip
+          dateLabel={fmtDate(selectedMs)}
+          events={events}
+          onSelect={(ms) => seekToTime(ms)}
+        />
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { HardDrive, Cctv, Video, Activity } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { TopBar } from "../components/TopBar";
@@ -8,13 +9,26 @@ import { CameraPopout } from "../components/CameraPopout";
 import { EmptyState } from "../components/ui/EmptyState";
 import { useCameras } from "../hooks/useCameras";
 import { useStorage } from "../hooks/useStorage";
+import { api } from "../lib/api";
 import { formatBytes } from "../lib/format";
-import type { Camera } from "../lib/types";
+import type { Camera, MotionEvent } from "../lib/types";
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
 
 export function Dashboard() {
   const navigate = useNavigate();
   const { data: cameras } = useCameras();
   const { data: storage } = useStorage();
+  const { data: todayEvents } = useQuery({
+    queryKey: ["events-today"],
+    queryFn: () =>
+      api.get<MotionEvent[]>(`/api/events?from=${startOfToday()}&to=${Date.now()}&limit=500`),
+    refetchInterval: 30000,
+  });
   const [popout, setPopout] = useState<Camera | null>(null);
   const list = cameras ?? [];
   const online = list.filter((c) => c.enabled).length;
@@ -34,7 +48,12 @@ export function Dashboard() {
             />
             <Metric icon={Cctv} label="Cameras online" value={`${online}`} sub={`of ${list.length}`} />
             <Metric icon={Video} label="Recording" value={`${recording}`} sub="cameras" />
-            <Metric icon={Activity} label="Events today" value="0" sub="motion" />
+            <Metric
+              icon={Activity}
+              label="Events today"
+              value={`${todayEvents?.length ?? 0}`}
+              sub="motion"
+            />
           </div>
 
           {list.length === 0 ? (

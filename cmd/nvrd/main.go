@@ -17,6 +17,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/api"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/motion"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/retention"
 	"github.com/TheOriUHD/aperture/internal/store"
@@ -74,6 +75,10 @@ func main() {
 	janitor := retention.New(cfg, st, log)
 	go janitor.Run(bgCtx)
 
+	// Motion detection (scene-change ticks -> events with thumbnails).
+	det := motion.New(cfg, st, sm, log)
+	go det.Run(bgCtx)
+
 	// Keep a recent JPEG frame cached per camera for instant blurred placeholders.
 	go func() {
 		t := time.NewTicker(15 * time.Second)
@@ -96,7 +101,7 @@ func main() {
 		}
 	}()
 
-	srv := api.NewServer(cfg, st, am, sm, rec, log)
+	srv := api.NewServer(cfg, st, am, sm, rec, det, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

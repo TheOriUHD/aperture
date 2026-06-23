@@ -92,7 +92,7 @@
     @apply pill bg-black/55 text-[#ffd6d7];
   }
   .pill-motion {
-    @apply pill bg-motion text-[#412402];
+    @apply pill bg-motion text-[#06243d];
   }
   .pill-online {
     @apply pill bg-online/15 text-online;

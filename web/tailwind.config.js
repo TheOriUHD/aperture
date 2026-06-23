@@ -28,7 +28,7 @@ export default {
           ink: "#0b3a5c",
         },
         rec: "#f0494e",
-        motion: "#f5a623",
+        motion: "#5cb3f7", // lighter blue: motion on the (dark-blue) recording rail
         online: "#3fce7c",
       },
       fontFamily: {

@@ -151,6 +151,7 @@ func (s *Server) syncStreams() {
 		}
 		// Pick up recording-mode / enabled changes promptly.
 		s.rec.Reconcile()
+		s.det.Reconcile()
 	}()
 }
 

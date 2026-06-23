@@ -5,6 +5,13 @@ export interface TR {
   end: number;
 }
 
+export interface TLEvent {
+  id: string;
+  start: number;
+  end: number;
+  thumbUrl?: string;
+}
+
 const MIN = 60_000;
 
 function majorInterval(windowMs: number): number {
@@ -37,16 +44,18 @@ export function VerticalTimeline({
   playheadFrac = 0.16,
   onScrubTo,
   onSeekAbs,
+  onEventClick,
 }: {
   selectedMs: number;
   windowMs: number;
   nowMs: number;
   segments: TR[];
-  events: TR[];
+  events: TLEvent[];
   live: boolean;
   playheadFrac?: number;
   onScrubTo: (ms: number) => void;
   onSeekAbs: (ms: number) => void;
+  onEventClick: (startMs: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const selRef = useRef(selectedMs);
@@ -82,6 +91,20 @@ export function VerticalTimeline({
     const minorStep = interval / 5;
     for (let t = Math.ceil(bottomTime / minorStep) * minorStep; t <= topTime; t += minorStep) {
       if (Math.abs(t % interval) > 1) minors.push(t);
+    }
+  }
+
+  // Visible events, and which ones get a thumbnail (avoid overlapping squares).
+  const visEvents = events.filter((e) => e.end > bottomTime && e.start < topTime);
+  const thumbIds = new Set<string>();
+  {
+    let last = -100;
+    for (const e of visEvents) {
+      const c = pct((e.start + e.end) / 2);
+      if (Math.abs(c - last) >= 4.5) {
+        thumbIds.add(e.id);
+        last = c;
+      }
     }
   }
 
@@ -137,13 +160,40 @@ export function VerticalTimeline({
           style={{ left: railX, top: `${pct(s.end)}%`, height: `${Math.max(pct(s.start) - pct(s.end), 0.2)}%` }}
         />
       ))}
-      {events.filter(visible).map((s, i) => (
-        <div
-          key={`m${i}`}
-          className="absolute w-[3px] rounded-full bg-motion"
-          style={{ left: railX + 6, top: `${pct(s.end)}%`, height: `${Math.max(pct(s.start) - pct(s.end), 0.4)}%` }}
-        />
-      ))}
+      {/* motion: lighter-blue highlight over the rail + dot + thumbnail square */}
+      {visEvents.map((e) => {
+        const cy = pct((e.start + e.end) / 2);
+        return (
+          <div key={e.id}>
+            <div
+              className="absolute w-[3px] rounded-full bg-motion"
+              style={{ left: railX, top: `${pct(e.end)}%`, height: `${Math.max(pct(e.start) - pct(e.end), 0.5)}%` }}
+            />
+            <div
+              className="absolute h-2 w-2 rounded-full bg-motion border border-ink-900"
+              style={{ left: railX + 1.5, top: `${cy}%`, transform: "translate(-50%,-50%)" }}
+            />
+            {thumbIds.has(e.id) && (
+              <button
+                onPointerDown={(ev) => ev.stopPropagation()}
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onEventClick(e.start);
+                }}
+                className="absolute rounded-sm overflow-hidden border border-motion/70 hover:border-motion bg-ink-800 shadow"
+                style={{ left: railX + 12, top: `${cy}%`, transform: "translateY(-50%)", width: 38, height: 26 }}
+                aria-label="Jump to motion event"
+              >
+                {e.thumbUrl ? (
+                  <img src={e.thumbUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="h-full w-full bg-ink-700" />
+                )}
+              </button>
+            )}
+          </div>
+        );
+      })}
 
       {!live && nowMs <= topTime && nowMs >= bottomTime && (
         <div className="absolute left-12 right-0 border-t border-dashed border-online/50" style={{ top: `${pct(nowMs)}%` }} />

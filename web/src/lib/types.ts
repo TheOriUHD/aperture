@@ -27,3 +27,16 @@ export interface StreamToken {
   token: string;
   wsUrl: string;
 }
+
+export interface MotionEvent {
+  id: string;
+  cameraId: string;
+  type: string;
+  startTs: number;
+  endTs: number;
+  ongoing: boolean;
+  score: number;
+  thumbUrl?: string;
+  reviewed: boolean;
+  saved: boolean;
+}
