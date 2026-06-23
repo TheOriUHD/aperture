@@ -72,6 +72,27 @@ func (s *Store) ListEventsAll(fromMs, toMs int64, limit int) ([]*Event, error) {
 	return collectEvents(rows)
 }
 
+// EventsInRange returns events overlapping [fromMs, toMs]. Empty cameraID = all.
+func (s *Store) EventsInRange(cameraID string, fromMs, toMs int64) ([]*Event, error) {
+	q := eventSelect + ` WHERE start_ts < ? AND (end_ts IS NULL OR end_ts > ?)`
+	args := []any{toMs, fromMs}
+	if cameraID != "" {
+		q = eventSelect + ` WHERE camera_id = ? AND start_ts < ? AND (end_ts IS NULL OR end_ts > ?)`
+		args = []any{cameraID, toMs, fromMs}
+	}
+	rows, err := s.db.Query(q+` ORDER BY start_ts ASC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collectEvents(rows)
+}
+
+// DeleteEvent removes an event row by id.
+func (s *Store) DeleteEvent(id string) error {
+	_, err := s.db.Exec(`DELETE FROM events WHERE id = ?`, id)
+	return err
+}
+
 // FinalizeOrphanedEvents closes any events left ongoing by a previous run, so
 // they don't render as perpetually ongoing. Called on detector startup.
 func (s *Store) FinalizeOrphanedEvents() error {

@@ -73,7 +73,9 @@ func (s *Server) routes() http.Handler {
 			r.Get("/cameras/{id}/seg/{seg}", s.handleSegmentFile)
 			r.Get("/events", s.handleEventsAll)
 			r.Get("/events/{id}/thumb.jpg", s.handleEventThumb)
+			r.Get("/cameras/{id}/schedule", s.handleGetSchedule)
 			r.Get("/system/storage", s.handleStorage)
+			r.Get("/system/settings", s.handleGetSettings)
 		})
 
 		// Admin-only.
@@ -87,6 +89,9 @@ func (s *Server) routes() http.Handler {
 			r.Post("/users", s.handleCreateUser)
 			r.Put("/users/{id}", s.handleUpdateUser)
 			r.Delete("/users/{id}", s.handleDeleteUser)
+			r.Put("/cameras/{id}/schedule", s.handleSetSchedule)
+			r.Put("/system/settings", s.handleSetSettings)
+			r.Post("/system/purge", s.handlePurge)
 		})
 	})
 

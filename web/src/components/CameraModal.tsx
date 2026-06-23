@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, CalendarClock } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Switch } from "./ui/Switch";
+import { ScheduleModal } from "./ScheduleModal";
 import { useCreateCamera, useUpdateCamera, useDeleteCamera } from "../hooks/useCameras";
 import type { Camera, RecordMode } from "../lib/types";
 
@@ -28,6 +29,7 @@ export function CameraModal({
   const [enabled, setEnabled] = useState(true);
   const [error, setError] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -169,6 +171,18 @@ export function CameraModal({
               />
             </div>
           </div>
+          {mode === "scheduled" &&
+            (isEdit ? (
+              <button type="button" className="btn-subtle w-full" onClick={() => setScheduleOpen(true)}>
+                <CalendarClock className="h-4 w-4" />
+                Edit recording schedule
+              </button>
+            ) : (
+              <p className="text-xs text-fg-faint">
+                Save the camera first, then open it again to set its recording schedule.
+              </p>
+            ))}
+
           {isEdit && (
             <div className="flex items-center justify-between pt-1">
               <div>
@@ -192,6 +206,15 @@ export function CameraModal({
         onConfirm={doDelete}
         onCancel={() => setConfirmDel(false)}
       />
+
+      {camera && (
+        <ScheduleModal
+          open={scheduleOpen}
+          cameraId={camera.id}
+          cameraName={camera.name}
+          onClose={() => setScheduleOpen(false)}
+        />
+      )}
     </>
   );
 }

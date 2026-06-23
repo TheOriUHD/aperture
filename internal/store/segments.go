@@ -81,6 +81,22 @@ func (s *Store) OldestSegments(cameraID string, limit int) ([]*Segment, error) {
 	return collectSegments(rows)
 }
 
+// SegmentsInRange returns segments overlapping [fromMs, toMs]. An empty
+// cameraID matches all cameras. Used by admin storage purge.
+func (s *Store) SegmentsInRange(cameraID string, fromMs, toMs int64) ([]*Segment, error) {
+	q := segmentSelect + ` WHERE start_ts < ? AND end_ts > ?`
+	args := []any{toMs, fromMs}
+	if cameraID != "" {
+		q = segmentSelect + ` WHERE camera_id = ? AND start_ts < ? AND end_ts > ?`
+		args = []any{cameraID, toMs, fromMs}
+	}
+	rows, err := s.db.Query(q+` ORDER BY start_ts ASC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collectSegments(rows)
+}
+
 // OldestSegmentsGlobal returns up to limit unlocked segments across all cameras,
 // oldest first. Used by the global free-space safety net.
 func (s *Store) OldestSegmentsGlobal(limit int) ([]*Segment, error) {

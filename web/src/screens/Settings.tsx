@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, UserPlus, Shield, User as UserIcon } from "lucide-react";
 import { TopBar } from "../components/TopBar";
 import { UserModal } from "../components/UserModal";
+import { StorageManager } from "../components/StorageManager";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUsers, type ManagedUser } from "../hooks/useUsers";
+import { useSiteName, useSetSiteName } from "../hooks/useSystem";
 
 export function Settings() {
   const { user } = useAuth();
@@ -26,7 +28,9 @@ export function Settings() {
             <Row label="Role" value={user?.role || "—"} className="capitalize" />
           </Section>
 
+          {isAdmin && <SiteSection />}
           {isAdmin && <UsersSection currentUserId={user?.id} />}
+          {isAdmin && <StorageManager />}
 
           <Section title="About">
             <Row label="Application" value="Aperture NVR" />
@@ -100,6 +104,45 @@ function UsersSection({ currentUserId }: { currentUserId?: string }) {
       </div>
 
       <UserModal open={open} user={editing} currentUserId={currentUserId} onClose={() => setOpen(false)} />
+    </div>
+  );
+}
+
+function SiteSection() {
+  const { data: site } = useSiteName();
+  const setSite = useSetSiteName();
+  const [name, setName] = useState("");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    if (site?.siteName) setName(site.siteName);
+  }, [site]);
+
+  return (
+    <div className="panel">
+      <h2 className="text-sm font-medium text-fg mb-3">System</h2>
+      <label className="label">Site name</label>
+      <div className="flex gap-2">
+        <input
+          className="input"
+          value={name}
+          placeholder="Home NVR"
+          onChange={(e) => {
+            setName(e.target.value);
+            setSaved(false);
+          }}
+        />
+        <button
+          className="btn-primary shrink-0"
+          disabled={setSite.isPending || !name.trim()}
+          onClick={async () => {
+            await setSite.mutateAsync(name.trim());
+            setSaved(true);
+          }}
+        >
+          {setSite.isPending ? "Saving…" : "Save"}
+        </button>
+      </div>
+      {saved && <p className="text-xs text-online mt-2">Saved.</p>}
     </div>
   );
 }

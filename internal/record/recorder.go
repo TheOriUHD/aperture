@@ -71,10 +71,37 @@ func (r *Recorder) Run(ctx context.Context) {
 }
 
 func (r *Recorder) shouldRecord(c *store.Camera) bool {
-	// Capture to disk for every mode except "never". Motion-mode cameras record
-	// continuously too (so events keep free pre-roll); the retention janitor then
-	// prunes their non-event footage. (Scheduled windows arrive in a later pass.)
-	return c.Enabled && c.RTSPMainURL != "" && c.RecordMode != store.ModeNever
+	if !c.Enabled || c.RTSPMainURL == "" {
+		return false
+	}
+	switch c.RecordMode {
+	case store.ModeNever:
+		return false
+	case store.ModeScheduled:
+		return r.scheduledActive(c.ID)
+	default:
+		// continuous + motion both capture to disk (motion is pruned to events
+		// by the retention janitor).
+		return true
+	}
+}
+
+// scheduledActive reports whether the current local time falls inside one of a
+// camera's recording windows. Reconcile re-checks every minute.
+func (r *Recorder) scheduledActive(cameraID string) bool {
+	scheds, err := r.st.ListSchedules(cameraID)
+	if err != nil || len(scheds) == 0 {
+		return false
+	}
+	now := time.Now()
+	wd := int(now.Weekday())
+	mins := now.Hour()*60 + now.Minute()
+	for _, s := range scheds {
+		if s.Weekday == wd && mins >= s.StartMin && mins < s.EndMin {
+			return true
+		}
+	}
+	return false
 }
 
 // Reconcile starts/stops per-camera recorders to match desired state.

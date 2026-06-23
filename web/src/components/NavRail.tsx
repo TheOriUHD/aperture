@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import clsx from "clsx";
 import {
   LayoutGrid,
@@ -26,9 +26,14 @@ const items: NavItem[] = [
 export function NavRail() {
   return (
     <nav className="flex flex-col items-center gap-1.5 w-[54px] shrink-0 bg-ink-850 border-r border-line py-3">
-      <div className="h-8 w-8 rounded-lg bg-brand grid place-items-center mb-3">
+      <Link
+        to="/dashboard"
+        title="Aperture — home"
+        aria-label="Home"
+        className="h-8 w-8 rounded-lg bg-brand grid place-items-center mb-3 hover:bg-[#2aa6f5] transition-colors"
+      >
         <Aperture className="h-5 w-5 text-white" />
-      </div>
+      </Link>
       {items.map((item) => (
         <RailLink key={item.to} {...item} />
       ))}
