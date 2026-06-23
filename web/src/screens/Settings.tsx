@@ -1,10 +1,15 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Plus, UserPlus, Shield, User as UserIcon } from "lucide-react";
 import { TopBar } from "../components/TopBar";
+import { UserModal } from "../components/UserModal";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useUsers, type ManagedUser } from "../hooks/useUsers";
 
 export function Settings() {
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const { data: ver } = useQuery({
     queryKey: ["version"],
     queryFn: () => api.get<{ version: string; commit: string }>("/api/system/version"),
@@ -21,13 +26,7 @@ export function Settings() {
             <Row label="Role" value={user?.role || "—"} className="capitalize" />
           </Section>
 
-          {user?.role === "admin" && (
-            <Section title="Users & roles">
-              <p className="text-sm text-fg-faint">
-                User management, per-camera access, and OIDC/SSO arrive in a later phase.
-              </p>
-            </Section>
-          )}
+          {isAdmin && <UsersSection currentUserId={user?.id} />}
 
           <Section title="About">
             <Row label="Application" value="Aperture NVR" />
@@ -36,6 +35,72 @@ export function Settings() {
         </div>
       </div>
     </>
+  );
+}
+
+function UsersSection({ currentUserId }: { currentUserId?: string }) {
+  const { data: users } = useUsers();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<ManagedUser | null>(null);
+
+  return (
+    <div className="panel">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-medium text-fg">Users &amp; roles</h2>
+        <button
+          className="btn-subtle h-8"
+          onClick={() => {
+            setEditing(null);
+            setOpen(true);
+          }}
+        >
+          <Plus className="h-4 w-4" />
+          Add user
+        </button>
+      </div>
+      <div className="space-y-1.5">
+        {(users ?? []).map((u) => (
+          <button
+            key={u.id}
+            onClick={() => {
+              setEditing(u);
+              setOpen(true);
+            }}
+            className="w-full text-left flex items-center gap-3 rounded-md px-2.5 py-2 hover:bg-ink-700"
+          >
+            <div className="h-8 w-8 rounded-full bg-ink-700 grid place-items-center shrink-0">
+              {u.role === "admin" ? (
+                <Shield className="h-4 w-4 text-brand" />
+              ) : (
+                <UserIcon className="h-4 w-4 text-fg-muted" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-fg truncate">
+                {u.name || u.email}
+                {u.id === currentUserId && <span className="text-fg-faint"> (you)</span>}
+              </p>
+              <p className="text-xs text-fg-faint truncate">{u.email}</p>
+            </div>
+            {u.disabled && <span className="pill bg-ink-700 text-fg-faint">Disabled</span>}
+            <span className="pill bg-ink-700 text-fg-muted capitalize">{u.role}</span>
+            {u.role === "viewer" && (
+              <span className="text-xs text-fg-faint w-16 text-right">
+                {u.cameraIds.length} {u.cameraIds.length === 1 ? "camera" : "cameras"}
+              </span>
+            )}
+          </button>
+        ))}
+        {(users ?? []).length === 0 && (
+          <div className="flex flex-col items-center gap-1.5 py-6 text-fg-faint">
+            <UserPlus className="h-5 w-5" />
+            <span className="text-xs">No users yet</span>
+          </div>
+        )}
+      </div>
+
+      <UserModal open={open} user={editing} currentUserId={currentUserId} onClose={() => setOpen(false)} />
+    </div>
   );
 }
 

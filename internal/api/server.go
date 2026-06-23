@@ -83,6 +83,10 @@ func (s *Server) routes() http.Handler {
 			r.Post("/cameras", s.handleCreateCamera)
 			r.Put("/cameras/{id}", s.handleUpdateCamera)
 			r.Delete("/cameras/{id}", s.handleDeleteCamera)
+			r.Get("/users", s.handleListUsers)
+			r.Post("/users", s.handleCreateUser)
+			r.Put("/users/{id}", s.handleUpdateUser)
+			r.Delete("/users/{id}", s.handleDeleteUser)
 		})
 	})
 

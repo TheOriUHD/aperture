@@ -28,6 +28,10 @@ func parseRange(r *http.Request) (from, to int64) {
 // used to draw the timeline.
 func (s *Server) handleSegmentsList(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !s.allowedCamera(r, id) {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
 	from, to := parseRange(r)
 	segs, err := s.st.ListSegments(id, from, to)
 	if err != nil {
@@ -51,6 +55,10 @@ func (s *Server) handleSegmentsList(w http.ResponseWriter, r *http.Request) {
 // Time gaps (e.g. an ffmpeg restart) become EXT-X-DISCONTINUITY markers.
 func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !s.allowedCamera(r, id) {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
 	from, to := parseRange(r)
 	segs, err := s.st.ListSegments(id, from, to)
 	if err != nil {
@@ -89,6 +97,10 @@ func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request) {
 // seeking).
 func (s *Server) handleSegmentFile(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !s.allowedCamera(r, id) {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
 	segID := strings.TrimSuffix(chi.URLParam(r, "seg"), ".ts")
 	seg, err := s.st.SegmentByID(segID)
 	if err != nil || seg.CameraID != id {

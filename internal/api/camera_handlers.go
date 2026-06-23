@@ -19,13 +19,21 @@ func (s *Server) handleListCameras(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(cams))
 	for _, c := range cams {
+		if !s.allowedCamera(r, c.ID) {
+			continue // viewers only see cameras in their ACL
+		}
 		out = append(out, cameraView(c))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
-	c, err := s.st.GetCamera(chi.URLParam(r, "id"))
+	id := chi.URLParam(r, "id")
+	if !s.allowedCamera(r, id) {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+	c, err := s.st.GetCamera(id)
 	if err != nil {
 		writeStoreError(w, err)
 		return

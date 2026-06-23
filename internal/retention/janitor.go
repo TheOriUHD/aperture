@@ -18,6 +18,7 @@ const (
 	minFreeBytesFloor = 5 << 30 // always try to keep at least 5 GiB free
 	minFreeFraction   = 0.07    // ...and at least 7% of the disk
 	deleteBatch       = 50
+	motionGraceMs     = 120_000 // wait 2 min before pruning non-event footage
 )
 
 // Janitor periodically prunes recorded segments.
@@ -56,6 +57,10 @@ func (j *Janitor) enforce() {
 	}
 	now := time.Now().UnixMilli()
 	for _, cam := range cams {
+		// Motion-mode: keep only footage that overlaps an event (with pre/post-roll).
+		if cam.RecordMode == store.ModeMotion {
+			j.pruneNonMotion(cam.ID, now-motionGraceMs)
+		}
 		if cam.RetentionDays > 0 {
 			before := now - int64(cam.RetentionDays)*86_400_000
 			j.deleteExpired(cam.ID, before)
@@ -65,6 +70,21 @@ func (j *Janitor) enforce() {
 		}
 	}
 	j.enforceFreeSpace()
+}
+
+// pruneNonMotion deletes a motion-mode camera's segments that don't overlap any
+// event. The grace period lets in-progress events finalize first.
+func (j *Janitor) pruneNonMotion(cameraID string, beforeMs int64) {
+	segs, err := j.st.NonEventSegments(cameraID, beforeMs)
+	if err != nil {
+		return
+	}
+	for _, s := range segs {
+		j.delete(s)
+	}
+	if len(segs) > 0 {
+		j.log.Info("retention: pruned non-motion footage", "camera", cameraID, "count", len(segs))
+	}
 }
 
 func (j *Janitor) deleteExpired(cameraID string, beforeMs int64) {

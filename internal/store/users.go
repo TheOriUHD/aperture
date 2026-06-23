@@ -75,6 +75,56 @@ func (s *Store) SetUserPassword(id, hash string) error {
 	return affected(res, err)
 }
 
+// UpdateUser updates an account's mutable profile fields.
+func (s *Store) UpdateUser(id, name, role string, disabled bool) error {
+	res, err := s.db.Exec(`UPDATE users SET name = ?, role = ?, disabled = ? WHERE id = ?`,
+		name, role, boolInt(disabled), id)
+	return affected(res, err)
+}
+
+// DeleteUser removes an account (and its camera ACL rows via cascade).
+func (s *Store) DeleteUser(id string) error {
+	return affected(s.db.Exec(`DELETE FROM users WHERE id = ?`, id))
+}
+
+// GetUserCameraIDs returns the camera ids a user is scoped to.
+func (s *Store) GetUserCameraIDs(userID string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT camera_id FROM user_camera_acl WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// SetUserCameras replaces a user's camera ACL with the given camera ids.
+func (s *Store) SetUserCameras(userID string, cameraIDs []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM user_camera_acl WHERE user_id = ?`, userID); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	for _, cid := range cameraIDs {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO user_camera_acl (user_id, camera_id) VALUES (?, ?)`,
+			userID, cid); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

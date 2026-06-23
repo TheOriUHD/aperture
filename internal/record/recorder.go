@@ -71,8 +71,10 @@ func (r *Recorder) Run(ctx context.Context) {
 }
 
 func (r *Recorder) shouldRecord(c *store.Camera) bool {
-	// Phase 1 records continuous-mode cameras. Motion/scheduled arrive later.
-	return c.Enabled && c.RTSPMainURL != "" && c.RecordMode == store.ModeContinuous
+	// Capture to disk for every mode except "never". Motion-mode cameras record
+	// continuously too (so events keep free pre-roll); the retention janitor then
+	// prunes their non-event footage. (Scheduled windows arrive in a later pass.)
+	return c.Enabled && c.RTSPMainURL != "" && c.RecordMode != store.ModeNever
 }
 
 // Reconcile starts/stops per-camera recorders to match desired state.

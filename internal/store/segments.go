@@ -92,6 +92,25 @@ func (s *Store) OldestSegmentsGlobal(limit int) ([]*Segment, error) {
 	return collectSegments(rows)
 }
 
+// NonEventSegments returns a camera's unlocked segments that ended before
+// beforeMs and do not overlap any motion event. Used to prune motion-mode
+// cameras down to just their event clips (with pre/post-roll).
+func (s *Store) NonEventSegments(cameraID string, beforeMs int64) ([]*Segment, error) {
+	rows, err := s.db.Query(segmentSelect+`
+        WHERE camera_id = ? AND end_ts < ? AND locked = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM events e
+            WHERE e.camera_id = segments.camera_id
+              AND e.start_ts < segments.end_ts
+              AND (e.end_ts IS NULL OR e.end_ts > segments.start_ts)
+          )
+        ORDER BY start_ts ASC`, cameraID, beforeMs)
+	if err != nil {
+		return nil, err
+	}
+	return collectSegments(rows)
+}
+
 // DeleteSegment removes a segment row by id.
 func (s *Store) DeleteSegment(id string) error {
 	_, err := s.db.Exec(`DELETE FROM segments WHERE id = ?`, id)

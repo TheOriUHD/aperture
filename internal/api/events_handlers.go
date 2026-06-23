@@ -35,6 +35,10 @@ func eventView(e *store.Event, now int64) map[string]any {
 // handleCameraEvents lists motion events for a camera in a time range.
 func (s *Server) handleCameraEvents(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !s.allowedCamera(r, id) {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
 	from, to := parseRange(r)
 	evs, err := s.st.ListEvents(id, from, to)
 	if err != nil {
@@ -56,7 +60,15 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 1000 {
 		limit = v
 	}
-	evs, err := s.st.ListEventsAll(from, to, limit)
+	isAdmin, allowed := s.allowedCameraSet(r)
+	fetch := limit
+	if !isAdmin {
+		fetch = limit * 4 // over-fetch, then filter to the viewer's cameras
+		if fetch > 1000 {
+			fetch = 1000
+		}
+	}
+	evs, err := s.st.ListEventsAll(from, to, fetch)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -64,6 +76,12 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UnixMilli()
 	out := make([]map[string]any, 0, len(evs))
 	for _, e := range evs {
+		if !isAdmin && !allowed[e.CameraID] {
+			continue
+		}
+		if len(out) >= limit {
+			break
+		}
 		out = append(out, eventView(e, now))
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -74,6 +92,10 @@ func (s *Server) handleEventThumb(w http.ResponseWriter, r *http.Request) {
 	e, err := s.st.EventByID(chi.URLParam(r, "id"))
 	if err != nil || e.ThumbPath == "" {
 		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.allowedCamera(r, e.CameraID) {
+		writeError(w, http.StatusForbidden, "access denied")
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
