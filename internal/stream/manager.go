@@ -186,6 +186,24 @@ func (m *Manager) Online(ctx context.Context, cameraID string) bool {
 	return ok
 }
 
+// Snapshot fetches a single JPEG frame for a camera from go2rtc.
+func (m *Manager) Snapshot(ctx context.Context, cameraID string) ([]byte, error) {
+	u := m.apiBase + "/api/frame.jpeg?src=" + url.QueryEscape(StreamName(cameraID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := m.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("go2rtc frame.jpeg: %s", resp.Status)
+	}
+	return io.ReadAll(resp.Body)
+}
+
 // ProxyWS rewrites an incoming request to go2rtc's live WebSocket for the named
 // stream and proxies it (WebRTC signaling + MSE fallback flow through here).
 func (m *Manager) ProxyWS(w http.ResponseWriter, r *http.Request, streamName string) {

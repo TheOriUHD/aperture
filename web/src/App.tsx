@@ -5,15 +5,14 @@ import { AppShell } from "./components/AppShell";
 import { Login } from "./screens/Login";
 import { Setup } from "./screens/Setup";
 import { Dashboard } from "./screens/Dashboard";
-import { Live } from "./screens/Live";
 import { Cameras } from "./screens/Cameras";
 import { Alarms } from "./screens/Alarms";
 import { Settings } from "./screens/Settings";
 import { Spinner } from "./components/ui/Spinner";
 
-// Recordings pulls in hls.js; load it only when visited.
-const Recordings = lazy(() =>
-  import("./screens/Recordings").then((m) => ({ default: m.Recordings })),
+// Playback pulls in hls.js; load it only when visited.
+const Playback = lazy(() =>
+  import("./screens/Playback").then((m) => ({ default: m.Playback })),
 );
 
 export default function App() {
@@ -40,14 +39,15 @@ export default function App() {
         }
       >
         <Routes>
-          <Route path="/" element={<Navigate to="/live" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/live" element={<Live />} />
+          <Route path="/live" element={<Navigate to="/dashboard" replace />} />
           <Route path="/cameras" element={<Cameras />} />
-          <Route path="/recordings" element={<Recordings />} />
+          <Route path="/playback" element={<Playback />} />
+          <Route path="/recordings" element={<Navigate to="/playback" replace />} />
           <Route path="/alarms" element={<Alarms />} />
           <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/live" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Suspense>
     </AppShell>

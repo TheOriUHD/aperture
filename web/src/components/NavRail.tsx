@@ -1,7 +1,6 @@
 import { NavLink } from "react-router-dom";
 import clsx from "clsx";
 import {
-  LayoutDashboard,
   LayoutGrid,
   Cctv,
   Clapperboard,
@@ -18,10 +17,9 @@ interface NavItem {
 }
 
 const items: NavItem[] = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/live", label: "Live view", icon: LayoutGrid },
+  { to: "/dashboard", label: "Live", icon: LayoutGrid },
   { to: "/cameras", label: "Cameras", icon: Cctv },
-  { to: "/recordings", label: "Recordings", icon: Clapperboard },
+  { to: "/playback", label: "Playback", icon: Clapperboard },
   { to: "/alarms", label: "Alarms", icon: Bell },
 ];
 

@@ -1,14 +1,21 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { HardDrive, Cctv, Video, Activity } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { TopBar } from "../components/TopBar";
 import { CameraTile } from "../components/CameraTile";
+import { CameraPopout } from "../components/CameraPopout";
+import { EmptyState } from "../components/ui/EmptyState";
 import { useCameras } from "../hooks/useCameras";
 import { useStorage } from "../hooks/useStorage";
 import { formatBytes } from "../lib/format";
+import type { Camera } from "../lib/types";
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const { data: cameras } = useCameras();
   const { data: storage } = useStorage();
+  const [popout, setPopout] = useState<Camera | null>(null);
   const list = cameras ?? [];
   const online = list.filter((c) => c.enabled).length;
   const recording = list.filter((c) => c.enabled && c.recordMode !== "never").length;
@@ -17,7 +24,7 @@ export function Dashboard() {
     <>
       <TopBar title="Dashboard" />
       <div className="flex-1 overflow-auto p-4">
-        <div className="max-w-6xl mx-auto space-y-4">
+        <div className="max-w-[1600px] mx-auto space-y-4">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <Metric
               icon={HardDrive}
@@ -30,22 +37,26 @@ export function Dashboard() {
             <Metric icon={Activity} label="Events today" value="0" sub="motion" />
           </div>
 
-          <div>
-            <h2 className="text-sm font-medium text-fg-muted mb-2.5">Live</h2>
-            {list.length === 0 ? (
-              <div className="panel text-sm text-fg-faint text-center py-10">
-                No cameras yet. Add one under Cameras.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {list.slice(0, 6).map((cam) => (
-                  <CameraTile key={cam.id} camera={cam} />
-                ))}
-              </div>
-            )}
-          </div>
+          {list.length === 0 ? (
+            <EmptyState icon={Cctv} title="No cameras yet" hint="Add a camera to see live feeds here." />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+              {list.map((cam) => (
+                <CameraTile key={cam.id} camera={cam} onOpen={setPopout} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
+
+      <CameraPopout
+        camera={popout}
+        onClose={() => setPopout(null)}
+        onOpenPlayback={(id) => {
+          setPopout(null);
+          navigate(`/playback?camera=${id}`);
+        }}
+      />
     </>
   );
 }

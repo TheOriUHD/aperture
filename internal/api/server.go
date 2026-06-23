@@ -64,6 +64,7 @@ func (s *Server) routes() http.Handler {
 			r.Get("/cameras", s.handleListCameras)
 			r.Get("/cameras/{id}", s.handleGetCamera)
 			r.Get("/cameras/{id}/stream-token", s.handleStreamToken)
+			r.Get("/cameras/{id}/snapshot.jpg", s.handleSnapshot)
 			r.Get("/cameras/{id}/segments", s.handleSegmentsList)
 			r.Get("/cameras/{id}/hls", s.handleHLS)
 			r.Get("/cameras/{id}/seg/{seg}", s.handleSegmentFile)

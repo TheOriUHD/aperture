@@ -32,6 +32,23 @@ func (s *Server) handleStreamToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSnapshot returns a single JPEG frame for a camera (used for thumbnails).
+func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if _, err := s.st.GetCamera(id); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	data, err := s.sm.Snapshot(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "snapshot unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
 // handleStreamWS authorizes a stream token, then proxies the live WebSocket
 // through to go2rtc (WebRTC with MSE fallback).
 func (s *Server) handleStreamWS(w http.ResponseWriter, r *http.Request) {
