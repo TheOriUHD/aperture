@@ -55,27 +55,26 @@ export function CameraPopout({
       >
         <LiveVideo camera={camera} fit="contain" className="aspect-video bg-black" />
 
-        {/* Top overlay: name + close */}
-        <div className="absolute top-0 inset-x-0 h-14 bg-gradient-to-b from-black/70 to-transparent pointer-events-none" />
-        <div className="absolute top-3 left-4 flex items-center gap-2.5">
+        {/* Top overlay: subtle name pill + close */}
+        <div className="absolute top-3 left-3 flex items-center gap-2 rounded-md bg-black/35 px-2.5 py-1 backdrop-blur-sm">
           {recording && (
-            <span className="pill-rec">
+            <span className="flex items-center gap-1 text-[11px] font-medium text-[#ffd6d7]">
               <span className="h-1.5 w-1.5 rounded-full bg-rec animate-rec-pulse" />
               REC
             </span>
           )}
-          <span className="text-sm font-medium text-white drop-shadow">{camera.name}</span>
+          <span className="text-xs font-medium text-white">{camera.name}</span>
         </div>
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 h-8 w-8 grid place-items-center rounded-md bg-black/55 text-white/90 hover:bg-black/75"
+          className="absolute top-3 right-3 h-8 w-8 grid place-items-center rounded-md bg-black/45 text-white/90 hover:bg-black/70 backdrop-blur-sm"
           aria-label="Close"
         >
           <X className="h-4 w-4" />
         </button>
 
         {/* Bottom controls */}
-        <div className="absolute bottom-0 inset-x-0 h-16 bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-0 h-16 bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
         <div className="absolute bottom-3 inset-x-4 flex items-center gap-2">
           <button
             onClick={() => onOpenPlayback(camera.id)}
