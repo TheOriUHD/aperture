@@ -74,6 +74,28 @@ func main() {
 	janitor := retention.New(cfg, st, log)
 	go janitor.Run(bgCtx)
 
+	// Keep a recent JPEG frame cached per camera for instant blurred placeholders.
+	go func() {
+		t := time.NewTicker(15 * time.Second)
+		defer t.Stop()
+		warm := func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
+			defer cancel()
+			if cams, err := st.ListCameras(); err == nil {
+				sm.WarmSnapshots(ctx, cams)
+			}
+		}
+		warm()
+		for {
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-t.C:
+				warm()
+			}
+		}
+	}()
+
 	srv := api.NewServer(cfg, st, am, sm, rec, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,

@@ -117,38 +117,46 @@ export function Playback() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive, selected?.id, dayStart, segments.length > 0]);
 
-  function requestSeek() {
+  const scrubbing = useRef(false);
+
+  function scheduleSeek() {
     window.clearTimeout(seekTimer.current);
     seekTimer.current = window.setTimeout(() => {
+      scrubbing.current = false;
       const v = playerVideoRef.current;
       if (v && hlsRef.current) {
         v.currentTime = wallToOffset(segmentsRef.current, selectedRef.current);
         void v.play().catch(() => undefined);
       }
-    }, 110);
+    }, 140);
   }
 
-  function setSelected(ms: number) {
+  // Single entry point for any scrub (drag, wheel, click, skip). Snaps to live
+  // when brought within a zoom-aware zone of the present.
+  function scrubToTime(ms: number) {
+    const snapMs = clamp(windowMs * 0.04, 5000, 90_000);
+    if (ms >= nowMs - snapMs) {
+      scrubbing.current = false;
+      window.clearTimeout(seekTimer.current);
+      setFollowing(true);
+      setPaused(false);
+      selectedRef.current = nowMs;
+      return;
+    }
     const c = clamp(ms, nowMs - MONTH_MS, nowMs);
+    scrubbing.current = true;
     setFollowing(false);
     setSelectedState(c);
     selectedRef.current = c;
+    scheduleSeek();
   }
 
-  function onScrub(deltaMs: number) {
-    setSelected(selectedMs + deltaMs);
-    requestSeek();
-  }
-  function onSeekTo(ms: number) {
-    setSelected(ms);
-    setPaused(false);
-    requestSeek();
-  }
   function shiftDay(dir: number) {
-    setSelected(selectedMs + dir * DAY_MS);
-    requestSeek();
+    scrubToTime(selectedMs + dir * DAY_MS);
   }
   function goLive() {
+    scrubbing.current = false;
+    window.clearTimeout(seekTimer.current);
     setFollowing(true);
     setPaused(false);
     selectedRef.current = nowMs;
@@ -235,9 +243,8 @@ export function Playback() {
             nowMs={nowMs}
             segments={recorded}
             events={motion}
-            following={following}
-            onScrub={onScrub}
-            onSeekTo={onSeekTo}
+            live={following}
+            onScrubTo={scrubToTime}
           />
           {!following && (
             <button
@@ -269,6 +276,7 @@ export function Playback() {
                 playsInline
                 className="absolute inset-0 h-full w-full object-contain bg-black"
                 onTimeUpdate={(e) => {
+                  if (scrubbing.current) return;
                   const wall = offsetToWall(segmentsRef.current, e.currentTarget.currentTime);
                   if (wall) {
                     setSelectedState(wall);
@@ -292,36 +300,38 @@ export function Playback() {
           )}
 
           {selected && (
-            <div className="absolute inset-x-0 bottom-0 opacity-0 pointer-events-none transition-opacity duration-200 group-hover:opacity-100 group-hover:pointer-events-auto">
-              <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
-              <div className="relative flex items-center gap-2 px-4 pb-3 pt-10">
-                {isLive ? (
-                  <span className="pill bg-online/20 text-online">
-                    <span className="h-1.5 w-1.5 rounded-full bg-online" />
-                    LIVE
-                  </span>
-                ) : (
-                  <>
-                    <CtlBtn onClick={togglePlay} label={paused ? "Play" : "Pause"}>
-                      {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-                    </CtlBtn>
-                    <CtlBtn onClick={() => onSeekTo(selectedMs - 30_000)} label="Back 30s">
-                      <Rewind className="h-4 w-4" />
-                    </CtlBtn>
-                    <button onClick={goLive} className="pill bg-black/55 text-white/90 hover:bg-black/75">
-                      Go live
-                    </button>
-                  </>
-                )}
-                <span className="text-xs font-mono text-white/90 tabular-nums ml-1">{fmtClock(overlayTime)}</span>
-                <div className="ml-auto flex items-center gap-1.5">
-                  <CtlBtn onClick={snapshot} label="Snapshot">
-                    <CameraIcon className="h-4 w-4" />
+            <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 px-4 pb-3 opacity-0 pointer-events-none transition-opacity duration-200 group-hover:opacity-100 group-hover:pointer-events-auto">
+              {isLive ? (
+                <span className="pill bg-online/25 text-online backdrop-blur-sm">
+                  <span className="h-1.5 w-1.5 rounded-full bg-online" />
+                  LIVE
+                </span>
+              ) : (
+                <>
+                  <CtlBtn onClick={togglePlay} label={paused ? "Play" : "Pause"}>
+                    {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
                   </CtlBtn>
-                  <CtlBtn onClick={fullscreen} label="Fullscreen">
-                    <Maximize2 className="h-4 w-4" />
+                  <CtlBtn onClick={() => scrubToTime(selectedMs - 30_000)} label="Back 30s">
+                    <Rewind className="h-4 w-4" />
                   </CtlBtn>
-                </div>
+                  <button
+                    onClick={goLive}
+                    className="pill bg-black/45 text-white/90 hover:bg-black/70 backdrop-blur-sm"
+                  >
+                    Go live
+                  </button>
+                </>
+              )}
+              <span className="text-xs font-mono text-white/90 tabular-nums rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm">
+                {fmtClock(overlayTime)}
+              </span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <CtlBtn onClick={snapshot} label="Snapshot">
+                  <CameraIcon className="h-4 w-4" />
+                </CtlBtn>
+                <CtlBtn onClick={fullscreen} label="Fullscreen">
+                  <Maximize2 className="h-4 w-4" />
+                </CtlBtn>
               </div>
             </div>
           )}
@@ -346,7 +356,7 @@ function CtlBtn({
     <button
       onClick={onClick}
       aria-label={label}
-      className="h-9 w-9 grid place-items-center rounded-md bg-black/55 text-white/90 hover:bg-black/75"
+      className="h-9 w-9 grid place-items-center rounded-md bg-black/45 text-white/90 hover:bg-black/70 backdrop-blur-sm"
     >
       {children}
     </button>

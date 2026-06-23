@@ -12,10 +12,16 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/TheOriUHD/aperture/internal/store"
 )
+
+type cachedSnap struct {
+	data []byte
+	ts   time.Time
+}
 
 // Manager talks to a go2rtc instance over its HTTP API.
 type Manager struct {
@@ -24,6 +30,9 @@ type Manager struct {
 	http      *http.Client
 	proxy     *httputil.ReverseProxy
 	proxyHost string
+
+	snapMu sync.RWMutex
+	snaps  map[string]cachedSnap // cameraID -> last JPEG frame
 }
 
 // NewManager builds a Manager. apiBase is the go2rtc HTTP API; rtspBase is its
@@ -41,6 +50,7 @@ func NewManager(apiBase, rtspBase string) (*Manager, error) {
 		http:      &http.Client{Timeout: 10 * time.Second},
 		proxy:     rp,
 		proxyHost: u.Host,
+		snaps:     map[string]cachedSnap{},
 	}, nil
 }
 
@@ -186,7 +196,7 @@ func (m *Manager) Online(ctx context.Context, cameraID string) bool {
 	return ok
 }
 
-// Snapshot fetches a single JPEG frame for a camera from go2rtc.
+// Snapshot fetches a single JPEG frame for a camera from go2rtc and caches it.
 func (m *Manager) Snapshot(ctx context.Context, cameraID string) ([]byte, error) {
 	u := m.apiBase + "/api/frame.jpeg?src=" + url.QueryEscape(StreamName(cameraID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -201,7 +211,45 @@ func (m *Manager) Snapshot(ctx context.Context, cameraID string) ([]byte, error)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("go2rtc frame.jpeg: %s", resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	m.snapMu.Lock()
+	m.snaps[cameraID] = cachedSnap{data: data, ts: time.Now()}
+	m.snapMu.Unlock()
+	return data, nil
+}
+
+// SnapshotCached returns a recent cached frame instantly when available, only
+// hitting go2rtc when the cache is stale or empty. This makes the blurred
+// loading placeholder appear immediately rather than waiting on go2rtc.
+func (m *Manager) SnapshotCached(ctx context.Context, cameraID string) ([]byte, error) {
+	m.snapMu.RLock()
+	c, ok := m.snaps[cameraID]
+	m.snapMu.RUnlock()
+	if ok && time.Since(c.ts) < 20*time.Second {
+		return c.data, nil
+	}
+	data, err := m.Snapshot(ctx, cameraID)
+	if err != nil {
+		if ok {
+			return c.data, nil // serve stale rather than failing
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
+// WarmSnapshots refreshes the cached frame for each enabled camera. Run it on a
+// short interval so a fresh-ish frame is always ready to serve.
+func (m *Manager) WarmSnapshots(ctx context.Context, cameras []*store.Camera) {
+	for _, c := range cameras {
+		if !c.Enabled {
+			continue
+		}
+		_, _ = m.Snapshot(ctx, c.ID)
+	}
 }
 
 // ProxyWS rewrites an incoming request to go2rtc's live WebSocket for the named

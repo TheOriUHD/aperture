@@ -39,7 +39,7 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	data, err := s.sm.Snapshot(r.Context(), id)
+	data, err := s.sm.SnapshotCached(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "snapshot unavailable")
 		return

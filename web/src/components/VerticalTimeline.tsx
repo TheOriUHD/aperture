@@ -22,9 +22,10 @@ const fmtHMS = (ms: number) =>
   new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 /**
- * Vertical time scrubber, UniFi-style: the playhead is fixed near the top and
- * the timeline scrolls behind it. Drag or scroll to scrub through time. Newest
- * is up, older is down.
+ * Vertical time scrubber: the playhead is fixed near the top and the timeline
+ * scrolls behind it. Drag or scroll to scrub. When at the live edge the playhead
+ * reads LIVE and footage grows beneath it. onScrubTo always receives an absolute
+ * target time so scrubbing is anchor-based and smooth.
  */
 export function VerticalTimeline({
   selectedMs,
@@ -32,23 +33,23 @@ export function VerticalTimeline({
   nowMs,
   segments,
   events,
-  following,
+  live,
   playheadFrac = 0.16,
-  onScrub,
-  onSeekTo,
+  onScrubTo,
 }: {
   selectedMs: number;
   windowMs: number;
   nowMs: number;
   segments: TR[];
   events: TR[];
-  following: boolean;
+  live: boolean;
   playheadFrac?: number;
-  onScrub: (deltaMs: number) => void;
-  onSeekTo: (ms: number) => void;
+  onScrubTo: (ms: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ moved: boolean; pid: number } | null>(null);
+  const selRef = useRef(selectedMs);
+  selRef.current = selectedMs;
+  const drag = useRef<{ anchorY: number; anchorSel: number; moved: boolean } | null>(null);
 
   const topTime = selectedMs + playheadFrac * windowMs;
   const bottomTime = topTime - windowMs;
@@ -56,39 +57,42 @@ export function VerticalTimeline({
   const visible = (r: TR) => r.end > bottomTime && r.start < topTime;
   const railX = 58;
 
-  // Non-passive wheel so we can scrub without scrolling the page.
+  // Non-passive wheel so scrubbing doesn't scroll the page; accumulate on a ref
+  // for lag-free response to fast scrolls.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      onScrub(-(e.deltaY / el.clientHeight) * windowMs * 0.5);
+      const next = selRef.current - (e.deltaY / el.clientHeight) * windowMs * 0.6;
+      selRef.current = next;
+      onScrubTo(next);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [windowMs, onScrub]);
+  }, [windowMs, onScrubTo]);
 
   const interval = majorInterval(windowMs);
   const majors: number[] = [];
   for (let t = Math.ceil(bottomTime / interval) * interval; t <= topTime; t += interval) majors.push(t);
-  const minorStep = interval / 5;
   const minors: number[] = [];
   if (windowMs <= 60 * MIN) {
+    const minorStep = interval / 5;
     for (let t = Math.ceil(bottomTime / minorStep) * minorStep; t <= topTime; t += minorStep) {
       if (Math.abs(t % interval) > 1) minors.push(t);
     }
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    drag.current = { moved: false, pid: e.pointerId };
+    drag.current = { anchorY: e.clientY, anchorSel: selRef.current, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!drag.current || !ref.current) return;
-    if (e.movementY !== 0) {
-      if (Math.abs(e.movementY) > 1) drag.current.moved = true;
-      onScrub((e.movementY * windowMs) / ref.current.clientHeight);
-    }
+    const d = drag.current;
+    if (!d || !ref.current) return;
+    const dy = e.clientY - d.anchorY;
+    if (Math.abs(dy) > 2) d.moved = true;
+    onScrubTo(d.anchorSel + (dy / ref.current.clientHeight) * windowMs);
   }
   function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     const d = drag.current;
@@ -100,8 +104,7 @@ export function VerticalTimeline({
     }
     if (d && !d.moved && ref.current) {
       const rect = ref.current.getBoundingClientRect();
-      const frac = (e.clientY - rect.top) / rect.height;
-      onSeekTo(topTime - frac * windowMs);
+      onScrubTo(topTime - ((e.clientY - rect.top) / rect.height) * windowMs);
     }
   }
 
@@ -113,29 +116,18 @@ export function VerticalTimeline({
       onPointerUp={onPointerUp}
       className="relative h-full w-full select-none overflow-hidden cursor-grab active:cursor-grabbing touch-none"
     >
-      {/* minor ticks */}
       {minors.map((t) => (
-        <div
-          key={`mi${t}`}
-          className="absolute h-px w-2 bg-line"
-          style={{ left: railX - 10, top: `${pct(t)}%` }}
-        />
+        <div key={`mi${t}`} className="absolute h-px w-2 bg-line" style={{ left: railX - 10, top: `${pct(t)}%` }} />
       ))}
-
-      {/* major ticks + labels */}
       {majors.map((t) => (
         <div key={`ma${t}`} className="absolute left-0 flex items-center gap-2" style={{ top: `${pct(t)}%` }}>
-          <span className="w-10 text-right text-[11px] font-mono text-fg-faint -translate-y-1/2">
-            {fmtHM(t)}
-          </span>
+          <span className="w-10 text-right text-[11px] font-mono text-fg-faint -translate-y-1/2">{fmtHM(t)}</span>
           <div className="h-px w-3 bg-line-strong -translate-y-1/2" />
         </div>
       ))}
 
-      {/* rail */}
       <div className="absolute top-0 bottom-0 w-[3px] rounded-full bg-ink-850" style={{ left: railX }} />
 
-      {/* recorded spans (solid, merged) */}
       {segments.filter(visible).map((s, i) => (
         <div
           key={`s${i}`}
@@ -143,7 +135,6 @@ export function VerticalTimeline({
           style={{ left: railX, top: `${pct(s.end)}%`, height: `${Math.max(pct(s.start) - pct(s.end), 0.2)}%` }}
         />
       ))}
-      {/* motion spans */}
       {events.filter(visible).map((s, i) => (
         <div
           key={`m${i}`}
@@ -152,23 +143,21 @@ export function VerticalTimeline({
         />
       ))}
 
-      {/* now marker (only when scrubbed into the past) */}
-      {!following && nowMs <= topTime && nowMs >= bottomTime && (
-        <div
-          className="absolute left-12 right-0 border-t border-dashed border-online/50"
-          style={{ top: `${pct(nowMs)}%` }}
-        />
+      {!live && nowMs <= topTime && nowMs >= bottomTime && (
+        <div className="absolute left-12 right-0 border-t border-dashed border-online/50" style={{ top: `${pct(nowMs)}%` }} />
       )}
 
-      {/* fixed playhead + time pill */}
+      {/* fixed playhead + pill */}
       <div className="absolute left-0 right-0 z-10 flex items-center" style={{ top: `${playheadFrac * 100}%` }}>
         <div
-          className="rounded-md bg-brand px-2 py-1 text-[12px] font-medium text-white tabular-nums shadow"
-          style={{ minWidth: 78, textAlign: "center" }}
+          className={`rounded-md px-2 py-1 text-[12px] font-medium tabular-nums shadow ${
+            live ? "bg-online text-[#06251a]" : "bg-brand text-white"
+          }`}
+          style={{ minWidth: 66, textAlign: "center" }}
         >
-          {fmtHMS(selectedMs)}
+          {live ? "LIVE" : fmtHMS(selectedMs)}
         </div>
-        <div className="flex-1 h-0.5 bg-brand" />
+        <div className={`flex-1 h-0.5 ${live ? "bg-online" : "bg-brand"}`} />
       </div>
     </div>
   );

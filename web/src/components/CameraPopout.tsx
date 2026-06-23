@@ -73,8 +73,7 @@ export function CameraPopout({
           <X className="h-4 w-4" />
         </button>
 
-        {/* Bottom controls */}
-        <div className="absolute bottom-0 inset-x-0 h-16 bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
+        {/* Bottom controls (self-contained pills, no gradient band) */}
         <div className="absolute bottom-3 inset-x-4 flex items-center gap-2">
           <button
             onClick={() => onOpenPlayback(camera.id)}
