@@ -4,18 +4,16 @@ import { api } from "../lib/api";
 import { LiveStream, type LiveState } from "../lib/livestream";
 import type { Camera, StreamToken } from "../lib/types";
 
-// Bare live player: a <video> wired to the WebRTC/MSE engine. While connecting
-// it shows a blurred snapshot of the camera (its last/current frame) with an
+// Bare live player: always fills its (relative, sized) parent. While connecting
+// it shows a blurred full-size snapshot of the camera's current frame with an
 // animated dot loader, instead of a black box.
 export function LiveVideo({
   camera,
-  className = "",
   muted = true,
   fit = "cover",
   videoRef: externalRef,
 }: {
   camera: Camera;
-  className?: string;
   muted?: boolean;
   fit?: "cover" | "contain";
   videoRef?: React.RefObject<HTMLVideoElement>;
@@ -52,7 +50,7 @@ export function LiveVideo({
   }, [camera.id, camera.enabled, videoRef]);
 
   return (
-    <div className={`relative overflow-hidden ${className}`}>
+    <div className="absolute inset-0 overflow-hidden bg-black">
       <video
         ref={videoRef}
         muted={muted}
@@ -67,7 +65,7 @@ export function LiveVideo({
             <img
               src={`/api/cameras/${camera.id}/snapshot.jpg`}
               alt=""
-              className="absolute inset-0 h-full w-full object-cover scale-110 blur-xl brightness-[0.45]"
+              className="absolute inset-0 h-full w-full object-cover scale-105 blur-2xl brightness-[0.7]"
               onError={() => setSnapOk(false)}
             />
           ) : (

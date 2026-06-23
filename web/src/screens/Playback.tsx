@@ -6,6 +6,7 @@ import {
   Play,
   Pause,
   Rewind,
+  FastForward,
   Maximize2,
   Camera as CameraIcon,
   ChevronLeft,
@@ -118,48 +119,68 @@ export function Playback() {
   }, [isLive, selected?.id, dayStart, segments.length > 0]);
 
   const scrubbing = useRef(false);
+  const snapAnim = useRef(0);
+  const nowRef = useRef(nowMs);
+  nowRef.current = nowMs;
 
-  function scheduleSeek() {
+  // Smoothly ease the view to the live edge, then switch to live.
+  function animateToLive() {
+    cancelAnimationFrame(snapAnim.current);
+    scrubbing.current = true;
+    const from = selectedRef.current;
+    const startT = performance.now();
+    const dur = 320;
+    const step = (t: number) => {
+      const k = Math.min(1, (t - startT) / dur);
+      const e = 1 - Math.pow(1 - k, 3); // ease-out cubic
+      const val = from + (nowRef.current - from) * e;
+      setSelectedState(val);
+      selectedRef.current = val;
+      if (k < 1) {
+        snapAnim.current = requestAnimationFrame(step);
+      } else {
+        scrubbing.current = false;
+        setFollowing(true);
+        setPaused(false);
+      }
+    };
+    snapAnim.current = requestAnimationFrame(step);
+  }
+
+  // After a scrub settles, either snap (smoothly) to live or seek the player.
+  function scheduleSettle() {
     window.clearTimeout(seekTimer.current);
     seekTimer.current = window.setTimeout(() => {
+      const snapMs = clamp(windowMs * 0.04, 5000, 90_000);
+      if (selectedRef.current >= nowRef.current - snapMs) {
+        animateToLive();
+        return;
+      }
       scrubbing.current = false;
       const v = playerVideoRef.current;
       if (v && hlsRef.current) {
         v.currentTime = wallToOffset(segmentsRef.current, selectedRef.current);
         void v.play().catch(() => undefined);
       }
-    }, 140);
+    }, 150);
   }
 
-  // Single entry point for any scrub (drag, wheel, click, skip). Snaps to live
-  // when brought within a zoom-aware zone of the present.
+  // Single entry point for any scrub (drag, wheel, click, skip).
   function scrubToTime(ms: number) {
-    const snapMs = clamp(windowMs * 0.04, 5000, 90_000);
-    if (ms >= nowMs - snapMs) {
-      scrubbing.current = false;
-      window.clearTimeout(seekTimer.current);
-      setFollowing(true);
-      setPaused(false);
-      selectedRef.current = nowMs;
-      return;
-    }
+    cancelAnimationFrame(snapAnim.current);
     const c = clamp(ms, nowMs - MONTH_MS, nowMs);
     scrubbing.current = true;
     setFollowing(false);
     setSelectedState(c);
     selectedRef.current = c;
-    scheduleSeek();
+    scheduleSettle();
   }
 
   function shiftDay(dir: number) {
     scrubToTime(selectedMs + dir * DAY_MS);
   }
   function goLive() {
-    scrubbing.current = false;
-    window.clearTimeout(seekTimer.current);
-    setFollowing(true);
-    setPaused(false);
-    selectedRef.current = nowMs;
+    if (!following) animateToLive();
   }
 
   function togglePlay() {
@@ -258,18 +279,12 @@ export function Playback() {
         </div>
       </div>
 
-      {/* player + events */}
+      {/* player + control bar + events */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <div ref={containerRef} className="group flex-1 relative bg-black min-h-0">
+        <div ref={containerRef} className="relative flex-1 bg-black min-h-0">
           {selected ? (
             isLive ? (
-              <LiveVideo
-                key={selected.id}
-                camera={selected}
-                fit="contain"
-                videoRef={playerVideoRef}
-                className="absolute inset-0"
-              />
+              <LiveVideo key={selected.id} camera={selected} fit="contain" videoRef={playerVideoRef} />
             ) : (
               <video
                 ref={playerVideoRef}
@@ -292,50 +307,51 @@ export function Playback() {
           )}
 
           {selected && (
-            <div className="absolute top-3 left-3 flex items-center gap-2 rounded-md bg-black/35 px-2.5 py-1 text-white backdrop-blur-sm">
+            <div className="absolute top-3 left-3 flex items-center gap-2 rounded-md bg-black/35 px-2.5 py-1 backdrop-blur-sm">
               <span className="text-xs font-mono tabular-nums text-white/90">{fmtClock(overlayTime)}</span>
               <span className="text-white/30">|</span>
-              <span className="text-xs font-medium">{selected.name}</span>
-            </div>
-          )}
-
-          {selected && (
-            <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 px-4 pb-3 opacity-0 pointer-events-none transition-opacity duration-200 group-hover:opacity-100 group-hover:pointer-events-auto">
-              {isLive ? (
-                <span className="pill bg-online/25 text-online backdrop-blur-sm">
-                  <span className="h-1.5 w-1.5 rounded-full bg-online" />
-                  LIVE
-                </span>
-              ) : (
-                <>
-                  <CtlBtn onClick={togglePlay} label={paused ? "Play" : "Pause"}>
-                    {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-                  </CtlBtn>
-                  <CtlBtn onClick={() => scrubToTime(selectedMs - 30_000)} label="Back 30s">
-                    <Rewind className="h-4 w-4" />
-                  </CtlBtn>
-                  <button
-                    onClick={goLive}
-                    className="pill bg-black/45 text-white/90 hover:bg-black/70 backdrop-blur-sm"
-                  >
-                    Go live
-                  </button>
-                </>
-              )}
-              <span className="text-xs font-mono text-white/90 tabular-nums rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm">
-                {fmtClock(overlayTime)}
-              </span>
-              <div className="ml-auto flex items-center gap-1.5">
-                <CtlBtn onClick={snapshot} label="Snapshot">
-                  <CameraIcon className="h-4 w-4" />
-                </CtlBtn>
-                <CtlBtn onClick={fullscreen} label="Fullscreen">
-                  <Maximize2 className="h-4 w-4" />
-                </CtlBtn>
-              </div>
+              <span className="text-xs font-medium text-white">{selected.name}</span>
             </div>
           )}
         </div>
+
+        {/* control bar (below the video) */}
+        {selected && (
+          <div className="flex items-center gap-1 h-12 px-3 border-t border-line bg-ink-900 shrink-0">
+            {isLive ? (
+              <span className="pill bg-online/20 text-online mr-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-online" />
+                LIVE
+              </span>
+            ) : (
+              <BarBtn onClick={togglePlay} label={paused ? "Play" : "Pause"}>
+                {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+              </BarBtn>
+            )}
+            <BarBtn onClick={() => scrubToTime((isLive ? nowMs : selectedMs) - 30_000)} label="Back 30 seconds">
+              <Rewind className="h-4 w-4" />
+            </BarBtn>
+            {!isLive && (
+              <BarBtn onClick={() => scrubToTime(selectedMs + 30_000)} label="Forward 30 seconds">
+                <FastForward className="h-4 w-4" />
+              </BarBtn>
+            )}
+            {!isLive && (
+              <button onClick={goLive} className="ml-1 h-8 rounded-md px-2.5 text-xs text-fg-muted hover:text-fg hover:bg-ink-700">
+                Go live
+              </button>
+            )}
+            <span className="ml-2 text-xs font-mono text-fg-muted tabular-nums">{fmtClock(overlayTime)}</span>
+            <div className="ml-auto flex items-center gap-0.5">
+              <BarBtn onClick={snapshot} label="Snapshot">
+                <CameraIcon className="h-4 w-4" />
+              </BarBtn>
+              <BarBtn onClick={fullscreen} label="Fullscreen">
+                <Maximize2 className="h-4 w-4" />
+              </BarBtn>
+            </div>
+          </div>
+        )}
 
         <EventStrip dateLabel={fmtDate(selectedMs)} />
       </div>
@@ -343,7 +359,7 @@ export function Playback() {
   );
 }
 
-function CtlBtn({
+function BarBtn({
   onClick,
   label,
   children,
@@ -356,7 +372,7 @@ function CtlBtn({
     <button
       onClick={onClick}
       aria-label={label}
-      className="h-9 w-9 grid place-items-center rounded-md bg-black/45 text-white/90 hover:bg-black/70 backdrop-blur-sm"
+      className="h-8 w-8 grid place-items-center rounded-md text-fg-muted hover:text-fg hover:bg-ink-700"
     >
       {children}
     </button>

@@ -12,7 +12,7 @@ export function CameraTile({ camera, onOpen }: { camera: Camera; onOpen?: (c: Ca
       }`}
       onClick={() => onOpen?.(camera)}
     >
-      <LiveVideo camera={camera} className="absolute inset-0" />
+      <LiveVideo camera={camera} />
 
       {/* Top-left status pill */}
       <div className="absolute top-2.5 left-2.5 flex items-center gap-2">

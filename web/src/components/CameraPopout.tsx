@@ -53,7 +53,9 @@ export function CameraPopout({
         ref={containerRef}
         className="relative w-[min(94vw,1100px)] card overflow-hidden shadow-pop animate-fade-in"
       >
-        <LiveVideo camera={camera} fit="contain" className="aspect-video bg-black" />
+        <div className="relative aspect-video bg-black">
+          <LiveVideo camera={camera} fit="contain" />
+        </div>
 
         {/* Top overlay: subtle name pill + close */}
         <div className="absolute top-3 left-3 flex items-center gap-2 rounded-md bg-black/35 px-2.5 py-1 backdrop-blur-sm">
