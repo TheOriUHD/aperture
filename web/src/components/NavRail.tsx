@@ -22,10 +22,12 @@ const items: NavItem[] = [
   { to: "/playback", label: "Playback", icon: Clapperboard },
   { to: "/alarms", label: "Alarms", icon: Bell },
 ];
+const settingsItem: NavItem = { to: "/settings", label: "Settings", icon: Settings };
 
+// Desktop: a vertical icon rail on the left. Hidden on mobile.
 export function NavRail() {
   return (
-    <nav className="flex flex-col items-center gap-1.5 w-[54px] shrink-0 bg-ink-850 border-r border-line py-3">
+    <nav className="hidden lg:flex flex-col items-center gap-1.5 w-[54px] shrink-0 bg-ink-850 border-r border-line py-3">
       <Link
         to="/dashboard"
         title="Aperture — home"
@@ -38,8 +40,33 @@ export function NavRail() {
         <RailLink key={item.to} {...item} />
       ))}
       <div className="mt-auto">
-        <RailLink to="/settings" label="Settings" icon={Settings} />
+        <RailLink {...settingsItem} />
       </div>
+    </nav>
+  );
+}
+
+// Mobile: a bottom tab bar. Hidden on desktop.
+export function BottomNav() {
+  const all = [...items, settingsItem];
+  return (
+    <nav className="flex lg:hidden items-stretch justify-around h-14 shrink-0 border-t border-line bg-ink-850">
+      {all.map((item) => (
+        <NavLink
+          key={item.to}
+          to={item.to}
+          aria-label={item.label}
+          className={({ isActive }) =>
+            clsx(
+              "flex flex-1 flex-col items-center justify-center gap-0.5",
+              isActive ? "text-brand" : "text-fg-faint",
+            )
+          }
+        >
+          <item.icon className="h-5 w-5" />
+          <span className="text-[10px]">{item.label}</span>
+        </NavLink>
+      ))}
     </nav>
   );
 }

@@ -12,12 +12,17 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowUp,
+  LayoutGrid,
+  ZoomIn,
+  Calendar,
+  Cctv,
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
 import { VerticalTimeline, type TR, type TLEvent } from "../components/VerticalTimeline";
 import { EventStrip } from "../components/EventStrip";
 import { LiveVideo } from "../components/LiveVideo";
 import { useCameras } from "../hooks/useCameras";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { api } from "../lib/api";
 import { wallToOffset, offsetToWall, mergeRanges, type Seg } from "../lib/playlist";
 import type { MotionEvent } from "../lib/types";
@@ -54,8 +59,12 @@ export function Playback() {
   const [zoomIdx, setZoomIdx] = useState(4); // 30 min
   const [paused, setPaused] = useState(false);
 
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const [camerasOpen, setCamerasOpen] = useState(false);
+
   const playerVideoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const selectedRef = useRef<number>(selectedState);
   const segmentsRef = useRef<Segment[]>([]);
@@ -262,9 +271,179 @@ export function Playback() {
     else void document.exitFullscreen();
   }
 
+  function openDatePicker() {
+    dateInputRef.current?.showPicker?.();
+    dateInputRef.current?.click();
+  }
+
+  // One video element, reused by both layouts (only one renders at a time).
+  function renderPlayer() {
+    if (!selected) {
+      return <div className="absolute inset-0 grid place-items-center text-sm text-fg-faint">No cameras</div>;
+    }
+    return isLive ? (
+      <LiveVideo key={selected.id} camera={selected} fit="contain" videoRef={playerVideoRef} />
+    ) : (
+      <video
+        ref={playerVideoRef}
+        playsInline
+        className="absolute inset-0 h-full w-full object-contain bg-black"
+        onTimeUpdate={(e) => {
+          if (scrubbing.current) return;
+          const wall = offsetToWall(segmentsRef.current, e.currentTarget.currentTime);
+          if (wall) {
+            setSelectedState(wall);
+            selectedRef.current = wall;
+          }
+        }}
+        onPlay={() => setPaused(false)}
+        onPause={() => setPaused(true)}
+      />
+    );
+  }
+
   const overlayTime = selectedMs;
   const atToday = dayStart >= startOfDay(nowMs);
+  const fmtDay = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
+  const hiddenDateInput = (
+    <input
+      ref={dateInputRef}
+      type="date"
+      className="sr-only"
+      onChange={(e) => {
+        if (!e.target.value) return;
+        seekToTime(new Date(e.target.value + "T12:00").getTime());
+      }}
+    />
+  );
+
+  // ---- Mobile layout (UniFi Protect-style) --------------------------------
+  if (!isDesktop) {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-ink-900">
+        {/* camera switcher (slides in/out) */}
+        <div
+          className={`shrink-0 overflow-hidden border-b border-line transition-[max-height] duration-300 ${
+            camerasOpen ? "max-h-[120px]" : "max-h-0"
+          }`}
+        >
+          <div className="flex gap-2 overflow-x-auto p-2">
+            {(cameras ?? []).map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setSelectedId(c.id)}
+                className="shrink-0 w-[120px]"
+              >
+                <div
+                  className={`relative aspect-video rounded-lg overflow-hidden border ${
+                    c.id === selectedId ? "border-brand ring-1 ring-brand" : "border-line"
+                  }`}
+                >
+                  <MobileThumb cameraId={c.id} enabled={c.enabled} />
+                </div>
+                <p
+                  className={`mt-1 text-[11px] uppercase tracking-wide truncate ${
+                    c.id === selectedId ? "text-fg font-medium" : "text-fg-muted"
+                  }`}
+                >
+                  {c.name}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* video */}
+        <div ref={containerRef} className="relative shrink-0 aspect-video bg-black">
+          {renderPlayer()}
+          {selected && (
+            <div className="absolute top-2 left-2 rounded-md bg-black/40 px-2 py-1 text-[11px] font-mono text-white/90 backdrop-blur-sm">
+              {fmtDate(overlayTime)} {fmtClock(overlayTime)} · {selected.name}
+            </div>
+          )}
+        </div>
+
+        {/* control header */}
+        {selected && (
+          <div className="flex items-center gap-2 px-3 h-12 border-b border-line shrink-0">
+            <span className="flex items-center gap-2 text-sm font-medium text-fg">
+              <span className={`h-2.5 w-2.5 rounded-full ${isLive ? "bg-rec" : "bg-fg-faint"}`} />
+              {selected.name}
+            </span>
+            <div className="ml-auto flex items-center gap-0.5">
+              {!isLive && (
+                <>
+                  <BarBtn onClick={togglePlay} label={paused ? "Play" : "Pause"}>
+                    {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                  </BarBtn>
+                  <BarBtn onClick={() => seekToTime(selectedMs - 30_000)} label="Back 30 seconds">
+                    <Rewind className="h-4 w-4" />
+                  </BarBtn>
+                </>
+              )}
+              <BarBtn onClick={() => setCamerasOpen((o) => !o)} label="Cameras">
+                <LayoutGrid className="h-4 w-4" />
+              </BarBtn>
+              <BarBtn onClick={fullscreen} label="Fullscreen">
+                <Maximize2 className="h-4 w-4" />
+              </BarBtn>
+            </div>
+          </div>
+        )}
+
+        {/* timeline */}
+        <div className="relative flex-1 min-h-0">
+          {selected && (
+            <VerticalTimeline
+              selectedMs={selectedMs}
+              windowMs={windowMs}
+              nowMs={nowMs}
+              segments={recorded}
+              events={tlEvents}
+              live={following}
+              onScrubTo={scrubToTime}
+              onSeekAbs={seekToTime}
+              onEventClick={seekToTime}
+            />
+          )}
+          <button
+            onClick={() => setZoomIdx((i) => (i + 1) % ZOOMS.length)}
+            className="absolute top-3 right-3 h-10 w-10 rounded-full bg-ink-700/90 text-fg-muted grid place-items-center backdrop-blur-sm"
+            aria-label="Zoom"
+          >
+            <ZoomIn className="h-4 w-4" />
+          </button>
+          {!following && (
+            <button
+              onClick={goLive}
+              className="absolute bottom-16 right-3 h-10 w-10 rounded-full bg-brand text-white grid place-items-center shadow-pop"
+              aria-label="Jump to live"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            onClick={openDatePicker}
+            className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-ink-700/90 px-3.5 py-2.5 text-xs text-fg backdrop-blur-sm"
+          >
+            <Calendar className="h-3.5 w-3.5" />
+            {fmtDay(selectedMs)}
+          </button>
+          <button
+            onClick={snapshot}
+            className="absolute bottom-3 right-3 h-10 w-10 rounded-full bg-ink-700/90 text-fg-muted grid place-items-center backdrop-blur-sm"
+            aria-label="Snapshot"
+          >
+            <CameraIcon className="h-4 w-4" />
+          </button>
+        </div>
+        {hiddenDateInput}
+      </div>
+    );
+  }
+
+  // ---- Desktop layout -----------------------------------------------------
   return (
     <div className="flex h-full min-h-0">
       <CameraRail cameras={cameras ?? []} selectedId={selectedId} onSelect={setSelectedId} />
@@ -328,29 +507,7 @@ export function Playback() {
       {/* player + control bar + events */}
       <div className="flex-1 min-w-0 flex flex-col">
         <div ref={containerRef} className="relative flex-1 bg-black min-h-0">
-          {selected ? (
-            isLive ? (
-              <LiveVideo key={selected.id} camera={selected} fit="contain" videoRef={playerVideoRef} />
-            ) : (
-              <video
-                ref={playerVideoRef}
-                playsInline
-                className="absolute inset-0 h-full w-full object-contain bg-black"
-                onTimeUpdate={(e) => {
-                  if (scrubbing.current) return;
-                  const wall = offsetToWall(segmentsRef.current, e.currentTarget.currentTime);
-                  if (wall) {
-                    setSelectedState(wall);
-                    selectedRef.current = wall;
-                  }
-                }}
-                onPlay={() => setPaused(false)}
-                onPause={() => setPaused(true)}
-              />
-            )
-          ) : (
-            <div className="absolute inset-0 grid place-items-center text-sm text-fg-faint">No cameras</div>
-          )}
+          {renderPlayer()}
 
           {selected && (
             <div className="absolute top-3 left-3 flex items-center gap-2 rounded-md bg-black/35 px-2.5 py-1 backdrop-blur-sm">
@@ -426,5 +583,30 @@ function BarBtn({
     >
       {children}
     </button>
+  );
+}
+
+function MobileThumb({ cameraId, enabled }: { cameraId: string; enabled: boolean }) {
+  const [tick, setTick] = useState(0);
+  const [ok, setOk] = useState(true);
+  useEffect(() => {
+    if (!enabled) return;
+    const i = setInterval(() => setTick((t) => t + 1), 5000);
+    return () => clearInterval(i);
+  }, [enabled]);
+  if (!enabled || !ok) {
+    return (
+      <div className="absolute inset-0 grid place-items-center bg-ink-800">
+        <Cctv className="h-5 w-5 text-fg-faint" />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={`/api/cameras/${cameraId}/snapshot.jpg?t=${tick}`}
+      alt=""
+      className="h-full w-full object-cover"
+      onError={() => setOk(false)}
+    />
   );
 }
