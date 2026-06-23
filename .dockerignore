@@ -1,0 +1,16 @@
+# Keep the Docker build context small and reproducible — the image builds the
+# web bundle and Go binaries from source itself.
+.git
+bin
+dist
+data
+recordings
+deploy/data
+deploy/recordings
+web/node_modules
+web/dist
+internal/webassets/dist
+*.db
+*.db-wal
+*.db-shm
+.env

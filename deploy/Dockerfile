@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npm run build
 
 # 2) Build the Go binaries with the web bundle embedded.
-FROM golang:1.24-bookworm AS gobuild
+FROM golang:1.25-bookworm AS gobuild
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
