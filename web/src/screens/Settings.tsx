@@ -4,6 +4,7 @@ import { Plus, UserPlus, Shield, User as UserIcon } from "lucide-react";
 import { TopBar } from "../components/TopBar";
 import { UserModal } from "../components/UserModal";
 import { StorageManager } from "../components/StorageManager";
+import { HomeAssistant } from "../components/HomeAssistant";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUsers, type ManagedUser } from "../hooks/useUsers";
@@ -31,6 +32,7 @@ export function Settings() {
           {isAdmin && <SiteSection />}
           {isAdmin && <UsersSection currentUserId={user?.id} />}
           {isAdmin && <StorageManager />}
+          {isAdmin && <HomeAssistant />}
 
           <Section title="About">
             <Row label="Application" value="Aperture NVR" />

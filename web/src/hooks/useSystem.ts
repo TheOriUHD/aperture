@@ -23,6 +23,43 @@ export interface PurgeResult {
   freedBytes: number;
 }
 
+export interface HAStream {
+  cameraId: string;
+  name: string;
+  rtsp: string;
+}
+export interface HAConfig {
+  enabled: boolean;
+  broker: string;
+  username: string;
+  prefix: string;
+  hasPassword: boolean;
+  connected: boolean;
+  streams: HAStream[];
+}
+
+export function useHA() {
+  return useQuery({
+    queryKey: ["ha"],
+    queryFn: () => api.get<HAConfig>("/api/system/ha"),
+    refetchInterval: 8000,
+  });
+}
+
+export function useSetHA() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      enabled: boolean;
+      broker: string;
+      username: string;
+      password?: string;
+      prefix: string;
+    }) => api.put<HAConfig>("/api/system/ha", input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ha"] }),
+  });
+}
+
 export function usePurge() {
   const qc = useQueryClient();
   return useMutation({

@@ -10,6 +10,7 @@ import (
 
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/motion"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/store"
@@ -26,13 +27,14 @@ type Server struct {
 	sm     *stream.Manager
 	rec    *record.Recorder
 	det    *motion.Detector
+	ha     *ha.Publisher
 	log    *slog.Logger
 	router http.Handler
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, log: log}
 	s.router = s.routes()
 	return s
 }
@@ -92,6 +94,8 @@ func (s *Server) routes() http.Handler {
 			r.Put("/cameras/{id}/schedule", s.handleSetSchedule)
 			r.Put("/system/settings", s.handleSetSettings)
 			r.Post("/system/purge", s.handlePurge)
+			r.Get("/system/ha", s.handleGetHA)
+			r.Put("/system/ha", s.handleSetHA)
 		})
 	})
 

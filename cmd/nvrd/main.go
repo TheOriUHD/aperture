@@ -17,6 +17,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/api"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/motion"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/retention"
@@ -79,6 +80,16 @@ func main() {
 	det := motion.New(cfg, st, sm, log)
 	go det.Run(bgCtx)
 
+	// Home Assistant MQTT publisher (outbound auto-discovery + state).
+	siteName := func() string {
+		if n, err := st.GetSetting("site_name"); err == nil && n != "" {
+			return n
+		}
+		return "Home NVR"
+	}
+	haPub := ha.New(cfg, st, sm, siteName, log)
+	go haPub.Run(bgCtx)
+
 	// Keep a recent JPEG frame cached per camera for instant blurred placeholders.
 	go func() {
 		t := time.NewTicker(15 * time.Second)
@@ -101,7 +112,7 @@ func main() {
 		}
 	}()
 
-	srv := api.NewServer(cfg, st, am, sm, rec, det, log)
+	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,
