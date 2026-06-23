@@ -1,0 +1,31 @@
+# Build artifacts
+/bin/
+/dist/
+*.exe
+
+# Runtime data
+/data/
+/recordings/
+/deploy/data/
+/deploy/recordings/
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets / env
+.env
+*.local
+
+# Frontend
+/web/node_modules/
+/web/dist/
+/web/.vite/
+
+# Go
+/vendor/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

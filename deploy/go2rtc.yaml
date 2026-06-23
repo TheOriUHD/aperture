@@ -1,0 +1,21 @@
+# Base go2rtc configuration. Aperture (nvrd) manages individual camera streams
+# dynamically through the go2rtc API, so the `streams:` block is intentionally
+# left for go2rtc to populate at runtime.
+
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+webrtc:
+  listen: ":8555"
+  candidates:
+    # Let go2rtc discover a routable address via STUN (works for most setups).
+    - stun:8555
+    # For a pure-LAN deployment, also add your host's LAN IP so browsers on the
+    # same network can connect directly, e.g.:
+    # - 192.168.1.50:8555
+
+log:
+  level: info

@@ -1,0 +1,54 @@
+services:
+  nvrd:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: aperture/nvrd:latest
+    container_name: aperture-nvrd
+    restart: unless-stopped
+    depends_on:
+      - go2rtc
+      - mosquitto
+    ports:
+      - "8080:8080"            # web UI + API
+    volumes:
+      - ./data:/data          # SQLite, secrets, runtime config
+      - ./recordings:/recordings
+    environment:
+      APERTURE_HTTP_ADDR: ":8080"
+      APERTURE_DATA_DIR: "/data"
+      APERTURE_RECORDINGS_DIR: "/recordings"
+      APERTURE_GO2RTC_URL: "http://go2rtc:1984"
+      APERTURE_GO2RTC_RTSP: "rtsp://go2rtc:8554"
+      APERTURE_MQTT_URL: "tcp://mosquitto:1883"
+      # Public base URL used to build stream URLs handed to browsers / Home Assistant.
+      APERTURE_PUBLIC_URL: "http://localhost:8080"
+    networks: [aperture]
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: aperture-go2rtc
+    restart: unless-stopped
+    ports:
+      - "1984:1984"           # API / MSE / HLS / signaling
+      - "8554:8554"           # RTSP restream (consumed by recorders + Home Assistant)
+      - "8555:8555/tcp"       # WebRTC
+      - "8555:8555/udp"       # WebRTC
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml
+    networks: [aperture]
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: aperture-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./data/mosquitto:/mosquitto/data
+    networks: [aperture]
+
+networks:
+  aperture:
+    driver: bridge

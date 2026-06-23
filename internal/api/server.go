@@ -1,0 +1,80 @@
+package api
+
+import (
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/TheOriUHD/aperture/internal/auth"
+	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/store"
+	"github.com/TheOriUHD/aperture/internal/stream"
+)
+
+const sessionTTL = 7 * 24 * time.Hour
+
+// Server wires the HTTP API and the embedded web UI.
+type Server struct {
+	cfg    *config.Config
+	st     *store.Store
+	am     *auth.Manager
+	sm     *stream.Manager
+	log    *slog.Logger
+	router http.Handler
+}
+
+// NewServer builds a Server and its routes.
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, log: log}
+	s.router = s.routes()
+	return s
+}
+
+// ServeHTTP implements http.Handler.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.router.ServeHTTP(w, r) }
+
+func (s *Server) routes() http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+	r.Use(s.am.Context)
+
+	r.Route("/api", func(r chi.Router) {
+		// Public.
+		r.Get("/system/health", s.handleHealth)
+		r.Get("/system/version", s.handleVersion)
+		r.Get("/setup/status", s.handleSetupStatus)
+		r.Post("/setup", s.handleSetup)
+		r.Post("/auth/login", s.handleLogin)
+		r.Post("/auth/logout", s.handleLogout)
+
+		// Live stream WebSocket (authorized via short-lived stream token in query).
+		r.Get("/cameras/{id}/ws", s.handleStreamWS)
+
+		// Authenticated.
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireAuth)
+			r.Get("/auth/me", s.handleMe)
+			r.Get("/cameras", s.handleListCameras)
+			r.Get("/cameras/{id}", s.handleGetCamera)
+			r.Get("/cameras/{id}/stream-token", s.handleStreamToken)
+		})
+
+		// Admin-only.
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireAuth)
+			r.Use(auth.RequireAdmin)
+			r.Post("/cameras", s.handleCreateCamera)
+			r.Put("/cameras/{id}", s.handleUpdateCamera)
+			r.Delete("/cameras/{id}", s.handleDeleteCamera)
+		})
+	})
+
+	// Everything else: the SPA.
+	r.NotFound(s.spaHandler())
+	return r
+}
