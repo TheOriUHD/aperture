@@ -50,6 +50,7 @@ export function ZoomControl({
         <>
           <input
             type="range"
+            className="vrange"
             min={0}
             max={max}
             step={1}
@@ -60,9 +61,7 @@ export function ZoomControl({
             }}
             onPointerDown={arm}
             onPointerUp={arm}
-            style={
-              { width: 6, height: 120, WebkitAppearance: "slider-vertical", appearance: "slider-vertical" } as React.CSSProperties
-            }
+            style={{ width: 6, height: 120 }}
           />
           <button
             className="h-9 w-9 grid place-items-center text-fg-muted shrink-0"

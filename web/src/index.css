@@ -4,6 +4,11 @@
 @tailwind components;
 @tailwind utilities;
 
+input.vrange {
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+}
+
 @keyframes dotpulse {
   0%,
   80%,
