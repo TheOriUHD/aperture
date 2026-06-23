@@ -13,7 +13,6 @@ import {
   ChevronRight,
   ArrowUp,
   LayoutGrid,
-  ZoomIn,
   Calendar,
   Cctv,
 } from "lucide-react";
@@ -21,6 +20,7 @@ import { CameraRail } from "../components/CameraRail";
 import { VerticalTimeline, type TR, type TLEvent } from "../components/VerticalTimeline";
 import { EventStrip } from "../components/EventStrip";
 import { LiveVideo } from "../components/LiveVideo";
+import { ZoomControl } from "../components/ZoomControl";
 import { useCameras } from "../hooks/useCameras";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { api } from "../lib/api";
@@ -35,7 +35,8 @@ interface Segment extends Seg {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MONTH_MS = 30 * DAY_MS;
 // Largest window first so the zoom slider reads left = out, right (+) = in.
-const ZOOMS = [720, 360, 180, 60, 30, 10].map((m) => m * 60_000);
+const ZOOMS = [720, 360, 240, 180, 120, 90, 60, 45, 30, 20, 15, 10, 5].map((m) => m * 60_000);
+const ZOOM_DEFAULT = 8; // 30 min
 
 const startOfDay = (ms: number) => {
   const d = new Date(ms);
@@ -56,7 +57,7 @@ export function Playback() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [following, setFollowing] = useState(true);
   const [selectedState, setSelectedState] = useState(() => Date.now());
-  const [zoomIdx, setZoomIdx] = useState(4); // 30 min
+  const [zoomIdx, setZoomIdx] = useState(ZOOM_DEFAULT);
   const [paused, setPaused] = useState(false);
 
   const isDesktop = useMediaQuery("(min-width: 1024px)");
@@ -407,13 +408,12 @@ export function Playback() {
               onEventClick={seekToTime}
             />
           )}
-          <button
-            onClick={() => setZoomIdx((i) => (i + 1) % ZOOMS.length)}
-            className="absolute top-3 right-3 h-10 w-10 rounded-full bg-ink-700/90 text-fg-muted grid place-items-center backdrop-blur-sm"
-            aria-label="Zoom"
-          >
-            <ZoomIn className="h-4 w-4" />
-          </button>
+          <ZoomControl
+            value={zoomIdx}
+            max={ZOOMS.length - 1}
+            onChange={setZoomIdx}
+            className="absolute top-3 right-3"
+          />
           {!following && (
             <button
               onClick={goLive}

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface TR {
   start: number;
@@ -13,20 +13,27 @@ export interface TLEvent {
 }
 
 const MIN = 60_000;
+const NICE = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720].map((m) => m * MIN);
 
-function majorInterval(windowMs: number): number {
-  if (windowMs <= 10 * MIN) return MIN;
-  if (windowMs <= 30 * MIN) return 2 * MIN;
-  if (windowMs <= 60 * MIN) return 5 * MIN;
-  if (windowMs <= 180 * MIN) return 15 * MIN;
-  if (windowMs <= 360 * MIN) return 30 * MIN;
-  return 60 * MIN;
+// Smallest "nice" interval that keeps labels at least minPx apart for the given
+// pixel height, so labels are evenly spaced at every zoom.
+function pickInterval(windowMs: number, heightPx: number, minPx: number): number {
+  if (heightPx <= 0) return 5 * MIN;
+  for (const n of NICE) {
+    if ((n / windowMs) * heightPx >= minPx) return n;
+  }
+  return NICE[NICE.length - 1];
 }
 
 const fmtHM = (ms: number) =>
-  new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
 const fmtHMS = (ms: number) =>
-  new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  new Date(ms).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 
 /**
  * Vertical time scrubber: the playhead is fixed near the top and the timeline
@@ -61,6 +68,16 @@ export function VerticalTimeline({
   const selRef = useRef(selectedMs);
   selRef.current = selectedMs;
   const drag = useRef<{ anchorY: number; anchorSel: number; moved: boolean } | null>(null);
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setHeight(el.clientHeight));
+    ro.observe(el);
+    setHeight(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
 
   const topTime = selectedMs + playheadFrac * windowMs;
   const bottomTime = topTime - windowMs;
@@ -83,12 +100,12 @@ export function VerticalTimeline({
     return () => el.removeEventListener("wheel", onWheel);
   }, [windowMs, onScrubTo]);
 
-  const interval = majorInterval(windowMs);
+  const interval = pickInterval(windowMs, height, 46);
   const majors: number[] = [];
   for (let t = Math.ceil(bottomTime / interval) * interval; t <= topTime; t += interval) majors.push(t);
+  const minorStep = interval / 4;
   const minors: number[] = [];
-  if (windowMs <= 60 * MIN) {
-    const minorStep = interval / 5;
+  if ((minorStep / windowMs) * height >= 7) {
     for (let t = Math.ceil(bottomTime / minorStep) * minorStep; t <= topTime; t += minorStep) {
       if (Math.abs(t % interval) > 1) minors.push(t);
     }
@@ -146,7 +163,9 @@ export function VerticalTimeline({
       ))}
       {majors.map((t) => (
         <div key={`ma${t}`} className="absolute left-0 flex items-center gap-2" style={{ top: `${pct(t)}%` }}>
-          <span className="w-10 text-right text-[11px] font-mono text-fg-faint -translate-y-1/2">{fmtHM(t)}</span>
+          <span className="w-10 text-right text-[11px] font-mono text-fg-faint -translate-y-1/2 whitespace-nowrap">
+            {fmtHM(t)}
+          </span>
           <div className="h-px w-3 bg-line-strong -translate-y-1/2" />
         </div>
       ))}
