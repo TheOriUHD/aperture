@@ -33,17 +33,19 @@ func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cameraView(c))
 }
 
+// cameraReq uses pointers for optional fields so PUT updates only touch what the
+// client actually sent (a partial edit must not wipe unset values).
 type cameraReq struct {
-	Name              string  `json:"name"`
-	RTSPMainURL       string  `json:"rtspMainUrl"`
-	RTSPSubURL        string  `json:"rtspSubUrl"`
-	Enabled           *bool   `json:"enabled"`
-	RecordMode        string  `json:"recordMode"`
-	RetentionDays     int     `json:"retentionDays"`
-	StorageQuotaBytes int64   `json:"storageQuotaBytes"`
-	MotionThreshold   float64 `json:"motionThreshold"`
-	FPS               int     `json:"fps"`
-	SortOrder         int     `json:"sortOrder"`
+	Name              string   `json:"name"`
+	RTSPMainURL       string   `json:"rtspMainUrl"`
+	RTSPSubURL        *string  `json:"rtspSubUrl"`
+	Enabled           *bool    `json:"enabled"`
+	RecordMode        string   `json:"recordMode"`
+	RetentionDays     *int     `json:"retentionDays"`
+	StorageQuotaBytes *int64   `json:"storageQuotaBytes"`
+	MotionThreshold   *float64 `json:"motionThreshold"`
+	FPS               *int     `json:"fps"`
+	SortOrder         *int     `json:"sortOrder"`
 }
 
 func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
@@ -59,14 +61,14 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 	c := &store.Camera{
 		Name:              req.Name,
 		RTSPMainURL:       req.RTSPMainURL,
-		RTSPSubURL:        req.RTSPSubURL,
+		RTSPSubURL:        derefStr(req.RTSPSubURL, ""),
 		Enabled:           req.Enabled == nil || *req.Enabled,
 		RecordMode:        defaultStr(req.RecordMode, store.ModeContinuous),
-		RetentionDays:     req.RetentionDays,
-		StorageQuotaBytes: req.StorageQuotaBytes,
-		MotionThreshold:   req.MotionThreshold,
-		FPS:               req.FPS,
-		SortOrder:         req.SortOrder,
+		RetentionDays:     derefInt(req.RetentionDays, 7),
+		StorageQuotaBytes: derefInt64(req.StorageQuotaBytes, 0),
+		MotionThreshold:   derefFloat(req.MotionThreshold, 0.02),
+		FPS:               derefInt(req.FPS, 0),
+		SortOrder:         derefInt(req.SortOrder, 0),
 	}
 	if err := s.st.CreateCamera(c); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create camera")
@@ -93,18 +95,30 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	if req.RTSPMainURL != "" {
 		c.RTSPMainURL = req.RTSPMainURL
 	}
-	c.RTSPSubURL = req.RTSPSubURL
+	if req.RTSPSubURL != nil {
+		c.RTSPSubURL = *req.RTSPSubURL
+	}
 	if req.Enabled != nil {
 		c.Enabled = *req.Enabled
 	}
 	if req.RecordMode != "" {
 		c.RecordMode = req.RecordMode
 	}
-	c.RetentionDays = req.RetentionDays
-	c.StorageQuotaBytes = req.StorageQuotaBytes
-	c.MotionThreshold = req.MotionThreshold
-	c.FPS = req.FPS
-	c.SortOrder = req.SortOrder
+	if req.RetentionDays != nil {
+		c.RetentionDays = *req.RetentionDays
+	}
+	if req.StorageQuotaBytes != nil {
+		c.StorageQuotaBytes = *req.StorageQuotaBytes
+	}
+	if req.MotionThreshold != nil {
+		c.MotionThreshold = *req.MotionThreshold
+	}
+	if req.FPS != nil {
+		c.FPS = *req.FPS
+	}
+	if req.SortOrder != nil {
+		c.SortOrder = *req.SortOrder
+	}
 	if err := s.st.UpdateCamera(c); err != nil {
 		writeStoreError(w, err)
 		return
@@ -159,4 +173,32 @@ func defaultStr(v, def string) string {
 		return def
 	}
 	return v
+}
+
+func derefStr(p *string, def string) string {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
+func derefInt(p *int, def int) int {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
+func derefInt64(p *int64, def int64) int64 {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
+func derefFloat(p *float64, def float64) float64 {
+	if p == nil {
+		return def
+	}
+	return *p
 }

@@ -70,6 +70,12 @@ func (m *Manager) Sync(ctx context.Context, cameras []*store.Camera) error {
 		if c.RTSPSubURL != "" {
 			srcs = append(srcs, c.RTSPSubURL)
 		}
+		// Only (re)register when the sources actually changed. Re-PUTting an
+		// unchanged stream would drop and recreate the producer, blipping every
+		// active live viewer — so edits to name/mode/retention must not churn it.
+		if cur, ok := existing[name]; ok && sameSources(cur, srcs) {
+			continue
+		}
 		if err := m.putStream(ctx, name, srcs); err != nil {
 			return fmt.Errorf("register stream %s: %w", name, err)
 		}
@@ -140,6 +146,33 @@ func (m *Manager) streams(ctx context.Context) (map[string]json.RawMessage, erro
 		return nil, err
 	}
 	return out, nil
+}
+
+// sameSources reports whether a go2rtc stream definition already has exactly the
+// desired source URLs (order-independent), so we can skip a needless re-register.
+func sameSources(raw json.RawMessage, srcs []string) bool {
+	var def struct {
+		Producers []struct {
+			URL string `json:"url"`
+		} `json:"producers"`
+	}
+	if err := json.Unmarshal(raw, &def); err != nil {
+		return false
+	}
+	if len(def.Producers) != len(srcs) {
+		return false
+	}
+	have := make(map[string]int, len(def.Producers))
+	for _, p := range def.Producers {
+		have[p.URL]++
+	}
+	for _, s := range srcs {
+		if have[s] == 0 {
+			return false
+		}
+		have[s]--
+	}
+	return true
 }
 
 // Online reports whether go2rtc currently has a producer for the camera (a
