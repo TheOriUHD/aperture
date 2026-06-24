@@ -33,6 +33,8 @@ func (s *Server) userPayload(u *store.User) map[string]any {
 	}
 	m["mustChangePassword"] = u.MustChangePassword
 	m["twoFactor"] = u.TOTPEnabled
+	n, _ := s.st.CountWebAuthnCredentials(u.ID)
+	m["passkeys"] = n
 	return m
 }
 

@@ -24,6 +24,7 @@ export interface User {
   preferences?: Partial<Preferences>;
   mustChangePassword?: boolean;
   twoFactor?: boolean;
+  passkeys?: number;
 }
 
 export type RecordMode = "never" | "continuous" | "motion" | "scheduled";

@@ -1,12 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { KeyRound } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
+import { passkeysSupported, passkeyError } from "../lib/passkey";
 import { AuthLayout } from "./AuthLayout";
 
 export function Login() {
   const { t } = useTranslation();
-  const { login, login2fa } = useAuth();
+  const { login, login2fa, loginPasskey } = useAuth();
+  const canPasskey = passkeysSupported();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [tfToken, setTfToken] = useState<string | null>(null);
@@ -35,6 +38,18 @@ export function Login() {
       if (r.twoFactor) setTfToken(r.token ?? "");
     } catch {
       setError(t("auth.invalid", "Invalid email or password."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onPasskey() {
+    setError("");
+    setBusy(true);
+    try {
+      await loginPasskey();
+    } catch (e) {
+      setError(passkeyError(e));
     } finally {
       setBusy(false);
     }
@@ -127,6 +142,13 @@ export function Login() {
           {busy ? t("auth.signingIn", "Signing in…") : t("auth.signIn", "Sign in")}
         </button>
       </form>
+
+      {canPasskey && (
+        <button type="button" className="btn-secondary w-full justify-center mt-3" disabled={busy} onClick={onPasskey}>
+          <KeyRound className="h-4 w-4" />
+          {t("auth.signInPasskey", "Sign in with a passkey")}
+        </button>
+      )}
 
       {sso.enabled && (
         <>

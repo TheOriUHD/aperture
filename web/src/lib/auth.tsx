@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
+import { loginPasskey as passkeyLoginRequest } from "./passkey";
 import type { User } from "./types";
 
 interface AuthState {
@@ -8,6 +9,7 @@ interface AuthState {
   needsSetup: boolean;
   login: (email: string, password: string) => Promise<{ twoFactor: boolean; token?: string }>;
   login2fa: (token: string, code: string) => Promise<void>;
+  loginPasskey: () => Promise<void>;
   setup: (email: string, name: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -59,6 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     async login2fa(token, code) {
       const u = await api.post<User>("/api/auth/login/2fa", { token, code });
+      setUser(u);
+      setNeedsSetup(false);
+    },
+    async loginPasskey() {
+      const u = await passkeyLoginRequest();
       setUser(u);
       setNeedsSetup(false);
     },

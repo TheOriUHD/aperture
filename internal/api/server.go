@@ -37,13 +37,14 @@ type Server struct {
 	audit  *audit.Logger
 	exp    *export.Manager
 	notify *notify.Engine
+	waSess *waSessions
 	log    *slog.Logger
 	router http.Handler
 }
 
 // NewServer builds a Server and its routes.
 func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, log: log}
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, waSess: newWASessions(), log: log}
 	s.router = s.routes()
 	return s
 }
@@ -85,6 +86,8 @@ func (s *Server) routes() http.Handler {
 		r.Post("/setup", s.handleSetup)
 		r.Post("/auth/login", s.handleLogin)
 		r.Post("/auth/login/2fa", s.handleLogin2FA)
+		r.Post("/auth/passkey/login/begin", s.handlePasskeyLoginBegin)
+		r.Post("/auth/passkey/login/finish", s.handlePasskeyLoginFinish)
 		r.Post("/auth/logout", s.handleLogout)
 		r.Get("/auth/oidc/status", s.handleOIDCStatus)
 		r.Get("/auth/oidc/login", s.handleOIDCLogin)
@@ -102,6 +105,10 @@ func (s *Server) routes() http.Handler {
 			r.Post("/auth/2fa/setup", s.handle2FASetup)
 			r.Post("/auth/2fa/enable", s.handle2FAEnable)
 			r.Post("/auth/2fa/disable", s.handle2FADisable)
+			r.Post("/auth/passkey/register/begin", s.handlePasskeyRegisterBegin)
+			r.Post("/auth/passkey/register/finish", s.handlePasskeyRegisterFinish)
+			r.Get("/auth/passkeys", s.handleListPasskeys)
+			r.Delete("/auth/passkeys/{id}", s.handleDeletePasskey)
 			r.Get("/users/me/preferences", s.handleGetPrefs)
 			r.Put("/users/me/preferences", s.handleSetPrefs)
 			r.Get("/cameras", s.handleListCameras)

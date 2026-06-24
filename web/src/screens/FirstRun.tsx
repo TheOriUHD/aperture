@@ -1,9 +1,8 @@
 import { useState, type FormEvent } from "react";
-import { ShieldCheck } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
 import { AuthLayout } from "./AuthLayout";
-import { TwoFactorSetup } from "../components/TwoFactorSetup";
+import { EnrollChooser } from "../components/EnrollChooser";
 
 // FirstRun gates a freshly-created account: force a new password, then offer
 // (but don't require) two-factor enrollment before entering the app.
@@ -14,7 +13,6 @@ export function FirstRun() {
   const [pw2, setPw2] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const [showSetup, setShowSetup] = useState(false);
 
   async function changePw(e: FormEvent) {
     e.preventDefault();
@@ -73,27 +71,8 @@ export function FirstRun() {
   }
 
   return (
-    <AuthLayout title="Secure your account" subtitle="Add an authenticator app for two-factor sign-in">
-      {showSetup ? (
-        <TwoFactorSetup onDone={() => void refresh()} />
-      ) : (
-        <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg bg-ink-850 p-3.5">
-            <ShieldCheck className="h-5 w-5 text-brand shrink-0 mt-0.5" />
-            <p className="text-sm text-fg-muted leading-relaxed">
-              Two-factor authentication asks for a one-time code from your phone at sign-in, so a
-              stolen password isn't enough. Recommended — but you can always set it up later in
-              Settings.
-            </p>
-          </div>
-          <button className="btn-primary w-full" onClick={() => setShowSetup(true)}>
-            Set up authenticator
-          </button>
-          <button className="btn-ghost w-full" onClick={() => void refresh()}>
-            Skip for now
-          </button>
-        </div>
-      )}
+    <AuthLayout title="Welcome to Aperture" subtitle="A couple of optional steps to keep your account safe">
+      <EnrollChooser onFinish={() => void refresh()} />
     </AuthLayout>
   );
 }

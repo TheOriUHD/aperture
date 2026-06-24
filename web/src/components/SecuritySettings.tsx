@@ -1,12 +1,48 @@
 import { useState, type FormEvent } from "react";
-import { ShieldCheck, ShieldOff, KeyRound } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ShieldCheck, ShieldOff, KeyRound, Fingerprint, Trash2, Plus } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { TwoFactorSetup } from "./TwoFactorSetup";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { registerPasskey, passkeysSupported, passkeyError } from "../lib/passkey";
+
+interface PasskeyRow {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastUsed: number;
+}
 
 export function SecuritySettings() {
   const { user, refresh } = useAuth();
+  const passkeys = useQuery({
+    queryKey: ["passkeys"],
+    queryFn: () => api.get<PasskeyRow[]>("/api/auth/passkeys"),
+  });
+  const [pkBusy, setPkBusy] = useState(false);
+  const [pkErr, setPkErr] = useState("");
+  const canPasskey = passkeysSupported();
+
+  async function addPasskey() {
+    setPkErr("");
+    setPkBusy(true);
+    try {
+      await registerPasskey("Passkey");
+      await passkeys.refetch();
+      await refresh();
+    } catch (e) {
+      setPkErr(passkeyError(e));
+    } finally {
+      setPkBusy(false);
+    }
+  }
+
+  async function removePasskey(id: string) {
+    await api.del(`/api/auth/passkeys/${id}`);
+    await passkeys.refetch();
+    await refresh();
+  }
   const [setup, setSetup] = useState(false);
   const [disabling, setDisabling] = useState(false);
   const [disableVal, setDisableVal] = useState("");
@@ -93,6 +129,56 @@ export function SecuritySettings() {
           <button className="btn-subtle" onClick={() => setSetup(true)}>
             Set up
           </button>
+        )}
+      </div>
+
+      <div className="rounded-lg bg-ink-850 p-3.5 mb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Fingerprint className="h-5 w-5 text-brand" />
+            <div>
+              <p className="text-sm text-fg">Passkeys</p>
+              <p className="text-xs text-fg-faint">
+                Sign in with your fingerprint, face, or device PIN — no password.
+              </p>
+            </div>
+          </div>
+          <button className="btn-subtle" disabled={!canPasskey || pkBusy} onClick={addPasskey}>
+            <Plus className="h-4 w-4" />
+            {pkBusy ? "Waiting…" : "Add"}
+          </button>
+        </div>
+        {!canPasskey && (
+          <p className="text-xs text-amber mt-2">
+            Passkeys need HTTPS or localhost — not available in this browser context.
+          </p>
+        )}
+        {pkErr && <p className="text-xs text-rec mt-2">{pkErr}</p>}
+        {(passkeys.data?.length ?? 0) > 0 && (
+          <div className="mt-3 space-y-1.5">
+            {passkeys.data!.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center gap-3 rounded-md bg-ink-800 px-3 py-2"
+              >
+                <KeyRound className="h-4 w-4 text-fg-muted shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-fg truncate">{p.name || "Passkey"}</p>
+                  <p className="text-xs text-fg-faint">
+                    Added {new Date(p.createdAt * 1000).toLocaleDateString()}
+                    {p.lastUsed > 0 && ` · last used ${new Date(p.lastUsed * 1000).toLocaleDateString()}`}
+                  </p>
+                </div>
+                <button
+                  className="text-fg-faint hover:text-rec p-1"
+                  title="Remove passkey"
+                  onClick={() => removePasskey(p.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
