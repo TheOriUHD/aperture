@@ -5,15 +5,14 @@
 package motion
 
 import (
-	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -178,7 +177,7 @@ func (d *Detector) Reconcile() {
 		}
 	}
 	for id, cam := range want {
-		sig := strconv.FormatFloat(cam.MotionThreshold, 'f', 4, 64)
+		sig := strconv.FormatFloat(cam.MotionThreshold, 'f', 4, 64) + "|" + cam.MotionZonesJSON
 		if _, ok := d.active[id]; ok {
 			if d.sigs[id] == sig {
 				continue
@@ -197,23 +196,30 @@ func (d *Detector) Reconcile() {
 }
 
 // detectCamera keeps a motion ffmpeg alive and parses its scene-score output.
+// detectCamera streams a tiny grayscale copy of the camera and computes
+// region-aware motion in Go: consecutive frames are diffed cell-by-cell,
+// ignore-masked cells are skipped, and the fraction of changed cells is compared
+// to the camera's sensitivity. This replaces the whole-frame scene-change scalar
+// so that motion zones (and, later, object gating) have spatial information.
 func (d *Detector) detectCamera(ctx context.Context, cam store.Camera) {
 	threshold := cam.MotionThreshold
 	if threshold <= 0 {
 		threshold = 0.02
 	}
+	mask := parseIgnoreMask(cam.MotionZonesJSON)
+	active := gridW*gridH - countTrue(mask)
+	if active <= 0 {
+		active = 1
+	}
+	const frameSize = gridW * gridH
 	backoff := time.Second
 	for ctx.Err() == nil {
-		vf := fmt.Sprintf("fps=4,scale=480:-2,select='gt(scene,%s)',metadata=print",
-			strconv.FormatFloat(threshold, 'f', 4, 64))
-		// metadata=print (no file=) writes via ffmpeg's logger to stderr, which
-		// flushes per line in real time — unlike file=- which uses buffered avio
-		// and only flushes on exit. -nostats keeps the progress line out.
+		vf := fmt.Sprintf("fps=5,scale=%d:%d,format=gray", gridW, gridH)
 		cmd := exec.CommandContext(ctx, "ffmpeg",
-			"-hide_banner", "-loglevel", "info", "-nostats", "-nostdin",
+			"-hide_banner", "-loglevel", "error", "-nostdin",
 			"-rtsp_transport", "tcp", "-i", d.sm.RTSPURL(cam.ID),
-			"-an", "-vf", vf, "-f", "null", "-")
-		stderr, err := cmd.StderrPipe()
+			"-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "gray", "-")
+		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			return
 		}
@@ -221,13 +227,20 @@ func (d *Detector) detectCamera(ctx context.Context, cam store.Camera) {
 			d.log.Warn("motion ffmpeg start failed", "camera", cam.ID, "err", err)
 		} else {
 			start := time.Now()
-			sc := bufio.NewScanner(stderr)
-			for sc.Scan() {
-				line := sc.Text()
-				if i := strings.Index(line, "lavfi.scene_score="); i >= 0 {
-					score, _ := strconv.ParseFloat(strings.TrimSpace(line[i+len("lavfi.scene_score="):]), 64)
-					d.onTick(cam.ID, score)
+			prev := make([]byte, frameSize)
+			cur := make([]byte, frameSize)
+			havePrev := false
+			for {
+				if _, err := io.ReadFull(stdout, cur); err != nil {
+					break
 				}
+				if havePrev {
+					if frac := diffFrac(prev, cur, mask, active); frac > threshold {
+						d.onTick(cam.ID, frac)
+					}
+				}
+				prev, cur = cur, prev
+				havePrev = true
 			}
 			_ = cmd.Wait()
 			if ctx.Err() != nil {

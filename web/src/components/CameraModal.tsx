@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Trash2, CalendarClock } from "lucide-react";
+import { Trash2, CalendarClock, Brush } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Switch } from "./ui/Switch";
 import { ScheduleModal } from "./ScheduleModal";
+import { ZoneEditor } from "./ZoneEditor";
 import { useCreateCamera, useUpdateCamera, useDeleteCamera } from "../hooks/useCameras";
 import type { Camera, RecordMode } from "../lib/types";
 
@@ -46,6 +47,7 @@ export function CameraModal({
   const [error, setError] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [zonesOpen, setZonesOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -277,6 +279,14 @@ export function CameraModal({
               clip; cooldown coalesces a flurry into one event; “ignore blips” drops events shorter
               than the set seconds (0 = off).
             </p>
+            {isEdit ? (
+              <button type="button" className="btn-subtle w-full mt-3" onClick={() => setZonesOpen(true)}>
+                <Brush className="h-4 w-4" />
+                Edit motion zones
+              </button>
+            ) : (
+              <p className="text-xs text-fg-faint mt-3">Save the camera first to paint motion zones.</p>
+            )}
           </div>
 
           {isEdit && (
@@ -310,6 +320,10 @@ export function CameraModal({
           cameraName={camera.name}
           onClose={() => setScheduleOpen(false)}
         />
+      )}
+
+      {camera && zonesOpen && (
+        <ZoneEditor cameraId={camera.id} cameraName={camera.name} onClose={() => setZonesOpen(false)} />
       )}
     </>
   );
