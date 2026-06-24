@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { NavRail, BottomNav } from "./NavRail";
+import { DownloadsOverlay } from "./DownloadsOverlay";
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -9,6 +10,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">{children}</div>
         <BottomNav />
       </main>
+      <DownloadsOverlay />
     </div>
   );
 }

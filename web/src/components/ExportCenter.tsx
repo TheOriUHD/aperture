@@ -12,6 +12,7 @@ import {
   type ExportJob,
 } from "../hooks/useExports";
 import { fmtTime, fmtDuration, fmtRelative, formatBytes } from "../lib/format";
+import { useDownloads } from "../lib/downloads";
 import type { Camera } from "../lib/types";
 
 const PRESETS = [
@@ -54,6 +55,7 @@ export function ExportCenter({
   const create = useCreateExport();
   const del = useDeleteExport();
   const delShare = useDeleteShare();
+  const { start: startDownload } = useDownloads();
 
   // Seed the range only when the modal opens — not on every live tick of
   // defaultTo, which would otherwise reset the inputs the user is editing.
@@ -175,13 +177,20 @@ export function ExportCenter({
                     </div>
                     {j.status === "done" && (
                       <>
-                        <a
+                        <button
                           className="btn-icon h-7 w-7"
-                          href={`/api/export/${j.id}/download`}
+                          onClick={() => {
+                            onClose();
+                            startDownload(
+                              `/api/export/${j.id}/download`,
+                              `${j.cameraName}_clip.mp4`,
+                              j.cameraName,
+                            );
+                          }}
                           aria-label="Download"
                         >
                           <Download className="h-3.5 w-3.5" />
-                        </a>
+                        </button>
                         <button
                           className="btn-icon h-7 w-7"
                           onClick={() => setShareJob(j)}
