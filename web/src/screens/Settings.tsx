@@ -8,6 +8,7 @@ import { StorageManager } from "../components/StorageManager";
 import { HomeAssistant } from "../components/HomeAssistant";
 import { OidcSettings } from "../components/OidcSettings";
 import { PreferencesSettings } from "../components/PreferencesSettings";
+import { SecuritySettings } from "../components/SecuritySettings";
 import { NotificationsSettings } from "../components/NotificationsSettings";
 import { AuditLog } from "../components/AuditLog";
 import { api } from "../lib/api";
@@ -35,6 +36,7 @@ export function Settings() {
             <Row label={t("settings.role", "Role")} value={user?.role || "—"} className="capitalize" />
           </Section>
 
+          <SecuritySettings />
           <PreferencesSettings />
           <NotificationsSettings />
 

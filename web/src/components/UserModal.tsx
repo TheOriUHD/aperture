@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { CredentialsCard } from "./CredentialsCard";
 import { Switch } from "./ui/Switch";
 import { useCameras } from "../hooks/useCameras";
 import { useCreateUser, useUpdateUser, useDeleteUser, type ManagedUser } from "../hooks/useUsers";
@@ -32,11 +33,13 @@ export function UserModal({
   const [camIds, setCamIds] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [card, setCard] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setError("");
     setConfirmDel(false);
+    setCard(null);
     setPassword("");
     if (user) {
       setEmail(user.email);
@@ -61,8 +64,8 @@ export function UserModal({
   }
 
   async function save() {
-    if (!isEdit && (!email.trim() || password.length < 8)) {
-      setError("Email and a password of at least 8 characters are required.");
+    if (!isEdit && !email.trim()) {
+      setError("Email is required.");
       return;
     }
     if (isEdit && password && password.length < 8) {
@@ -79,16 +82,22 @@ export function UserModal({
           password: password || undefined,
           cameraIds: role === "viewer" ? camIds : [],
         });
+        onClose();
       } else {
-        await create.mutateAsync({
+        // No password sent → the server generates a temporary one and returns
+        // it once so we can show the credentials card.
+        const created = (await create.mutateAsync({
           email: email.trim(),
           name,
           role,
-          password,
           cameraIds: role === "viewer" ? camIds : [],
-        });
+        })) as ManagedUser & { tempPassword?: string };
+        if (created.tempPassword) {
+          setCard({ email: created.email, password: created.tempPassword });
+        } else {
+          onClose();
+        }
       }
-      onClose();
     } catch {
       setError("Could not save the user.");
     }
@@ -97,7 +106,7 @@ export function UserModal({
   return (
     <>
       <Modal
-        open={open}
+        open={open && !card}
         onClose={onClose}
         title={isEdit ? "Edit user" : "Add user"}
         footer={
@@ -140,24 +149,32 @@ export function UserModal({
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className={isEdit ? "" : "col-span-2"}>
               <label className="label">Role</label>
               <select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
                 <option value="viewer">Viewer</option>
                 <option value="admin">Administrator</option>
               </select>
             </div>
-            <div>
-              <label className="label">{isEdit ? "New password" : "Password"}</label>
-              <input
-                className="input"
-                type="password"
-                placeholder={isEdit ? "Leave blank to keep" : ""}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
+            {isEdit && (
+              <div>
+                <label className="label">New password</label>
+                <input
+                  className="input"
+                  type="password"
+                  placeholder="Leave blank to keep"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            )}
           </div>
+          {!isEdit && (
+            <p className="text-xs text-fg-faint -mt-1">
+              A temporary password is generated and shown on a printable card. The user chooses their
+              own password the first time they sign in, and can add an authenticator app.
+            </p>
+          )}
 
           {role === "viewer" && (
             <div>
@@ -217,6 +234,16 @@ export function UserModal({
           }
         }}
         onCancel={() => setConfirmDel(false)}
+      />
+
+      <CredentialsCard
+        open={!!card}
+        email={card?.email ?? ""}
+        password={card?.password ?? ""}
+        onClose={() => {
+          setCard(null);
+          onClose();
+        }}
       />
     </>
   );

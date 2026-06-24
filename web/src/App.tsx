@@ -5,6 +5,7 @@ import { usePrefs } from "./lib/prefs";
 import { AppShell } from "./components/AppShell";
 import { Login } from "./screens/Login";
 import { Setup } from "./screens/Setup";
+import { FirstRun } from "./screens/FirstRun";
 import { Dashboard } from "./screens/Dashboard";
 import { Cameras } from "./screens/Cameras";
 import { Alarms } from "./screens/Alarms";
@@ -30,6 +31,7 @@ export default function App() {
 
   if (needsSetup) return <Setup />;
   if (!user) return <Login />;
+  if (user.mustChangePassword) return <FirstRun />;
 
   return (
     <AppShell>

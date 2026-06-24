@@ -6,7 +6,8 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   needsSetup: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<{ twoFactor: boolean; token?: string }>;
+  login2fa: (token: string, code: string) => Promise<void>;
   setup: (email: string, name: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -47,7 +48,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     needsSetup,
     async login(email, password) {
-      const u = await api.post<User>("/api/auth/login", { email, password });
+      const r = await api.post<User & { twoFactorRequired?: boolean; token?: string }>(
+        "/api/auth/login",
+        { email, password },
+      );
+      if (r.twoFactorRequired) return { twoFactor: true, token: r.token };
+      setUser(r);
+      setNeedsSetup(false);
+      return { twoFactor: false };
+    },
+    async login2fa(token, code) {
+      const u = await api.post<User>("/api/auth/login/2fa", { token, code });
       setUser(u);
       setNeedsSetup(false);
     },

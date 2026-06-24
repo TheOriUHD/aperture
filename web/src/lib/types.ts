@@ -22,6 +22,8 @@ export interface User {
   name: string;
   role: Role;
   preferences?: Partial<Preferences>;
+  mustChangePassword?: boolean;
+  twoFactor?: boolean;
 }
 
 export type RecordMode = "never" | "continuous" | "motion" | "scheduled";
