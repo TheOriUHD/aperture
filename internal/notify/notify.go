@@ -143,7 +143,7 @@ func (e *Engine) userAllowed(userID, cameraID string) bool {
 }
 
 func (e *Engine) deepLink(camID string, ts int64) string {
-	return fmt.Sprintf("%s/playback?camera=%s&ts=%d", strings.TrimRight(e.cfg.PublicURL, "/"),
+	return fmt.Sprintf("%s/playback?camera=%s&t=%d", strings.TrimRight(e.cfg.PublicURL, "/"),
 		url.QueryEscape(camID), ts)
 }
 

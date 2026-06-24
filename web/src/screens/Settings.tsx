@@ -7,6 +7,7 @@ import { StorageManager } from "../components/StorageManager";
 import { HomeAssistant } from "../components/HomeAssistant";
 import { OidcSettings } from "../components/OidcSettings";
 import { PreferencesSettings } from "../components/PreferencesSettings";
+import { NotificationsSettings } from "../components/NotificationsSettings";
 import { AuditLog } from "../components/AuditLog";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -33,6 +34,7 @@ export function Settings() {
           </Section>
 
           <PreferencesSettings />
+          <NotificationsSettings />
 
           {isAdmin && <SiteSection />}
           {isAdmin && <UsersSection currentUserId={user?.id} />}
