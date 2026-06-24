@@ -25,25 +25,36 @@ func (s *Server) webFS() fs.FS {
 }
 
 // spaHandler serves static assets, falling back to index.html so client-side
-// routing works on deep links.
+// routing works on deep links. Content-hashed assets are cached immutably; the
+// HTML shell is never cached, so a redeploy always reaches the browser (the
+// embedded files share a zero modtime, which would otherwise yield stale 304s).
 func (s *Server) spaHandler() http.HandlerFunc {
 	fsys := s.webFS()
 	fileServer := http.FileServerFS(fsys)
 	return func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
-		if p == "" {
-			http.ServeFileFS(w, r, fsys, "index.html")
-			return
-		}
-		if f, err := fsys.Open(p); err == nil {
-			info, statErr := f.Stat()
-			f.Close()
-			if statErr == nil && !info.IsDir() {
-				fileServer.ServeHTTP(w, r)
-				return
+		if p != "" && p != "index.html" {
+			if f, err := fsys.Open(p); err == nil {
+				info, statErr := f.Stat()
+				f.Close()
+				if statErr == nil && !info.IsDir() {
+					if strings.HasPrefix(p, "assets/") {
+						w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					}
+					fileServer.ServeHTTP(w, r)
+					return
+				}
 			}
 		}
-		// Unknown path: hand it to the SPA router.
-		http.ServeFileFS(w, r, fsys, "index.html")
+		// index.html and unknown SPA routes: always serve fresh.
+		b, err := fs.ReadFile(fsys, "index.html")
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		_, _ = w.Write(b)
 	}
 }
