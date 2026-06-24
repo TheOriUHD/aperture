@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -48,11 +49,30 @@ func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream
 // ServeHTTP implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.router.ServeHTTP(w, r) }
 
+// logRequests logs API mutations and any error responses, so we can see exactly
+// what reaches the server.
+func (s *Server) logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		start := time.Now()
+		next.ServeHTTP(ww, r)
+		if r.Method != http.MethodGet || ww.Status() >= 400 {
+			s.log.Info("api", "method", r.Method, "path", r.URL.Path,
+				"status", ww.Status(), "ms", time.Since(start).Milliseconds())
+		}
+	})
+}
+
 func (s *Server) routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(s.logRequests)
 	r.Use(s.am.Context)
 
 	r.Route("/api", func(r chi.Router) {

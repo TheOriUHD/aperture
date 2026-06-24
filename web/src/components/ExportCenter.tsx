@@ -153,12 +153,21 @@ export function ExportCenter({
             {durMs > 4 * 3600_000 && (
               <p className="text-xs text-rec">Range too long — 4 hours max per export.</p>
             )}
+            {create.isPending && <p className="text-xs text-fg-faint">Starting export…</p>}
+            {create.isError && (
+              <p className="text-xs text-rec">Couldn’t start the export — please try again.</p>
+            )}
+            {create.isSuccess && !create.isPending && (
+              <p className="text-xs text-online">Export started — see “Recent clips” below.</p>
+            )}
           </div>
 
-          {/* jobs list */}
-          {jobs && jobs.length > 0 && (
-            <div className="border-t border-line pt-3">
-              <p className="text-xs font-medium text-fg-muted mb-2">Recent clips</p>
+          {/* jobs list — always shown so there's a stable place clips appear */}
+          <div className="border-t border-line pt-3">
+            <p className="text-xs font-medium text-fg-muted mb-2">Recent clips</p>
+            {!jobs || jobs.length === 0 ? (
+              <p className="text-xs text-fg-faint">Your exported clips will appear here.</p>
+            ) : (
               <div className="space-y-1.5 max-h-64 overflow-auto">
                 {jobs.map((j) => (
                   <div
@@ -210,8 +219,8 @@ export function ExportCenter({
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* shared links */}
           {shares && shares.filter((sh) => !sh.revoked).length > 0 && (
