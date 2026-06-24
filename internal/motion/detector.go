@@ -52,9 +52,13 @@ type Detector struct {
 	mu      sync.Mutex
 	active  map[string]context.CancelFunc
 
-	evMu   sync.Mutex
-	events map[string]*activeEvent // cameraID -> ongoing event
+	evMu    sync.Mutex
+	events  map[string]*activeEvent // cameraID -> ongoing event
+	onEvent func(*store.Event)      // notified when a new event opens
 }
+
+// SetOnEvent registers a callback invoked (async) when a new event starts.
+func (d *Detector) SetOnEvent(fn func(*store.Event)) { d.onEvent = fn }
 
 // New constructs a Detector.
 func New(cfg *config.Config, st *store.Store, sm snapshotter, log *slog.Logger) *Detector {
@@ -188,13 +192,15 @@ func (d *Detector) onTick(cameraID string, score float64) {
 		ev = &activeEvent{id: store.NewID(), start: now - prerollMs, lastTick: now, maxScore: score}
 		d.events[cameraID] = ev
 		d.evMu.Unlock()
-		if err := d.st.InsertEvent(&store.Event{
-			ID: ev.id, CameraID: cameraID, Type: "motion", StartTS: ev.start, Score: score,
-		}); err != nil {
+		e := &store.Event{ID: ev.id, CameraID: cameraID, Type: "motion", StartTS: ev.start, Score: score}
+		if err := d.st.InsertEvent(e); err != nil {
 			d.log.Error("motion: insert event", "err", err)
 			return
 		}
 		go d.captureThumb(cameraID, ev.id)
+		if d.onEvent != nil {
+			go d.onEvent(e)
+		}
 		return
 	}
 	ev.lastTick = now

@@ -15,6 +15,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/motion"
+	"github.com/TheOriUHD/aperture/internal/notify"
 	"github.com/TheOriUHD/aperture/internal/oidc"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/store"
@@ -35,13 +36,14 @@ type Server struct {
 	oidc   *oidc.Authenticator
 	audit  *audit.Logger
 	exp    *export.Manager
+	notify *notify.Engine
 	log    *slog.Logger
 	router http.Handler
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, log: log}
 	s.router = s.routes()
 	return s
 }
@@ -86,6 +88,7 @@ func (s *Server) routes() http.Handler {
 		r.Get("/auth/oidc/status", s.handleOIDCStatus)
 		r.Get("/auth/oidc/login", s.handleOIDCLogin)
 		r.Get("/auth/oidc/callback", s.handleOIDCCallback)
+		r.Get("/public/event-thumb", s.handlePublicThumb)
 
 		// Live stream WebSocket (authorized via short-lived stream token in query).
 		r.Get("/cameras/{id}/ws", s.handleStreamWS)
@@ -114,6 +117,19 @@ func (s *Server) routes() http.Handler {
 			r.Post("/shares", s.handleCreateShare)
 			r.Get("/shares", s.handleListShares)
 			r.Delete("/shares/{id}", s.handleDeleteShare)
+			r.Get("/notify/channels", s.handleListChannels)
+			r.Post("/notify/channels", s.handleCreateChannel)
+			r.Put("/notify/channels/{id}", s.handleUpdateChannel)
+			r.Delete("/notify/channels/{id}", s.handleDeleteChannel)
+			r.Post("/notify/channels/{id}/test", s.handleTestChannel)
+			r.Get("/notify/rules", s.handleListRules)
+			r.Post("/notify/rules", s.handleCreateRule)
+			r.Put("/notify/rules/{id}", s.handleUpdateRule)
+			r.Delete("/notify/rules/{id}", s.handleDeleteRule)
+			r.Post("/notify/rules/{id}/test", s.handleTestRule)
+			r.Get("/push/key", s.handlePushKey)
+			r.Post("/push/subscribe", s.handlePushSubscribe)
+			r.Post("/push/unsubscribe", s.handlePushUnsubscribe)
 			r.Get("/cameras/{id}/schedule", s.handleGetSchedule)
 			r.Get("/system/storage", s.handleStorage)
 			r.Get("/system/settings", s.handleGetSettings)

@@ -22,6 +22,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/motion"
+	"github.com/TheOriUHD/aperture/internal/notify"
 	"github.com/TheOriUHD/aperture/internal/oidc"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/retention"
@@ -120,7 +121,9 @@ func main() {
 	auditLog := audit.New(st)
 	exporter := export.New(st, filepath.Join(cfg.DataDir, "exports"), log)
 	exporter.Start(bgCtx)
-	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, exporter, log)
+	notifyEng := notify.New(cfg, st, log)
+	det.SetOnEvent(notifyEng.OnEvent)
+	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, exporter, notifyEng, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,
