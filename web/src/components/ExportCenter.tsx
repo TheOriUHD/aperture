@@ -55,13 +55,15 @@ export function ExportCenter({
   const del = useDeleteExport();
   const delShare = useDeleteShare();
 
+  // Seed the range only when the modal opens — not on every live tick of
+  // defaultTo, which would otherwise reset the inputs the user is editing.
   useEffect(() => {
-    if (open) {
-      setCameraId(camera?.id ?? cameras[0]?.id ?? "");
-      setTo(defaultTo);
-      setFrom(defaultTo - 60_000);
-    }
-  }, [open, camera?.id, defaultTo, cameras]);
+    if (!open) return;
+    setCameraId(camera?.id ?? cameras[0]?.id ?? "");
+    setTo(defaultTo);
+    setFrom(defaultTo - 60_000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const durMs = to - from;
   const invalid = !cameraId || durMs <= 0 || durMs > 4 * 3600_000;
