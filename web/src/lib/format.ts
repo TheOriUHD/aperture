@@ -4,14 +4,20 @@
 // (epoch ms, bytes); conversion happens only at this display boundary.
 
 let clock24 = true;
+let locale: string | undefined; // undefined = browser default
 
 /** Set by the preferences layer; flips 24h vs 12h clock across the app. */
 export function setClock24(v: boolean): void {
   clock24 = v;
 }
 
+/** Set by the i18n layer so dates/numbers format in the chosen language. */
+export function setLocale(l: string | undefined): void {
+  locale = l || undefined;
+}
+
 export function fmtTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, {
+  return new Date(ms).toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: !clock24,
@@ -19,7 +25,7 @@ export function fmtTime(ms: number): string {
 }
 
 export function fmtTimeSec(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, {
+  return new Date(ms).toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -28,7 +34,7 @@ export function fmtTimeSec(ms: number): string {
 }
 
 export function fmtDate(ms: number): string {
-  return new Date(ms).toLocaleDateString(undefined, {
+  return new Date(ms).toLocaleDateString(locale, {
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -36,7 +42,7 @@ export function fmtDate(ms: number): string {
 }
 
 export function fmtDateTime(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
+  return new Date(ms).toLocaleString(locale, {
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -46,9 +52,8 @@ export function fmtDateTime(ms: number): string {
   });
 }
 
-const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-
 export function fmtRelative(ms: number): string {
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const diff = ms - Date.now();
   const abs = Math.abs(diff);
   const units: [Intl.RelativeTimeFormatUnit, number][] = [

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, UserPlus, Shield, User as UserIcon } from "lucide-react";
 import { TopBar } from "../components/TopBar";
@@ -15,6 +16,7 @@ import { useUsers, type ManagedUser } from "../hooks/useUsers";
 import { useSiteName, useSetSiteName } from "../hooks/useSystem";
 
 export function Settings() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const { data: ver } = useQuery({
@@ -24,13 +26,13 @@ export function Settings() {
 
   return (
     <>
-      <TopBar title="Settings" />
+      <TopBar title={t("settings.title", "Settings")} />
       <div className="flex-1 overflow-auto p-4">
         <div className="max-w-2xl mx-auto space-y-4">
-          <Section title="Account">
-            <Row label="Name" value={user?.name || "—"} />
-            <Row label="Email" value={user?.email || "—"} />
-            <Row label="Role" value={user?.role || "—"} className="capitalize" />
+          <Section title={t("settings.account", "Account")}>
+            <Row label={t("settings.name", "Name")} value={user?.name || "—"} />
+            <Row label={t("settings.email", "Email")} value={user?.email || "—"} />
+            <Row label={t("settings.role", "Role")} value={user?.role || "—"} className="capitalize" />
           </Section>
 
           <PreferencesSettings />
@@ -43,9 +45,9 @@ export function Settings() {
           {isAdmin && <HomeAssistant />}
           {isAdmin && <AuditLog />}
 
-          <Section title="About">
-            <Row label="Application" value="Aperture NVR" />
-            <Row label="Version" value={ver ? `${ver.version} (${ver.commit})` : "…"} />
+          <Section title={t("settings.about", "About")}>
+            <Row label={t("settings.application", "Application")} value="Aperture NVR" />
+            <Row label={t("settings.version", "Version")} value={ver ? `${ver.version} (${ver.commit})` : "…"} />
           </Section>
         </div>
       </div>

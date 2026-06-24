@@ -6,6 +6,7 @@ import { AuthProvider } from "./lib/auth";
 import { PrefsProvider } from "./lib/prefs";
 import { DownloadsProvider } from "./lib/downloads";
 import App from "./App";
+import "./lib/i18n";
 import "./index.css";
 
 const queryClient = new QueryClient({

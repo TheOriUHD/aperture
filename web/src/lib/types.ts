@@ -5,6 +5,7 @@ export interface Preferences {
   landing: "dashboard" | "playback" | "alarms" | "cameras";
   timelineZoom: number;
   density: "comfortable" | "compact";
+  language: string; // "en" | "de" | "auto"
 }
 
 export const DEFAULT_PREFS: Preferences = {
@@ -12,6 +13,7 @@ export const DEFAULT_PREFS: Preferences = {
   landing: "dashboard",
   timelineZoom: 8,
   density: "comfortable",
+  language: "auto",
 };
 
 export interface User {

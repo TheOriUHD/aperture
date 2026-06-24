@@ -1,15 +1,17 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
 import { AuthLayout } from "./AuthLayout";
 
 export function Login() {
+  const { t } = useTranslation();
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(
     new URLSearchParams(window.location.search).get("error") === "sso"
-      ? "Single sign-on failed. Try again or use your password."
+      ? t("auth.ssoFailed", "Single sign-on failed. Try again or use your password.")
       : "",
   );
   const [busy, setBusy] = useState(false);
@@ -29,18 +31,18 @@ export function Login() {
     try {
       await login(email, password);
     } catch {
-      setError("Invalid email or password.");
+      setError(t("auth.invalid", "Invalid email or password."));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <AuthLayout title="Welcome back" subtitle="Sign in to your NVR">
+    <AuthLayout title={t("auth.welcome", "Welcome back")} subtitle={t("auth.sub", "Sign in to your NVR")}>
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <label className="label" htmlFor="email">
-            Email
+            {t("auth.email", "Email")}
           </label>
           <input
             id="email"
@@ -54,7 +56,7 @@ export function Login() {
         </div>
         <div>
           <label className="label" htmlFor="password">
-            Password
+            {t("auth.password", "Password")}
           </label>
           <input
             id="password"
@@ -67,7 +69,7 @@ export function Login() {
         </div>
         {error && <p className="text-sm text-rec">{error}</p>}
         <button type="submit" className="btn-primary w-full" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
+          {busy ? t("auth.signingIn", "Signing in…") : t("auth.signIn", "Sign in")}
         </button>
       </form>
 
@@ -75,11 +77,11 @@ export function Login() {
         <>
           <div className="my-5 flex items-center gap-3 text-fg-faint">
             <span className="h-px flex-1 bg-line" />
-            <span className="text-xs uppercase tracking-wide">or</span>
+            <span className="text-xs uppercase tracking-wide">{t("auth.or", "or")}</span>
             <span className="h-px flex-1 bg-line" />
           </div>
           <a href="/api/auth/oidc/login" className="btn-secondary w-full justify-center">
-            Sign in with {sso.name}
+            {t("auth.signInWith", "Sign in with {{name}}", { name: sso.name })}
           </a>
         </>
       )}

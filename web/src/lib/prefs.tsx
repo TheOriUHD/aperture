@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { api } from "./api";
 import { useAuth } from "./auth";
 import { setClock24 } from "./format";
+import { setLanguage } from "./i18n";
 import { DEFAULT_PREFS, type Preferences } from "./types";
 
 interface PrefsState {
@@ -25,6 +26,10 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setClock24(prefs.clock24);
   }, [prefs.clock24]);
+
+  useEffect(() => {
+    setLanguage(prefs.language);
+  }, [prefs.language]);
 
   function setPref(partial: Partial<Preferences>) {
     setPrefs((cur) => {
