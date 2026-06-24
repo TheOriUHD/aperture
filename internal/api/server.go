@@ -11,6 +11,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/audit"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/motion"
 	"github.com/TheOriUHD/aperture/internal/oidc"
@@ -32,13 +33,14 @@ type Server struct {
 	ha     *ha.Publisher
 	oidc   *oidc.Authenticator
 	audit  *audit.Logger
+	exp    *export.Manager
 	log    *slog.Logger
 	router http.Handler
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, log: log}
 	s.router = s.routes()
 	return s
 }
@@ -84,6 +86,14 @@ func (s *Server) routes() http.Handler {
 			r.Get("/cameras/{id}/seg/{seg}", s.handleSegmentFile)
 			r.Get("/events", s.handleEventsAll)
 			r.Get("/events/{id}/thumb.jpg", s.handleEventThumb)
+			r.Post("/export", s.handleCreateExport)
+			r.Get("/export", s.handleListExports)
+			r.Get("/export/{id}", s.handleGetExport)
+			r.Get("/export/{id}/download", s.handleDownloadExport)
+			r.Delete("/export/{id}", s.handleDeleteExport)
+			r.Post("/shares", s.handleCreateShare)
+			r.Get("/shares", s.handleListShares)
+			r.Delete("/shares/{id}", s.handleDeleteShare)
 			r.Get("/cameras/{id}/schedule", s.handleGetSchedule)
 			r.Get("/system/storage", s.handleStorage)
 			r.Get("/system/settings", s.handleGetSettings)
@@ -111,6 +121,10 @@ func (s *Server) routes() http.Handler {
 			r.Get("/system/audit/verify", s.handleVerifyAudit)
 		})
 	})
+
+	// Public share viewer (chrome-less, token-gated).
+	r.Get("/s/{token}", s.handleSharePage)
+	r.Get("/s/{token}/media", s.handleShareMedia)
 
 	// Everything else: the SPA.
 	r.NotFound(s.spaHandler())

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/audit"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/motion"
 	"github.com/TheOriUHD/aperture/internal/oidc"
@@ -116,7 +118,9 @@ func main() {
 
 	oidcAuth := oidc.New(cfg, st)
 	auditLog := audit.New(st)
-	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, log)
+	exporter := export.New(st, filepath.Join(cfg.DataDir, "exports"), log)
+	exporter.Start(bgCtx)
+	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, exporter, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

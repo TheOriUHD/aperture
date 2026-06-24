@@ -1,0 +1,120 @@
+package store
+
+import "database/sql"
+
+// ExportJob is a queued/processing/finished clip export.
+type ExportJob struct {
+	ID         string  `json:"id"`
+	UserID     string  `json:"userId"`
+	CameraID   string  `json:"cameraId"`
+	CameraName string  `json:"cameraName"`
+	FromTS     int64   `json:"fromTs"`
+	ToTS       int64   `json:"toTs"`
+	BurnIn     bool    `json:"burnIn"`
+	Audio      bool    `json:"audio"`
+	Status     string  `json:"status"` // queued | running | done | error
+	Progress   float64 `json:"progress"`
+	OutputPath string  `json:"-"`
+	SizeBytes  int64   `json:"sizeBytes"`
+	Error      string  `json:"error"`
+	CreatedAt  int64   `json:"createdAt"`
+	FinishedAt int64   `json:"finishedAt"`
+}
+
+const exportSelect = `SELECT id, user_id, camera_id, camera_name, from_ts, to_ts, burn_in, audio,
+    status, progress, output_path, size_bytes, error, created_at, finished_at FROM export_jobs`
+
+func scanExport(row rowScanner) (*ExportJob, error) {
+	var j ExportJob
+	var burn, audio int
+	if err := row.Scan(&j.ID, &j.UserID, &j.CameraID, &j.CameraName, &j.FromTS, &j.ToTS,
+		&burn, &audio, &j.Status, &j.Progress, &j.OutputPath, &j.SizeBytes, &j.Error,
+		&j.CreatedAt, &j.FinishedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	j.BurnIn, j.Audio = burn != 0, audio != 0
+	return &j, nil
+}
+
+func (s *Store) CreateExport(j *ExportJob) error {
+	if j.ID == "" {
+		j.ID = NewID()
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO export_jobs (id, user_id, camera_id, camera_name, from_ts, to_ts, burn_in, audio, status, progress, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		j.ID, j.UserID, j.CameraID, j.CameraName, j.FromTS, j.ToTS,
+		boolInt(j.BurnIn), boolInt(j.Audio), j.Status, j.Progress, j.CreatedAt)
+	return err
+}
+
+func (s *Store) GetExport(id string) (*ExportJob, error) {
+	return scanExport(s.db.QueryRow(exportSelect+` WHERE id = ?`, id))
+}
+
+func (s *Store) ListExportsByUser(userID string, limit int) ([]*ExportJob, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Query(exportSelect+` WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return collectExports(rows)
+}
+
+// PendingExports returns jobs left queued/running (e.g. across a restart).
+func (s *Store) PendingExports() ([]*ExportJob, error) {
+	rows, err := s.db.Query(exportSelect + ` WHERE status IN ('queued','running') ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	return collectExports(rows)
+}
+
+// ExportsBefore returns finished jobs created before ts (for TTL cleanup).
+func (s *Store) ExportsBefore(ts int64) ([]*ExportJob, error) {
+	rows, err := s.db.Query(exportSelect+` WHERE created_at < ?`, ts)
+	if err != nil {
+		return nil, err
+	}
+	return collectExports(rows)
+}
+
+func (s *Store) SetExportProgress(id string, progress float64) error {
+	_, err := s.db.Exec(`UPDATE export_jobs SET progress = ?, status = 'running' WHERE id = ?`, progress, id)
+	return err
+}
+
+func (s *Store) FinishExport(id, outputPath string, size int64, finishedAt int64) error {
+	_, err := s.db.Exec(
+		`UPDATE export_jobs SET status='done', progress=1, output_path=?, size_bytes=?, finished_at=? WHERE id=?`,
+		outputPath, size, finishedAt, id)
+	return err
+}
+
+func (s *Store) FailExport(id, msg string, finishedAt int64) error {
+	_, err := s.db.Exec(`UPDATE export_jobs SET status='error', error=?, finished_at=? WHERE id=?`, msg, finishedAt, id)
+	return err
+}
+
+func (s *Store) DeleteExport(id string) error {
+	_, err := s.db.Exec(`DELETE FROM export_jobs WHERE id = ?`, id)
+	return err
+}
+
+func collectExports(rows *sql.Rows) ([]*ExportJob, error) {
+	defer rows.Close()
+	var out []*ExportJob
+	for rows.Next() {
+		j, err := scanExport(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}

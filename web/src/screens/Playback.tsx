@@ -15,12 +15,14 @@ import {
   LayoutGrid,
   Calendar,
   Cctv,
+  Scissors,
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
 import { VerticalTimeline, type TR, type TLEvent } from "../components/VerticalTimeline";
 import { EventStrip } from "../components/EventStrip";
 import { LiveVideo } from "../components/LiveVideo";
 import { ZoomControl } from "../components/ZoomControl";
+import { ExportCenter } from "../components/ExportCenter";
 import { useCameras } from "../hooks/useCameras";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { usePrefs } from "../lib/prefs";
@@ -66,6 +68,7 @@ export function Playback() {
 
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const [camerasOpen, setCamerasOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const playerVideoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -324,9 +327,20 @@ export function Playback() {
   );
 
   // ---- Mobile layout (UniFi Protect-style) --------------------------------
+  const exportModal = (
+    <ExportCenter
+      open={exportOpen}
+      onClose={() => setExportOpen(false)}
+      camera={selected}
+      cameras={cameras ?? []}
+      defaultTo={selectedMs}
+    />
+  );
+
   if (!isDesktop) {
     return (
       <div className="flex h-full min-h-0 flex-col bg-ink-900">
+        {exportModal}
         {/* camera switcher (slides in/out) */}
         <div
           className={`shrink-0 overflow-hidden border-b border-line transition-[max-height] duration-300 ${
@@ -390,6 +404,9 @@ export function Playback() {
               <BarBtn onClick={() => setCamerasOpen((o) => !o)} label="Cameras">
                 <LayoutGrid className="h-4 w-4" />
               </BarBtn>
+              <BarBtn onClick={() => setExportOpen(true)} label="Export clip">
+                <Scissors className="h-4 w-4" />
+              </BarBtn>
               <BarBtn onClick={fullscreen} label="Fullscreen">
                 <Maximize2 className="h-4 w-4" />
               </BarBtn>
@@ -450,6 +467,7 @@ export function Playback() {
   // ---- Desktop layout -----------------------------------------------------
   return (
     <div className="flex h-full min-h-0">
+      {exportModal}
       <CameraRail cameras={cameras ?? []} selectedId={selectedId} onSelect={setSelectedId} />
 
       {/* timeline column */}
@@ -552,6 +570,9 @@ export function Playback() {
             <div className="ml-auto flex items-center gap-0.5">
               <BarBtn onClick={snapshot} label="Snapshot">
                 <CameraIcon className="h-4 w-4" />
+              </BarBtn>
+              <BarBtn onClick={() => setExportOpen(true)} label="Export clip">
+                <Scissors className="h-4 w-4" />
               </BarBtn>
               <BarBtn onClick={fullscreen} label="Fullscreen">
                 <Maximize2 className="h-4 w-4" />
