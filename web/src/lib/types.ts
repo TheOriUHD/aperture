@@ -36,6 +36,10 @@ export interface Camera {
   motionThreshold: number;
   fps: number;
   sortOrder: number;
+  prerollMs: number;
+  postrollMs: number;
+  cooldownMs: number;
+  minDurationMs: number;
 }
 
 export interface StreamToken {

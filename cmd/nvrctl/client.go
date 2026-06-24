@@ -264,6 +264,10 @@ type cameraInfo struct {
 	RetentionDays   int     `json:"retentionDays"`
 	MotionThreshold float64 `json:"motionThreshold"`
 	FPS             int     `json:"fps"`
+	PrerollMs       int     `json:"prerollMs"`
+	PostrollMs      int     `json:"postrollMs"`
+	CooldownMs      int     `json:"cooldownMs"`
+	MinDurationMs   int     `json:"minDurationMs"`
 }
 
 type userInfo struct {

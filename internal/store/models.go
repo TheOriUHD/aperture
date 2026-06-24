@@ -45,6 +45,10 @@ type Camera struct {
 	MotionZonesJSON   string  `json:"motionZonesJson"`
 	FPS               int     `json:"fps"`
 	SortOrder         int     `json:"sortOrder"`
+	PrerollMs         int     `json:"prerollMs"`
+	PostrollMs        int     `json:"postrollMs"`
+	CooldownMs        int     `json:"cooldownMs"`
+	MinDurationMs     int     `json:"minDurationMs"`
 	CreatedAt         int64   `json:"createdAt"`
 	UpdatedAt         int64   `json:"updatedAt"`
 }

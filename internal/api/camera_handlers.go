@@ -54,6 +54,10 @@ type cameraReq struct {
 	MotionThreshold   *float64 `json:"motionThreshold"`
 	FPS               *int     `json:"fps"`
 	SortOrder         *int     `json:"sortOrder"`
+	PrerollMs         *int     `json:"prerollMs"`
+	PostrollMs        *int     `json:"postrollMs"`
+	CooldownMs        *int     `json:"cooldownMs"`
+	MinDurationMs     *int     `json:"minDurationMs"`
 }
 
 func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +81,10 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 		MotionThreshold:   derefFloat(req.MotionThreshold, 0.02),
 		FPS:               derefInt(req.FPS, 0),
 		SortOrder:         derefInt(req.SortOrder, 0),
+		PrerollMs:         derefInt(req.PrerollMs, 5000),
+		PostrollMs:        derefInt(req.PostrollMs, 5000),
+		CooldownMs:        derefInt(req.CooldownMs, 5000),
+		MinDurationMs:     derefInt(req.MinDurationMs, 0),
 	}
 	if err := s.st.CreateCamera(c); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create camera")
@@ -127,6 +135,18 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SortOrder != nil {
 		c.SortOrder = *req.SortOrder
+	}
+	if req.PrerollMs != nil {
+		c.PrerollMs = *req.PrerollMs
+	}
+	if req.PostrollMs != nil {
+		c.PostrollMs = *req.PostrollMs
+	}
+	if req.CooldownMs != nil {
+		c.CooldownMs = *req.CooldownMs
+	}
+	if req.MinDurationMs != nil {
+		c.MinDurationMs = *req.MinDurationMs
 	}
 	if err := s.st.UpdateCamera(c); err != nil {
 		writeStoreError(w, err)
@@ -184,6 +204,10 @@ func cameraView(c *store.Camera) map[string]any {
 		"motionThreshold":   c.MotionThreshold,
 		"fps":               c.FPS,
 		"sortOrder":         c.SortOrder,
+		"prerollMs":         c.PrerollMs,
+		"postrollMs":        c.PostrollMs,
+		"cooldownMs":        c.CooldownMs,
+		"minDurationMs":     c.MinDurationMs,
 	}
 }
 

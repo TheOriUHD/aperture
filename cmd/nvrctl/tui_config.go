@@ -405,6 +405,10 @@ func (a *app) submitForm() tea.Cmd {
 			"retentionDays":   atoiDef(f.val("retentionDays"), 7),
 			"motionThreshold": atofDef(f.val("motionThreshold"), 0.02),
 			"fps":             atoiDef(f.val("fps"), 0),
+			"prerollMs":       atoiDef(f.val("preroll"), 5) * 1000,
+			"postrollMs":      atoiDef(f.val("postroll"), 5) * 1000,
+			"cooldownMs":      atoiDef(f.val("cooldown"), 5) * 1000,
+			"minDurationMs":   atoiDef(f.val("minDuration"), 0) * 1000,
 		}
 		a.busy = true
 		return tea.Batch(a.spin.Tick, saveCameraCmd(a.c, f.id, body))
@@ -473,11 +477,16 @@ func (a *app) buildCameraForm(cam *cameraInfo) {
 	name, main, sub, mode := "", "", "", "continuous"
 	en := true
 	ret, thr, fps, id, title := "7", "0.02", "0", "", "New camera"
+	pre, post, cool, mind := "5", "5", "5", "0"
 	if cam != nil {
 		id, name, main, sub, mode, en = cam.ID, cam.Name, cam.RTSPMainURL, cam.RTSPSubURL, cam.RecordMode, cam.Enabled
 		ret = strconv.Itoa(cam.RetentionDays)
 		thr = strconv.FormatFloat(cam.MotionThreshold, 'f', -1, 64)
 		fps = strconv.Itoa(cam.FPS)
+		pre = strconv.Itoa(maxInt(cam.PrerollMs/1000, 0))
+		post = strconv.Itoa(maxInt(cam.PostrollMs/1000, 0))
+		cool = strconv.Itoa(maxInt(cam.CooldownMs/1000, 1))
+		mind = strconv.Itoa(maxInt(cam.MinDurationMs/1000, 0))
 		title = "Edit camera"
 	}
 	a.form = form{id: id, title: title, fields: []ffield{
@@ -488,9 +497,20 @@ func (a *app) buildCameraForm(cam *cameraInfo) {
 		fbool("enabled", "Enabled", en, ""),
 		ftext("retentionDays", "Retention (days)", ret, ""),
 		ftext("motionThreshold", "Motion sensitivity", thr, "scene-change 0–1; lower = more sensitive"),
+		ftext("preroll", "Pre-roll (s)", pre, ""),
+		ftext("postroll", "Post-roll (s)", post, ""),
+		ftext("cooldown", "Cooldown (s)", cool, ""),
+		ftext("minDuration", "Ignore blips under (s)", mind, "0 = off"),
 		ftext("fps", "Capture FPS", fps, "0 = source rate"),
 	}}
 	a.activateForm()
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (a *app) buildUserForm(u *userInfo) {

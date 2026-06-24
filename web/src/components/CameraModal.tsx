@@ -7,6 +7,17 @@ import { ScheduleModal } from "./ScheduleModal";
 import { useCreateCamera, useUpdateCamera, useDeleteCamera } from "../hooks/useCameras";
 import type { Camera, RecordMode } from "../lib/types";
 
+const SENS: { v: number; label: string }[] = [
+  { v: 0.06, label: "Low" },
+  { v: 0.03, label: "Medium-low" },
+  { v: 0.02, label: "Medium" },
+  { v: 0.012, label: "High" },
+  { v: 0.006, label: "Very high" },
+];
+function nearestSens(v: number): number {
+  return SENS.reduce((a, b) => (Math.abs(b.v - v) < Math.abs(a.v - v) ? b : a), SENS[2]).v;
+}
+
 export function CameraModal({
   open,
   camera,
@@ -27,6 +38,11 @@ export function CameraModal({
   const [mode, setMode] = useState<RecordMode>("continuous");
   const [retention, setRetention] = useState(7);
   const [enabled, setEnabled] = useState(true);
+  const [sensitivity, setSensitivity] = useState(0.02);
+  const [preroll, setPreroll] = useState(5);
+  const [postroll, setPostroll] = useState(5);
+  const [cooldown, setCooldown] = useState(5);
+  const [minDur, setMinDur] = useState(0);
   const [error, setError] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -42,6 +58,11 @@ export function CameraModal({
       setMode(camera.recordMode);
       setRetention(camera.retentionDays);
       setEnabled(camera.enabled);
+      setSensitivity(nearestSens(camera.motionThreshold || 0.02));
+      setPreroll(Math.round((camera.prerollMs || 5000) / 1000));
+      setPostroll(Math.round((camera.postrollMs || 5000) / 1000));
+      setCooldown(Math.round((camera.cooldownMs || 5000) / 1000));
+      setMinDur(Math.round((camera.minDurationMs || 0) / 1000));
     } else {
       setName("");
       setMain("");
@@ -49,6 +70,11 @@ export function CameraModal({
       setMode("continuous");
       setRetention(7);
       setEnabled(true);
+      setSensitivity(0.02);
+      setPreroll(5);
+      setPostroll(5);
+      setCooldown(5);
+      setMinDur(0);
     }
   }, [open, camera]);
 
@@ -66,6 +92,11 @@ export function CameraModal({
       recordMode: mode,
       retentionDays: retention,
       enabled,
+      motionThreshold: sensitivity,
+      prerollMs: preroll * 1000,
+      postrollMs: postroll * 1000,
+      cooldownMs: cooldown * 1000,
+      minDurationMs: minDur * 1000,
     };
     try {
       if (camera) await update.mutateAsync({ id: camera.id, ...input });
@@ -182,6 +213,71 @@ export function CameraModal({
                 Save the camera first, then open it again to set its recording schedule.
               </p>
             ))}
+
+          <div className="border-t border-line pt-4">
+            <p className="text-xs font-medium text-fg-muted mb-3">Motion detection</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Sensitivity</label>
+                <select
+                  className="input"
+                  value={sensitivity}
+                  onChange={(e) => setSensitivity(Number(e.target.value))}
+                >
+                  {SENS.map((s) => (
+                    <option key={s.v} value={s.v}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Ignore blips under (s)</label>
+                <input
+                  type="number"
+                  min={0}
+                  className="input"
+                  value={minDur}
+                  onChange={(e) => setMinDur(Math.max(0, Number(e.target.value) || 0))}
+                />
+              </div>
+              <div>
+                <label className="label">Pre-roll (s)</label>
+                <input
+                  type="number"
+                  min={0}
+                  className="input"
+                  value={preroll}
+                  onChange={(e) => setPreroll(Math.max(0, Number(e.target.value) || 0))}
+                />
+              </div>
+              <div>
+                <label className="label">Post-roll (s)</label>
+                <input
+                  type="number"
+                  min={0}
+                  className="input"
+                  value={postroll}
+                  onChange={(e) => setPostroll(Math.max(0, Number(e.target.value) || 0))}
+                />
+              </div>
+              <div>
+                <label className="label">Cooldown (s)</label>
+                <input
+                  type="number"
+                  min={1}
+                  className="input"
+                  value={cooldown}
+                  onChange={(e) => setCooldown(Math.max(1, Number(e.target.value) || 1))}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-fg-faint mt-2 leading-relaxed">
+              Higher sensitivity catches more motion (and more false alarms). Pre/post-roll pad each
+              clip; cooldown coalesces a flurry into one event; “ignore blips” drops events shorter
+              than the set seconds (0 = off).
+            </p>
+          </div>
 
           {isEdit && (
             <div className="flex items-center justify-between pt-1">

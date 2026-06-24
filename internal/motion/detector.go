@@ -39,6 +39,9 @@ type activeEvent struct {
 	start    int64 // unix ms (incl. preroll)
 	lastTick int64 // unix ms
 	maxScore float64
+	postroll int64
+	cooldown int64
+	minDur   int64
 }
 
 // Detector supervises per-camera motion detection.
@@ -51,10 +54,22 @@ type Detector struct {
 	baseCtx context.Context
 	mu      sync.Mutex
 	active  map[string]context.CancelFunc
+	sigs    map[string]string // cameraID -> settings signature (for restart-on-change)
+
+	tuneMu sync.Mutex
+	tune   map[string]camTune // cameraID -> event-lifecycle tuning
 
 	evMu    sync.Mutex
 	events  map[string]*activeEvent // cameraID -> ongoing event
 	onEvent func(*store.Event)      // notified when a new event opens
+}
+
+// camTune is a camera's per-event timing, captured at event open.
+type camTune struct {
+	preroll  int64
+	postroll int64
+	cooldown int64
+	minDur   int64
 }
 
 // SetOnEvent registers a callback invoked (async) when a new event starts.
@@ -65,8 +80,38 @@ func New(cfg *config.Config, st *store.Store, sm snapshotter, log *slog.Logger) 
 	return &Detector{
 		cfg: cfg, st: st, sm: sm, log: log,
 		active: map[string]context.CancelFunc{},
+		sigs:   map[string]string{},
+		tune:   map[string]camTune{},
 		events: map[string]*activeEvent{},
 	}
+}
+
+func tuneOf(c *store.Camera) camTune {
+	t := camTune{
+		preroll:  int64(c.PrerollMs),
+		postroll: int64(c.PostrollMs),
+		cooldown: int64(c.CooldownMs),
+		minDur:   int64(c.MinDurationMs),
+	}
+	if t.preroll <= 0 {
+		t.preroll = prerollMs
+	}
+	if t.postroll <= 0 {
+		t.postroll = postrollMs
+	}
+	if t.cooldown <= 0 {
+		t.cooldown = cooldown.Milliseconds()
+	}
+	return t
+}
+
+func (d *Detector) tuneFor(cameraID string) camTune {
+	d.tuneMu.Lock()
+	defer d.tuneMu.Unlock()
+	if t, ok := d.tune[cameraID]; ok {
+		return t
+	}
+	return camTune{preroll: prerollMs, postroll: postrollMs, cooldown: cooldown.Milliseconds()}
 }
 
 // Run starts detection and the reconcile + finalize loops until ctx is done.
@@ -113,20 +158,38 @@ func (d *Detector) Reconcile() {
 		}
 	}
 
+	// Refresh the event-lifecycle tuning cache (applies on the next event;
+	// no ffmpeg restart needed since roll/cooldown don't affect detection).
+	d.tuneMu.Lock()
+	nt := make(map[string]camTune, len(want))
+	for id, c := range want {
+		nt[id] = tuneOf(c)
+	}
+	d.tune = nt
+	d.tuneMu.Unlock()
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for id, cancel := range d.active {
 		if _, ok := want[id]; !ok {
 			cancel()
 			delete(d.active, id)
+			delete(d.sigs, id)
 		}
 	}
 	for id, cam := range want {
+		sig := strconv.FormatFloat(cam.MotionThreshold, 'f', 4, 64)
 		if _, ok := d.active[id]; ok {
-			continue
+			if d.sigs[id] == sig {
+				continue
+			}
+			// Detection settings changed — restart with the new threshold.
+			d.active[id]()
+			delete(d.active, id)
 		}
 		cctx, cancel := context.WithCancel(d.baseCtx)
 		d.active[id] = cancel
+		d.sigs[id] = sig
 		c := *cam
 		go d.detectCamera(cctx, c)
 		d.log.Info("motion detection started", "camera", id, "threshold", cam.MotionThreshold)
@@ -189,7 +252,11 @@ func (d *Detector) onTick(cameraID string, score float64) {
 	d.evMu.Lock()
 	ev := d.events[cameraID]
 	if ev == nil {
-		ev = &activeEvent{id: store.NewID(), start: now - prerollMs, lastTick: now, maxScore: score}
+		t := d.tuneFor(cameraID)
+		ev = &activeEvent{
+			id: store.NewID(), start: now - t.preroll, lastTick: now, maxScore: score,
+			postroll: t.postroll, cooldown: t.cooldown, minDur: t.minDur,
+		}
 		d.events[cameraID] = ev
 		d.evMu.Unlock()
 		e := &store.Event{ID: ev.id, CameraID: cameraID, Type: "motion", StartTS: ev.start, Score: score}
@@ -216,14 +283,28 @@ func (d *Detector) finalizeStale() {
 	d.evMu.Lock()
 	var done []*activeEvent
 	for camID, ev := range d.events {
-		if now-ev.lastTick > cooldown.Milliseconds() {
+		cd := ev.cooldown
+		if cd <= 0 {
+			cd = cooldown.Milliseconds()
+		}
+		if now-ev.lastTick > cd {
 			done = append(done, ev)
 			delete(d.events, camID)
 		}
 	}
 	d.evMu.Unlock()
 	for _, ev := range done {
-		if err := d.st.FinalizeEvent(ev.id, ev.lastTick+postrollMs, ev.maxScore); err != nil {
+		end := ev.lastTick + ev.postroll
+		// Min-duration filter: discard brief blips (compression artifacts,
+		// a single-frame flash) instead of committing them as events.
+		if ev.minDur > 0 && end-ev.start < ev.minDur {
+			if e, err := d.st.EventByID(ev.id); err == nil && e.ThumbPath != "" {
+				_ = os.Remove(e.ThumbPath)
+			}
+			_ = d.st.DeleteEvent(ev.id)
+			continue
+		}
+		if err := d.st.FinalizeEvent(ev.id, end, ev.maxScore); err != nil {
 			d.log.Error("motion: finalize event", "err", err)
 		}
 	}

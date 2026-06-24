@@ -16,6 +16,11 @@ export interface CameraInput {
   recordMode?: Camera["recordMode"];
   retentionDays?: number;
   enabled?: boolean;
+  motionThreshold?: number;
+  prerollMs?: number;
+  postrollMs?: number;
+  cooldownMs?: number;
+  minDurationMs?: number;
 }
 
 export function useCreateCamera() {
