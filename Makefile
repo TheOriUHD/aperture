@@ -8,7 +8,7 @@ LDFLAGS := -s -w \
 	-X $(PKG)/internal/version.Version=$(VERSION) \
 	-X $(PKG)/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build build-go build-web tidy run dev web-dev test lint up down logs clean fmt
+.PHONY: all build build-go build-web tidy run dev web-dev test lint up down logs clean fmt install-cli
 
 all: build
 
@@ -23,6 +23,13 @@ build-web:
 build-go:
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrd ./cmd/nvrd
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrctl ./cmd/nvrctl
+
+## Install the nvrctl admin console natively to ~/.local/bin (on PATH)
+install-cli:
+	@mkdir -p $(HOME)/.local/bin
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(HOME)/.local/bin/nvrctl ./cmd/nvrctl
+	@echo "Installed 'nvrctl' to ~/.local/bin (defaults to http://localhost:8971)."
+	@echo "Run it with:  nvrctl        (override with --url or APERTURE_URL)"
 
 tidy:
 	$(GO) mod tidy
