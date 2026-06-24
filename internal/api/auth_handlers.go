@@ -83,6 +83,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "account disabled")
 		return
 	}
+	if u.TOTPEnabled {
+		tok, err := s.am.IssuePending2FA(u.ID, pending2FATTL)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"twoFactorRequired": true, "token": tok})
+		return
+	}
 	s.startSession(w, u)
 	s.logAuditAs(r, u.Email, "auth.login", u.Email, "password")
 	writeJSON(w, http.StatusOK, s.userPayload(u))

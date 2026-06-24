@@ -45,7 +45,35 @@ type SessionClaims struct {
 	Email  string `json:"email"`
 	Name   string `json:"name"`
 	Role   string `json:"role"`
+	Stage  string `json:"stg,omitempty"` // "" = full session; "2fa" = password ok, awaiting code
 	jwt.RegisteredClaims
+}
+
+// IssuePending2FA returns a short-lived token proving the password step passed,
+// to be exchanged for a real session once the TOTP code is verified.
+func (m *Manager) IssuePending2FA(userID string, ttl time.Duration) (string, error) {
+	now := time.Now()
+	claims := SessionClaims{
+		UserID: userID, Stage: "2fa",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		},
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(m.jwtSecret)
+}
+
+// ParsePending2FA verifies a pending-2FA token and returns its user id.
+func (m *Manager) ParsePending2FA(token string) (string, error) {
+	c, err := m.ParseSession(token)
+	if err != nil {
+		return "", err
+	}
+	if c.Stage != "2fa" {
+		return "", errors.New("not a pending 2FA token")
+	}
+	return c.UserID, nil
 }
 
 // HashPassword returns a bcrypt hash of the plaintext password.
@@ -117,7 +145,14 @@ func (m *Manager) SessionFromRequest(r *http.Request) (*SessionClaims, error) {
 	if err != nil {
 		return nil, err
 	}
-	return m.ParseSession(c.Value)
+	claims, err := m.ParseSession(c.Value)
+	if err != nil {
+		return nil, err
+	}
+	if claims.Stage != "" {
+		return nil, errors.New("incomplete session")
+	}
+	return claims, nil
 }
 
 // streamClaims is the payload of a short-lived stream-access token.

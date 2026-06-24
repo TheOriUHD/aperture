@@ -28,24 +28,39 @@ func (s *Store) CreateUser(u *User) error {
 		u.Role = RoleViewer
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO users (id, email, name, password_hash, role, oidc_sub, disabled, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO users (id, email, name, password_hash, role, oidc_sub, disabled, created_at, must_change_password)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.ID, u.Email, u.Name, nullStr(u.PasswordHash), u.Role, u.OIDCSub, boolInt(u.Disabled), u.CreatedAt,
+		boolInt(u.MustChangePassword),
 	)
 	return err
+}
+
+// SetMustChangePassword flags (or clears) the forced first-login reset.
+func (s *Store) SetMustChangePassword(id string, must bool) error {
+	return affected(s.db.Exec(`UPDATE users SET must_change_password = ? WHERE id = ?`, boolInt(must), id))
+}
+
+// SetUserTOTP stores a user's TOTP secret/enabled state + recovery codes.
+func (s *Store) SetUserTOTP(id, secret string, enabled bool, recovery string) error {
+	return affected(s.db.Exec(
+		`UPDATE users SET totp_secret = ?, totp_enabled = ?, totp_recovery = ? WHERE id = ?`,
+		secret, boolInt(enabled), recovery, id))
 }
 
 // GetUserByEmail looks up an account by email (case-sensitive).
 func (s *Store) GetUserByEmail(email string) (*User, error) {
 	return s.scanUser(s.db.QueryRow(
-		`SELECT id, email, name, password_hash, role, oidc_sub, disabled, created_at
+		`SELECT id, email, name, password_hash, role, oidc_sub, disabled, created_at,
+                must_change_password, totp_secret, totp_enabled, totp_recovery
          FROM users WHERE email = ?`, email))
 }
 
 // GetUserByOIDCSub looks up an account by its linked OIDC subject.
 func (s *Store) GetUserByOIDCSub(sub string) (*User, error) {
 	return s.scanUser(s.db.QueryRow(
-		`SELECT id, email, name, password_hash, role, oidc_sub, disabled, created_at
+		`SELECT id, email, name, password_hash, role, oidc_sub, disabled, created_at,
+                must_change_password, totp_secret, totp_enabled, totp_recovery
          FROM users WHERE oidc_sub = ?`, sub))
 }
 
@@ -57,14 +72,16 @@ func (s *Store) SetUserOIDC(id, sub string) error {
 // GetUserByID looks up an account by id.
 func (s *Store) GetUserByID(id string) (*User, error) {
 	return s.scanUser(s.db.QueryRow(
-		`SELECT id, email, name, password_hash, role, oidc_sub, disabled, created_at
+		`SELECT id, email, name, password_hash, role, oidc_sub, disabled, created_at,
+                must_change_password, totp_secret, totp_enabled, totp_recovery
          FROM users WHERE id = ?`, id))
 }
 
 // ListUsers returns all accounts ordered by creation time.
 func (s *Store) ListUsers() ([]*User, error) {
 	rows, err := s.db.Query(
-		`SELECT id, email, name, password_hash, role, oidc_sub, disabled, created_at
+		`SELECT id, email, name, password_hash, role, oidc_sub, disabled, created_at,
+                must_change_password, totp_secret, totp_enabled, totp_recovery
          FROM users ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
@@ -145,8 +162,9 @@ func (s *Store) scanUser(row rowScanner) (*User, error) {
 	var u User
 	var pw sql.NullString
 	var oidc sql.NullString
-	var disabled int
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &pw, &u.Role, &oidc, &disabled, &u.CreatedAt)
+	var disabled, mustChange, totpEnabled int
+	err := row.Scan(&u.ID, &u.Email, &u.Name, &pw, &u.Role, &oidc, &disabled, &u.CreatedAt,
+		&mustChange, &u.TOTPSecret, &totpEnabled, &u.TOTPRecovery)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -159,6 +177,8 @@ func (s *Store) scanUser(row rowScanner) (*User, error) {
 		u.OIDCSub = &v
 	}
 	u.Disabled = disabled != 0
+	u.MustChangePassword = mustChange != 0
+	u.TOTPEnabled = totpEnabled != 0
 	return &u, nil
 }
 

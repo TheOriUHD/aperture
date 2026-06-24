@@ -21,14 +21,18 @@ const (
 
 // User is an account that can sign in.
 type User struct {
-	ID           string  `json:"id"`
-	Email        string  `json:"email"`
-	Name         string  `json:"name"`
-	PasswordHash string  `json:"-"`
-	Role         string  `json:"role"`
-	OIDCSub      *string `json:"-"`
-	Disabled     bool    `json:"disabled"`
-	CreatedAt    int64   `json:"createdAt"`
+	ID                 string  `json:"id"`
+	Email              string  `json:"email"`
+	Name               string  `json:"name"`
+	PasswordHash       string  `json:"-"`
+	Role               string  `json:"role"`
+	OIDCSub            *string `json:"-"`
+	Disabled           bool    `json:"disabled"`
+	CreatedAt          int64   `json:"createdAt"`
+	MustChangePassword bool    `json:"-"`
+	TOTPSecret         string  `json:"-"`
+	TOTPEnabled        bool    `json:"-"`
+	TOTPRecovery       string  `json:"-"`
 }
 
 // Camera is a configured RTSP source.

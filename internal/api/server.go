@@ -84,6 +84,7 @@ func (s *Server) routes() http.Handler {
 		r.Get("/setup/status", s.handleSetupStatus)
 		r.Post("/setup", s.handleSetup)
 		r.Post("/auth/login", s.handleLogin)
+		r.Post("/auth/login/2fa", s.handleLogin2FA)
 		r.Post("/auth/logout", s.handleLogout)
 		r.Get("/auth/oidc/status", s.handleOIDCStatus)
 		r.Get("/auth/oidc/login", s.handleOIDCLogin)
@@ -97,6 +98,10 @@ func (s *Server) routes() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireAuth)
 			r.Get("/auth/me", s.handleMe)
+			r.Post("/auth/password", s.handleChangePassword)
+			r.Post("/auth/2fa/setup", s.handle2FASetup)
+			r.Post("/auth/2fa/enable", s.handle2FAEnable)
+			r.Post("/auth/2fa/disable", s.handle2FADisable)
 			r.Get("/users/me/preferences", s.handleGetPrefs)
 			r.Put("/users/me/preferences", s.handleSetPrefs)
 			r.Get("/cameras", s.handleListCameras)

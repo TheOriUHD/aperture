@@ -31,6 +31,8 @@ func (s *Server) userPayload(u *store.User) map[string]any {
 	} else {
 		m["preferences"] = json.RawMessage("{}")
 	}
+	m["mustChangePassword"] = u.MustChangePassword
+	m["twoFactor"] = u.TOTPEnabled
 	return m
 }
 

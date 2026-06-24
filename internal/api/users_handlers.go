@@ -54,20 +54,31 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
-	if req.Email == "" || len(req.Password) < 8 {
-		writeError(w, http.StatusBadRequest, "email and a password of at least 8 characters are required")
+	if req.Email == "" {
+		writeError(w, http.StatusBadRequest, "email is required")
+		return
+	}
+	// Generate a strong temporary password unless one was supplied; the user is
+	// forced to set their own on first login.
+	tempPassword := strings.TrimSpace(req.Password)
+	generated := false
+	if tempPassword == "" {
+		tempPassword = generatePassword()
+		generated = true
+	} else if len(tempPassword) < 8 {
+		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
 		return
 	}
 	role := req.Role
 	if role != store.RoleAdmin {
 		role = store.RoleViewer
 	}
-	hash, err := auth.HashPassword(req.Password)
+	hash, err := auth.HashPassword(tempPassword)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	u := &store.User{Email: req.Email, Name: req.Name, PasswordHash: hash, Role: role}
+	u := &store.User{Email: req.Email, Name: req.Name, PasswordHash: hash, Role: role, MustChangePassword: true}
 	if err := s.st.CreateUser(u); err != nil {
 		writeError(w, http.StatusConflict, "could not create user (email may already exist)")
 		return
@@ -76,7 +87,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		_ = s.st.SetUserCameras(u.ID, req.CameraIDs)
 	}
 	s.logAudit(r, "user.create", u.Email, "role="+u.Role)
-	writeJSON(w, http.StatusCreated, s.userView(u))
+	resp := s.userView(u)
+	resp["tempPassword"] = tempPassword
+	resp["generated"] = generated
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
