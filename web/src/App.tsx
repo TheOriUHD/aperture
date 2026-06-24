@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./lib/auth";
+import { usePrefs } from "./lib/prefs";
 import { AppShell } from "./components/AppShell";
 import { Login } from "./screens/Login";
 import { Setup } from "./screens/Setup";
@@ -17,6 +18,7 @@ const Playback = lazy(() =>
 
 export default function App() {
   const { user, loading, needsSetup } = useAuth();
+  const { prefs } = usePrefs();
 
   if (loading) {
     return (
@@ -39,7 +41,7 @@ export default function App() {
         }
       >
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Navigate to={`/${prefs.landing}`} replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/live" element={<Navigate to="/dashboard" replace />} />
           <Route path="/cameras" element={<Cameras />} />

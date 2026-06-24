@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { fmtTime, fmtTimeSec } from "../lib/format";
 
 export interface TR {
   start: number;
@@ -25,15 +26,8 @@ function pickInterval(windowMs: number, heightPx: number, minPx: number): number
   return NICE[NICE.length - 1];
 }
 
-const fmtHM = (ms: number) =>
-  new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
-const fmtHMS = (ms: number) =>
-  new Date(ms).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
+const fmtHM = fmtTime;
+const fmtHMS = fmtTimeSec;
 
 /**
  * Vertical time scrubber: the playhead is fixed near the top and the timeline

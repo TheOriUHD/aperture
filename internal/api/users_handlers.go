@@ -75,6 +75,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if role == store.RoleViewer {
 		_ = s.st.SetUserCameras(u.ID, req.CameraIDs)
 	}
+	s.logAudit(r, "user.create", u.Email, "role="+u.Role)
 	writeJSON(w, http.StatusCreated, s.userView(u))
 }
 
@@ -116,6 +117,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		_ = s.st.SetUserCameras(u.ID, req.CameraIDs)
 	}
 	u, _ = s.st.GetUserByID(id)
+	s.logAudit(r, "user.update", u.Email, "role="+u.Role)
 	writeJSON(w, http.StatusOK, s.userView(u))
 }
 
@@ -126,10 +128,15 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "you cannot delete your own account")
 		return
 	}
+	email := id
+	if u, err := s.st.GetUserByID(id); err == nil {
+		email = u.Email
+	}
 	if err := s.st.DeleteUser(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	s.logAudit(r, "user.delete", email, "")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 

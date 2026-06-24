@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "./lib/auth";
+import { PrefsProvider } from "./lib/prefs";
 import App from "./App";
 import "./index.css";
 
@@ -17,7 +18,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <App />
+          <PrefsProvider>
+            <App />
+          </PrefsProvider>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>

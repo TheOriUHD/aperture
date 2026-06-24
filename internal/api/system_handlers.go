@@ -1,10 +1,12 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
 
+	"github.com/TheOriUHD/aperture/internal/format"
 	"github.com/TheOriUHD/aperture/internal/version"
 )
 
@@ -51,6 +53,7 @@ func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	s.logAudit(r, "settings.update", "site name", name)
 	writeJSON(w, http.StatusOK, map[string]any{"siteName": name})
 }
 
@@ -100,6 +103,11 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.log.Info("storage purge", "camera", req.CameraID, "segments", delSeg, "events", delEv, "freedBytes", freed)
+	cam := req.CameraID
+	if cam == "" {
+		cam = "all cameras"
+	}
+	s.logAudit(r, "storage.purge", cam, fmt.Sprintf("%d clips, %s freed", delSeg, format.Bytes(freed)))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"deletedSegments": delSeg,
 		"deletedEvents":   delEv,

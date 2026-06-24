@@ -79,6 +79,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.startSession(w, u)
+	s.logAuditAs(r, u.Email, "auth.login", u.Email, "sso")
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -127,5 +128,6 @@ func (s *Server) handleSetOIDC(w http.ResponseWriter, r *http.Request) {
 	if req.Secret != "" {
 		_ = s.st.SetSetting("oidc_client_secret", req.Secret)
 	}
+	s.logAudit(r, "oidc.update", "", "enabled="+boolStr(req.Enabled))
 	s.handleGetOIDC(w, r)
 }

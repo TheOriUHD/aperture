@@ -56,7 +56,8 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.startSession(w, u)
-	writeJSON(w, http.StatusCreated, publicUser(u))
+	s.logAuditAs(r, u.Email, "user.create", u.Email, "first administrator")
+	writeJSON(w, http.StatusCreated, s.userPayload(u))
 }
 
 type loginReq struct {
@@ -73,18 +74,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	u, err := s.st.GetUserByEmail(req.Email)
 	if err != nil || u.PasswordHash == "" || !auth.VerifyPassword(u.PasswordHash, req.Password) {
+		s.logAuditAs(r, req.Email, "auth.login_failed", req.Email, "invalid email or password")
 		writeError(w, http.StatusUnauthorized, "invalid email or password")
 		return
 	}
 	if u.Disabled {
+		s.logAuditAs(r, u.Email, "auth.login_failed", u.Email, "account disabled")
 		writeError(w, http.StatusForbidden, "account disabled")
 		return
 	}
 	s.startSession(w, u)
-	writeJSON(w, http.StatusOK, publicUser(u))
+	s.logAuditAs(r, u.Email, "auth.login", u.Email, "password")
+	writeJSON(w, http.StatusOK, s.userPayload(u))
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	s.logAudit(r, "auth.logout", "", "")
 	s.am.ClearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
@@ -96,7 +101,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, publicUser(u))
+	writeJSON(w, http.StatusOK, s.userPayload(u))
 }
 
 func (s *Server) startSession(w http.ResponseWriter, u *store.User) {

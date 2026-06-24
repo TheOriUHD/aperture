@@ -62,6 +62,7 @@ func (s *Server) handleSetHA(w http.ResponseWriter, r *http.Request) {
 		_ = s.st.SetSetting("ha_pass", req.Password)
 	}
 	s.ha.Reconcile()
+	s.logAudit(r, "ha.update", "", "enabled="+boolStr(req.Enabled))
 	s.handleGetHA(w, r)
 }
 

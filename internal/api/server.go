@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/TheOriUHD/aperture/internal/audit"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/ha"
@@ -30,13 +31,14 @@ type Server struct {
 	det    *motion.Detector
 	ha     *ha.Publisher
 	oidc   *oidc.Authenticator
+	audit  *audit.Logger
 	log    *slog.Logger
 	router http.Handler
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, log: log}
 	s.router = s.routes()
 	return s
 }
@@ -70,6 +72,8 @@ func (s *Server) routes() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireAuth)
 			r.Get("/auth/me", s.handleMe)
+			r.Get("/users/me/preferences", s.handleGetPrefs)
+			r.Put("/users/me/preferences", s.handleSetPrefs)
 			r.Get("/cameras", s.handleListCameras)
 			r.Get("/cameras/{id}", s.handleGetCamera)
 			r.Get("/cameras/{id}/stream-token", s.handleStreamToken)
@@ -103,6 +107,8 @@ func (s *Server) routes() http.Handler {
 			r.Put("/system/ha", s.handleSetHA)
 			r.Get("/system/oidc", s.handleGetOIDC)
 			r.Put("/system/oidc", s.handleSetOIDC)
+			r.Get("/system/audit", s.handleGetAudit)
+			r.Get("/system/audit/verify", s.handleVerifyAudit)
 		})
 	})
 

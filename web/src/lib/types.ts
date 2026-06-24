@@ -1,10 +1,25 @@
 export type Role = "admin" | "viewer";
 
+export interface Preferences {
+  clock24: boolean;
+  landing: "dashboard" | "playback" | "alarms" | "cameras";
+  timelineZoom: number;
+  density: "comfortable" | "compact";
+}
+
+export const DEFAULT_PREFS: Preferences = {
+  clock24: true,
+  landing: "dashboard",
+  timelineZoom: 8,
+  density: "comfortable",
+};
+
 export interface User {
   id: string;
   email: string;
   name: string;
   role: Role;
+  preferences?: Partial<Preferences>;
 }
 
 export type RecordMode = "never" | "continuous" | "motion" | "scheduled";

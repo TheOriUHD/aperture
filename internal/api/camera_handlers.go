@@ -83,6 +83,7 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.syncStreams()
+	s.logAudit(r, "camera.create", c.Name, "mode="+c.RecordMode)
 	writeJSON(w, http.StatusCreated, cameraView(c))
 }
 
@@ -132,15 +133,22 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.syncStreams()
+	s.logAudit(r, "camera.update", c.Name, "mode="+c.RecordMode)
 	writeJSON(w, http.StatusOK, cameraView(c))
 }
 
 func (s *Server) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
-	if err := s.st.DeleteCamera(chi.URLParam(r, "id")); err != nil {
+	id := chi.URLParam(r, "id")
+	name := id
+	if c, err := s.st.GetCamera(id); err == nil {
+		name = c.Name
+	}
+	if err := s.st.DeleteCamera(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	s.syncStreams()
+	s.logAudit(r, "camera.delete", name, "")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 

@@ -6,6 +6,8 @@ import { UserModal } from "../components/UserModal";
 import { StorageManager } from "../components/StorageManager";
 import { HomeAssistant } from "../components/HomeAssistant";
 import { OidcSettings } from "../components/OidcSettings";
+import { PreferencesSettings } from "../components/PreferencesSettings";
+import { AuditLog } from "../components/AuditLog";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUsers, type ManagedUser } from "../hooks/useUsers";
@@ -30,11 +32,14 @@ export function Settings() {
             <Row label="Role" value={user?.role || "—"} className="capitalize" />
           </Section>
 
+          <PreferencesSettings />
+
           {isAdmin && <SiteSection />}
           {isAdmin && <UsersSection currentUserId={user?.id} />}
           {isAdmin && <OidcSettings />}
           {isAdmin && <StorageManager />}
           {isAdmin && <HomeAssistant />}
+          {isAdmin && <AuditLog />}
 
           <Section title="About">
             <Row label="Application" value="Aperture NVR" />

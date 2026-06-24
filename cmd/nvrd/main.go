@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/TheOriUHD/aperture/internal/api"
+	"github.com/TheOriUHD/aperture/internal/audit"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/ha"
@@ -114,7 +115,8 @@ func main() {
 	}()
 
 	oidcAuth := oidc.New(cfg, st)
-	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, log)
+	auditLog := audit.New(st)
+	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

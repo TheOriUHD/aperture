@@ -23,6 +23,7 @@ import { LiveVideo } from "../components/LiveVideo";
 import { ZoomControl } from "../components/ZoomControl";
 import { useCameras } from "../hooks/useCameras";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { usePrefs } from "../lib/prefs";
 import { api } from "../lib/api";
 import { wallToOffset, offsetToWall, mergeRanges, type Seg } from "../lib/playlist";
 import type { MotionEvent } from "../lib/types";
@@ -57,7 +58,10 @@ export function Playback() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [following, setFollowing] = useState(true);
   const [selectedState, setSelectedState] = useState(() => Date.now());
-  const [zoomIdx, setZoomIdx] = useState(ZOOM_DEFAULT);
+  const { prefs } = usePrefs();
+  const [zoomIdx, setZoomIdx] = useState(
+    Math.min(ZOOMS.length - 1, Math.max(0, prefs.timelineZoom ?? ZOOM_DEFAULT)),
+  );
   const [paused, setPaused] = useState(false);
 
   const isDesktop = useMediaQuery("(min-width: 1024px)");
