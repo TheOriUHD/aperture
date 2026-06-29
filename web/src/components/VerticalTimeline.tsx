@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fmtTime, fmtTimeSec } from "../lib/format";
+import { shadeColor, type ShadeBand } from "../lib/shading";
 
 export interface TR {
   start: number;
@@ -42,6 +43,8 @@ export function VerticalTimeline({
   segments,
   events,
   live,
+  shadeBands,
+  ribbon,
   playheadFrac = 0.16,
   onScrubTo,
   onSeekAbs,
@@ -53,6 +56,8 @@ export function VerticalTimeline({
   segments: TR[];
   events: TLEvent[];
   live: boolean;
+  shadeBands?: ShadeBand[];
+  ribbon?: { ts: number; tempC?: number; precipMm?: number }[];
   playheadFrac?: number;
   onScrubTo: (ms: number) => void;
   onSeekAbs: (ms: number) => void;
@@ -119,6 +124,41 @@ export function VerticalTimeline({
     }
   }
 
+  // Environmental ribbon: a temperature trend (warmer = further right) with
+  // precipitation ticks, drawn down the right margin where nothing else lives.
+  const ribbonEl = (() => {
+    const pts = (ribbon ?? []).filter((r) => r.tempC != null);
+    if (pts.length < 2) return null;
+    const temps = pts.map((r) => r.tempC as number);
+    let lo = Math.min(...temps);
+    let hi = Math.max(...temps);
+    if (hi - lo < 1) hi = lo + 1;
+    const x0 = 74;
+    const x1 = 96;
+    const xOf = (t: number) => x0 + ((t - lo) / (hi - lo)) * (x1 - x0);
+    const line = pts.map((r) => `${xOf(r.tempC as number).toFixed(2)},${pct(r.ts * 1000).toFixed(2)}`).join(" ");
+    const rain = (ribbon ?? []).filter((r) => (r.precipMm ?? 0) > 0);
+    return (
+      <svg
+        className="absolute inset-0 h-full w-full pointer-events-none"
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+      >
+        {rain.map((r, i) => (
+          <rect key={`p${i}`} x={66} y={pct(r.ts * 1000) - 0.4} width={4} height={0.8} fill="rgba(80,150,240,0.65)" />
+        ))}
+        <polyline
+          points={line}
+          fill="none"
+          stroke="rgba(245,180,90,0.7)"
+          strokeWidth={1.2}
+          vectorEffect="non-scaling-stroke"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  })();
+
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     drag.current = { anchorY: e.clientY, anchorSel: selRef.current, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -152,6 +192,20 @@ export function VerticalTimeline({
       onPointerUp={onPointerUp}
       className="relative h-full w-full select-none overflow-hidden cursor-grab active:cursor-grabbing touch-none"
     >
+      {/* Day/night shading from the astro layer, behind everything. */}
+      {shadeBands?.map((b, i) => {
+        const top = pct(b.end);
+        const h = pct(b.start) - pct(b.end);
+        if (h <= 0 || top >= 100 || top + h <= 0) return null;
+        return (
+          <div
+            key={`sh${i}`}
+            className="absolute left-0 right-0 pointer-events-none"
+            style={{ top: `${top}%`, height: `${h}%`, backgroundColor: shadeColor(b.kind) }}
+          />
+        );
+      })}
+
       {minors.map((t) => (
         <div key={`mi${t}`} className="absolute h-px w-2 bg-line" style={{ left: railX - 10, top: `${pct(t)}%` }} />
       ))}
@@ -207,6 +261,8 @@ export function VerticalTimeline({
           </div>
         );
       })}
+
+      {ribbonEl}
 
       {!live && nowMs <= topTime && nowMs >= bottomTime && (
         <div className="absolute left-12 right-0 border-t border-dashed border-online/50" style={{ top: `${pct(nowMs)}%` }} />

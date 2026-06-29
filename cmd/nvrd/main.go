@@ -29,6 +29,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
 	"github.com/TheOriUHD/aperture/internal/version"
+	"github.com/TheOriUHD/aperture/internal/weather"
 )
 
 func main() {
@@ -61,17 +62,38 @@ func main() {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
 
-	// Best-effort initial reconciliation of go2rtc streams with stored cameras.
+	// Reconcile go2rtc streams with stored cameras at startup and then on a
+	// fixed interval. go2rtc keeps dynamically-added streams only in memory, so
+	// a go2rtc restart silently drops them; periodic reconciliation makes live
+	// view self-heal instead of staying dark until nvrd is restarted.
 	go func() {
-		ctx, cancel := context.WithTimeout(bgCtx, 15*time.Second)
-		defer cancel()
-		cams, err := st.ListCameras()
-		if err != nil {
-			log.Error("initial stream sync: list cameras", "err", err)
-			return
+		reconcile := func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 15*time.Second)
+			defer cancel()
+			cams, err := st.ListCameras()
+			if err != nil {
+				log.Error("stream sync: list cameras", "err", err)
+				return
+			}
+			n, err := sm.Sync(ctx, cams)
+			if err != nil {
+				log.Warn("stream sync failed (will retry)", "err", err)
+				return
+			}
+			if n > 0 {
+				log.Info("stream sync: registered camera streams in go2rtc", "count", n)
+			}
 		}
-		if err := sm.Sync(ctx, cams); err != nil {
-			log.Warn("initial stream sync failed (go2rtc may not be up yet)", "err", err)
+		reconcile()
+		t := time.NewTicker(60 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-t.C:
+				reconcile()
+			}
 		}
 	}()
 
@@ -123,7 +145,13 @@ func main() {
 	exporter.Start(bgCtx)
 	notifyEng := notify.New(cfg, st, log)
 	det.SetOnEvent(notifyEng.OnEvent)
-	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, exporter, notifyEng, log)
+
+	// Environmental context: poll weather into a time-series for "past weather
+	// at the playhead". No-ops until a site location is configured.
+	weatherPoller := weather.New(st, log)
+	go weatherPoller.Run(bgCtx)
+
+	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

@@ -1,8 +1,6 @@
 import { Activity, Footprints } from "lucide-react";
 import type { MotionEvent } from "../lib/types";
-
-const fmtTime = (ms: number) =>
-  new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+import { fmtTime } from "../lib/format";
 
 // UniFi-style Playback footer: motion event thumbnails for the day; click to
 // jump the player to that moment.

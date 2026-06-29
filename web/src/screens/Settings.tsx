@@ -6,6 +6,7 @@ import { TopBar } from "../components/TopBar";
 import { UserModal } from "../components/UserModal";
 import { StorageManager } from "../components/StorageManager";
 import { HomeAssistant } from "../components/HomeAssistant";
+import { LocationWeather } from "../components/LocationWeather";
 import { OidcSettings } from "../components/OidcSettings";
 import { PreferencesSettings } from "../components/PreferencesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
@@ -41,6 +42,7 @@ export function Settings() {
           <NotificationsSettings />
 
           {isAdmin && <SiteSection />}
+          {isAdmin && <LocationWeather />}
           {isAdmin && <UsersSection currentUserId={user?.id} />}
           {isAdmin && <OidcSettings />}
           {isAdmin && <StorageManager />}

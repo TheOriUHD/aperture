@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { X, Maximize2, Camera as CameraIcon, Clapperboard } from "lucide-react";
 import { LiveVideo } from "./LiveVideo";
+import { LiveConditions } from "./ConditionsOverlay";
 import type { Camera } from "../lib/types";
 
 export function CameraPopout({
@@ -55,6 +56,7 @@ export function CameraPopout({
       >
         <div className="relative aspect-video bg-black">
           <LiveVideo camera={camera} fit="contain" />
+          <LiveConditions variant="full" className="top-3 right-14" />
         </div>
 
         {/* Top overlay: subtle name pill + close */}

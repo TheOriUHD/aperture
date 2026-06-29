@@ -20,31 +20,33 @@ import (
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
+	"github.com/TheOriUHD/aperture/internal/weather"
 )
 
 const sessionTTL = 7 * 24 * time.Hour
 
 // Server wires the HTTP API and the embedded web UI.
 type Server struct {
-	cfg    *config.Config
-	st     *store.Store
-	am     *auth.Manager
-	sm     *stream.Manager
-	rec    *record.Recorder
-	det    *motion.Detector
-	ha     *ha.Publisher
-	oidc   *oidc.Authenticator
-	audit  *audit.Logger
-	exp    *export.Manager
-	notify *notify.Engine
-	waSess *waSessions
-	log    *slog.Logger
-	router http.Handler
+	cfg     *config.Config
+	st      *store.Store
+	am      *auth.Manager
+	sm      *stream.Manager
+	rec     *record.Recorder
+	det     *motion.Detector
+	ha      *ha.Publisher
+	oidc    *oidc.Authenticator
+	audit   *audit.Logger
+	exp     *export.Manager
+	notify  *notify.Engine
+	weather *weather.Poller
+	waSess  *waSessions
+	log     *slog.Logger
+	router  http.Handler
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, waSess: newWASessions(), log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, waSess: newWASessions(), log: log}
 	s.router = s.routes()
 	return s
 }
@@ -146,6 +148,11 @@ func (s *Server) routes() http.Handler {
 			r.Get("/cameras/{id}/zones", s.handleGetZones)
 			r.Get("/system/storage", s.handleStorage)
 			r.Get("/system/settings", s.handleGetSettings)
+			r.Get("/system/site", s.handleGetSite)
+			r.Get("/system/weather/now", s.handleWeatherNow)
+			r.Get("/system/weather/at", s.handleWeatherAt)
+			r.Get("/system/weather/range", s.handleWeatherRange)
+			r.Get("/system/astro", s.handleAstro)
 		})
 
 		// Admin-only.
@@ -162,6 +169,11 @@ func (s *Server) routes() http.Handler {
 			r.Put("/cameras/{id}/schedule", s.handleSetSchedule)
 			r.Put("/cameras/{id}/zones", s.handleSetZones)
 			r.Put("/system/settings", s.handleSetSettings)
+			r.Put("/system/site", s.handleSetSite)
+			r.Get("/system/geocode", s.handleGeocode)
+			r.Get("/system/geo/resolve", s.handleResolveGeo)
+			r.Get("/system/weather", s.handleGetWeather)
+			r.Put("/system/weather", s.handleSetWeather)
 			r.Post("/system/purge", s.handlePurge)
 			r.Get("/system/ha", s.handleGetHA)
 			r.Put("/system/ha", s.handleSetHA)

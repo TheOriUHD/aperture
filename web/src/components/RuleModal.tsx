@@ -63,6 +63,8 @@ export function RuleModal({
   const [qStart, setQStart] = useState(minToHHMM(rule?.quietStart ?? 1380));
   const [qEnd, setQEnd] = useState(minToHHMM(rule?.quietEnd ?? 420));
   const [cooldown, setCooldown] = useState(rule?.cooldownSec ?? 120);
+  const [timeOfDay, setTimeOfDay] = useState<"" | "day" | "night">(rule?.conditions?.timeOfDay ?? "");
+  const [onlyPrecip, setOnlyPrecip] = useState(rule?.conditions?.onlyPrecip ?? false);
   const [err, setErr] = useState("");
 
   const toggle = (arr: string[], set: (v: string[]) => void, id: string) =>
@@ -96,6 +98,7 @@ export function RuleModal({
                   quietStart: quiet ? hhmmToMin(qStart) : -1,
                   quietEnd: quiet ? hhmmToMin(qEnd) : -1,
                   cooldownSec: cooldown,
+                  conditions: { timeOfDay, onlyPrecip },
                 });
                 onClose();
               } catch (e) {
@@ -184,6 +187,29 @@ export function RuleModal({
             </div>
           </div>
         )}
+
+        <div className="border-t border-line pt-4">
+          <label className="label">Only notify when…</label>
+          <div className="grid grid-cols-2 gap-3">
+            <select
+              className="input"
+              value={timeOfDay}
+              onChange={(e) => setTimeOfDay(e.target.value as "" | "day" | "night")}
+            >
+              <option value="">Any time of day</option>
+              <option value="day">Daytime only</option>
+              <option value="night">Nighttime only</option>
+            </select>
+            <label className="flex items-center gap-2 text-sm text-fg">
+              <input type="checkbox" checked={onlyPrecip} onChange={(e) => setOnlyPrecip(e.target.checked)} />
+              Only when raining
+            </label>
+          </div>
+          <p className="text-xs text-fg-faint mt-1.5">
+            Uses your site’s sun times and recorded weather. Ignored until a location is set in Settings →
+            Location &amp; weather.
+          </p>
+        </div>
 
         {err && <p className="text-xs text-rec">{err}</p>}
       </div>

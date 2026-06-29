@@ -46,9 +46,14 @@ func (s *Server) handleCameraEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UnixMilli()
+	enr := s.newCondEnricher()
 	out := make([]map[string]any, 0, len(evs))
 	for _, e := range evs {
-		out = append(out, eventView(e, now))
+		v := eventView(e, now)
+		if c := enr.conditions(e.StartTS); c != nil {
+			v["conditions"] = c
+		}
+		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -74,6 +79,7 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UnixMilli()
+	enr := s.newCondEnricher()
 	out := make([]map[string]any, 0, len(evs))
 	for _, e := range evs {
 		if !isAdmin && !allowed[e.CameraID] {
@@ -82,7 +88,11 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 		if len(out) >= limit {
 			break
 		}
-		out = append(out, eventView(e, now))
+		v := eventView(e, now)
+		if c := enr.conditions(e.StartTS); c != nil {
+			v["conditions"] = c
+		}
+		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -182,7 +182,7 @@ func (s *Server) syncStreams() {
 			s.log.Error("sync streams: list cameras", "err", err)
 			return
 		}
-		if err := s.sm.Sync(ctx, cams); err != nil {
+		if _, err := s.sm.Sync(ctx, cams); err != nil {
 			s.log.Error("sync streams", "err", err)
 		}
 		// Pick up recording-mode / enabled changes promptly.

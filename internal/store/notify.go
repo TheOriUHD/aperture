@@ -76,18 +76,34 @@ func scanChannel(row rowScanner) (*NotifyChannel, error) {
 
 // --- rules ---------------------------------------------------------------
 
+// RuleConditions gates a rule on the environmental context at the event. Empty
+// fields mean "don't care".
+type RuleConditions struct {
+	TimeOfDay  string `json:"timeOfDay"`  // "" | "day" | "night"
+	OnlyPrecip bool   `json:"onlyPrecip"` // only when precipitation > 0
+}
+
 type NotifyRule struct {
-	ID         string   `json:"id"`
-	UserID     string   `json:"userId"`
-	Name       string   `json:"name"`
-	Enabled    bool     `json:"enabled"`
-	Cameras    []string `json:"cameras"`
-	EventTypes []string `json:"eventTypes"`
-	Channels   []string `json:"channels"`
-	QuietStart int      `json:"quietStart"`
-	QuietEnd   int      `json:"quietEnd"`
-	CooldownS  int      `json:"cooldownSec"`
-	CreatedAt  int64    `json:"createdAt"`
+	ID         string         `json:"id"`
+	UserID     string         `json:"userId"`
+	Name       string         `json:"name"`
+	Enabled    bool           `json:"enabled"`
+	Cameras    []string       `json:"cameras"`
+	EventTypes []string       `json:"eventTypes"`
+	Channels   []string       `json:"channels"`
+	QuietStart int            `json:"quietStart"`
+	QuietEnd   int            `json:"quietEnd"`
+	CooldownS  int            `json:"cooldownSec"`
+	Conditions RuleConditions `json:"conditions"`
+	CreatedAt  int64          `json:"createdAt"`
+}
+
+func (c RuleConditions) marshal() string {
+	if c.TimeOfDay == "" && !c.OnlyPrecip {
+		return ""
+	}
+	b, _ := json.Marshal(c)
+	return string(b)
 }
 
 func (s *Store) CreateRule(r *NotifyRule) error {
@@ -95,18 +111,18 @@ func (s *Store) CreateRule(r *NotifyRule) error {
 		r.ID = NewID()
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO notify_rules (id, user_id, name, enabled, cameras, event_types, channels, quiet_start, quiet_end, cooldown_sec, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO notify_rules (id, user_id, name, enabled, cameras, event_types, channels, quiet_start, quiet_end, cooldown_sec, conditions, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.UserID, r.Name, boolInt(r.Enabled), jsonArr(r.Cameras), jsonArr(r.EventTypes),
-		jsonArr(r.Channels), r.QuietStart, r.QuietEnd, r.CooldownS, r.CreatedAt)
+		jsonArr(r.Channels), r.QuietStart, r.QuietEnd, r.CooldownS, r.Conditions.marshal(), r.CreatedAt)
 	return err
 }
 
 func (s *Store) UpdateRule(r *NotifyRule) error {
 	return affected(s.db.Exec(
-		`UPDATE notify_rules SET name=?, enabled=?, cameras=?, event_types=?, channels=?, quiet_start=?, quiet_end=?, cooldown_sec=? WHERE id=?`,
+		`UPDATE notify_rules SET name=?, enabled=?, cameras=?, event_types=?, channels=?, quiet_start=?, quiet_end=?, cooldown_sec=?, conditions=? WHERE id=?`,
 		r.Name, boolInt(r.Enabled), jsonArr(r.Cameras), jsonArr(r.EventTypes), jsonArr(r.Channels),
-		r.QuietStart, r.QuietEnd, r.CooldownS, r.ID))
+		r.QuietStart, r.QuietEnd, r.CooldownS, r.Conditions.marshal(), r.ID))
 }
 
 func (s *Store) GetRule(id string) (*NotifyRule, error) {
@@ -126,14 +142,14 @@ func (s *Store) DeleteRule(id string) error {
 	return err
 }
 
-const ruleSelect = `SELECT id, user_id, name, enabled, cameras, event_types, channels, quiet_start, quiet_end, cooldown_sec, created_at FROM notify_rules`
+const ruleSelect = `SELECT id, user_id, name, enabled, cameras, event_types, channels, quiet_start, quiet_end, cooldown_sec, conditions, created_at FROM notify_rules`
 
 func scanRule(row rowScanner) (*NotifyRule, error) {
 	var r NotifyRule
 	var en int
-	var cams, types, chans string
+	var cams, types, chans, conds string
 	if err := row.Scan(&r.ID, &r.UserID, &r.Name, &en, &cams, &types, &chans,
-		&r.QuietStart, &r.QuietEnd, &r.CooldownS, &r.CreatedAt); err != nil {
+		&r.QuietStart, &r.QuietEnd, &r.CooldownS, &conds, &r.CreatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
 		}
@@ -143,6 +159,9 @@ func scanRule(row rowScanner) (*NotifyRule, error) {
 	r.Cameras = parseArr(cams)
 	r.EventTypes = parseArr(types)
 	r.Channels = parseArr(chans)
+	if conds != "" {
+		_ = json.Unmarshal([]byte(conds), &r.Conditions)
+	}
 	return &r, nil
 }
 

@@ -64,12 +64,17 @@ func (m *Manager) RTSPURL(cameraID string) string {
 
 // Sync reconciles go2rtc's streams with the given cameras: enabled cameras get
 // their sources registered, others are removed.
-func (m *Manager) Sync(ctx context.Context, cameras []*store.Camera) error {
+// Sync reconciles go2rtc's stream set with the stored cameras and returns the
+// number of streams it (re)registered. Because go2rtc holds dynamically-added
+// streams only in memory, a go2rtc restart drops them all — so this must be run
+// periodically, not just once, for live view to self-heal.
+func (m *Manager) Sync(ctx context.Context, cameras []*store.Camera) (int, error) {
 	existing, err := m.streams(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	want := map[string]bool{}
+	registered := 0
 	for _, c := range cameras {
 		if !c.Enabled || c.RTSPMainURL == "" {
 			continue
@@ -87,8 +92,9 @@ func (m *Manager) Sync(ctx context.Context, cameras []*store.Camera) error {
 			continue
 		}
 		if err := m.putStream(ctx, name, srcs); err != nil {
-			return fmt.Errorf("register stream %s: %w", name, err)
+			return registered, fmt.Errorf("register stream %s: %w", name, err)
 		}
+		registered++
 	}
 	// Remove go2rtc streams we manage (cam_*) that are no longer wanted.
 	for name := range existing {
@@ -96,7 +102,7 @@ func (m *Manager) Sync(ctx context.Context, cameras []*store.Camera) error {
 			_ = m.deleteStream(ctx, name)
 		}
 	}
-	return nil
+	return registered, nil
 }
 
 // putStream registers (or replaces) a stream's sources in go2rtc.

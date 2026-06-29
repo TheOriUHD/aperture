@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import Hls from "hls.js";
@@ -23,10 +23,14 @@ import { EventStrip } from "../components/EventStrip";
 import { LiveVideo } from "../components/LiveVideo";
 import { ZoomControl } from "../components/ZoomControl";
 import { ExportCenter } from "../components/ExportCenter";
+import { PlaybackConditions } from "../components/ConditionsOverlay";
 import { useCameras } from "../hooks/useCameras";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useSite, useAstro, useWeatherRange } from "../hooks/useEnvironment";
+import { buildShadeBands } from "../lib/shading";
 import { usePrefs } from "../lib/prefs";
 import { api } from "../lib/api";
+import { fmtTimeSec, fmtDate } from "../lib/format";
 import { wallToOffset, offsetToWall, mergeRanges, type Seg } from "../lib/playlist";
 import type { MotionEvent } from "../lib/types";
 
@@ -47,10 +51,7 @@ const startOfDay = (ms: number) => {
   return d.getTime();
 };
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
-const fmtClock = (ms: number) =>
-  new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-const fmtDate = (ms: number) =>
-  new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const fmtClock = fmtTimeSec;
 
 export function Playback() {
   const { data: cameras } = useCameras();
@@ -138,6 +139,25 @@ export function Playback() {
     end: e.endTs,
     thumbUrl: e.thumbUrl,
   }));
+
+  // Day/night timeline shading from the astro layer. We fetch the playhead day
+  // plus its neighbours so the night band stays continuous across midnight.
+  const { data: site } = useSite();
+  const dayKey = (ms: number) =>
+    new Date(ms).toLocaleDateString("en-CA", { timeZone: site?.timezone || undefined });
+  const astroPrev = useAstro(dayKey(selectedMs - DAY_MS));
+  const astroDay = useAstro(dayKey(selectedMs));
+  const astroNext = useAstro(dayKey(selectedMs + DAY_MS));
+  const shadeBands = useMemo(
+    () =>
+      site?.configured
+        ? buildShadeBands([astroPrev.data?.sun, astroDay.data?.sun, astroNext.data?.sun])
+        : [],
+    [site?.configured, astroPrev.data, astroDay.data, astroNext.data],
+  );
+
+  // The day's weather samples feed the timeline's environmental ribbon.
+  const { data: dayWeather } = useWeatherRange(dayStart, dayEnd, !!site?.configured);
 
   // HLS playback for the active day.
   useEffect(() => {
@@ -381,6 +401,7 @@ export function Playback() {
               {fmtDate(overlayTime)} {fmtClock(overlayTime)} · {selected.name}
             </div>
           )}
+          {selected && <PlaybackConditions tsMs={selectedMs} className="top-2 right-2" />}
         </div>
 
         {/* control header */}
@@ -424,6 +445,8 @@ export function Playback() {
               segments={recorded}
               events={tlEvents}
               live={following}
+              shadeBands={shadeBands}
+              ribbon={dayWeather}
               onScrubTo={scrubToTime}
               onSeekAbs={seekToTime}
               onEventClick={seekToTime}
@@ -510,6 +533,8 @@ export function Playback() {
             segments={recorded}
             events={tlEvents}
             live={following}
+            shadeBands={shadeBands}
+            ribbon={dayWeather}
             onScrubTo={scrubToTime}
             onSeekAbs={seekToTime}
             onEventClick={seekToTime}
@@ -538,6 +563,7 @@ export function Playback() {
               <span className="text-xs font-medium text-white">{selected.name}</span>
             </div>
           )}
+          {selected && <PlaybackConditions tsMs={selectedMs} className="top-3 right-3" />}
         </div>
 
         {/* control bar (below the video) */}

@@ -147,14 +147,15 @@ func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 }
 
 type ruleReq struct {
-	Name       string   `json:"name"`
-	Enabled    bool     `json:"enabled"`
-	Cameras    []string `json:"cameras"`
-	EventTypes []string `json:"eventTypes"`
-	Channels   []string `json:"channels"`
-	QuietStart int      `json:"quietStart"`
-	QuietEnd   int      `json:"quietEnd"`
-	CooldownS  int      `json:"cooldownSec"`
+	Name       string               `json:"name"`
+	Enabled    bool                 `json:"enabled"`
+	Cameras    []string             `json:"cameras"`
+	EventTypes []string             `json:"eventTypes"`
+	Channels   []string             `json:"channels"`
+	QuietStart int                  `json:"quietStart"`
+	QuietEnd   int                  `json:"quietEnd"`
+	CooldownS  int                  `json:"cooldownSec"`
+	Conditions store.RuleConditions `json:"conditions"`
 }
 
 func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +169,8 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		UserID: c.UserID, Name: req.Name, Enabled: req.Enabled,
 		Cameras: req.Cameras, EventTypes: req.EventTypes, Channels: req.Channels,
 		QuietStart: req.QuietStart, QuietEnd: req.QuietEnd, CooldownS: req.CooldownS,
-		CreatedAt: time.Now().Unix(),
+		Conditions: req.Conditions,
+		CreatedAt:  time.Now().Unix(),
 	}
 	if rule.QuietStart == 0 && rule.QuietEnd == 0 {
 		rule.QuietStart, rule.QuietEnd = -1, -1
@@ -199,6 +201,7 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 	rule.Name, rule.Enabled = req.Name, req.Enabled
 	rule.Cameras, rule.EventTypes, rule.Channels = req.Cameras, req.EventTypes, req.Channels
 	rule.QuietStart, rule.QuietEnd, rule.CooldownS = req.QuietStart, req.QuietEnd, req.CooldownS
+	rule.Conditions = req.Conditions
 	if err := s.st.UpdateRule(rule); err != nil {
 		writeStoreError(w, err)
 		return

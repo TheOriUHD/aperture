@@ -9,6 +9,11 @@ export interface Channel {
   createdAt: number;
 }
 
+export interface RuleConditions {
+  timeOfDay?: "" | "day" | "night";
+  onlyPrecip?: boolean;
+}
+
 export interface Rule {
   id: string;
   name: string;
@@ -19,6 +24,7 @@ export interface Rule {
   quietStart: number;
   quietEnd: number;
   cooldownSec: number;
+  conditions?: RuleConditions;
   createdAt: number;
 }
 

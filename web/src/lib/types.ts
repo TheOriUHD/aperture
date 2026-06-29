@@ -52,6 +52,14 @@ export interface StreamToken {
   wsUrl: string;
 }
 
+export interface EventConditions {
+  tempC?: number;
+  conditionCode?: number;
+  precipMm?: number;
+  windSpeedMs?: number;
+  isNight?: boolean;
+}
+
 export interface MotionEvent {
   id: string;
   cameraId: string;
@@ -63,4 +71,5 @@ export interface MotionEvent {
   thumbUrl?: string;
   reviewed: boolean;
   saved: boolean;
+  conditions?: EventConditions;
 }

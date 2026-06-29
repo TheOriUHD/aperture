@@ -16,19 +16,32 @@ export function setLocale(l: string | undefined): void {
   locale = l || undefined;
 }
 
-export function fmtTime(ms: number): string {
+export function fmtTime(ms: number, tz?: string): string {
   return new Date(ms).toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: !clock24,
+    timeZone: tz || undefined,
   });
 }
 
-export function fmtTimeSec(ms: number): string {
+export function fmtTimeSec(ms: number, tz?: string): string {
   return new Date(ms).toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    hour12: !clock24,
+    timeZone: tz || undefined,
+  });
+}
+
+/** Short "MMM d, HH:MM" date+time honoring the clock preference. */
+export function fmtDayTime(ms: number): string {
+  return new Date(ms).toLocaleString(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
     hour12: !clock24,
   });
 }

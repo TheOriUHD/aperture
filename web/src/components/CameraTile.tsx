@@ -1,5 +1,6 @@
 import { Maximize2 } from "lucide-react";
 import { LiveVideo } from "./LiveVideo";
+import { LiveConditions } from "./ConditionsOverlay";
 import type { Camera } from "../lib/types";
 
 export function CameraTile({ camera, onOpen }: { camera: Camera; onOpen?: (c: Camera) => void }) {
@@ -34,6 +35,9 @@ export function CameraTile({ camera, onOpen }: { camera: Camera; onOpen?: (c: Ca
           </span>
         </div>
       )}
+
+      {/* Conditions readout (bottom-right, opposite the name) */}
+      <LiveConditions variant="compact" className="bottom-2.5 right-3" />
 
       {/* Name (text shadow, no gradient band) */}
       <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between">

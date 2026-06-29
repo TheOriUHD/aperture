@@ -16,7 +16,9 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 
+	"github.com/TheOriUHD/aperture/internal/astro"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/site"
 	"github.com/TheOriUHD/aperture/internal/store"
 )
 
@@ -70,8 +72,12 @@ func (e *Engine) OnEvent(ev *store.Event) {
 		return
 	}
 	now := time.Now()
+	ec := e.eventContext(ev)
 	for _, r := range rules {
 		if !match(r.Cameras, ev.CameraID) || !match(r.EventTypes, ev.Type) {
+			continue
+		}
+		if !conditionsMet(r.Conditions, ec) {
 			continue
 		}
 		if inQuietHours(r, now) {
@@ -89,6 +95,53 @@ func (e *Engine) OnEvent(ev *store.Event) {
 		note := e.buildNote(ev, cam)
 		go e.fire(r, note)
 	}
+}
+
+// evContext is the environmental context at an event, computed once per event.
+type evContext struct {
+	configured bool
+	isNight    bool
+	precip     bool
+}
+
+// eventContext joins the event time against the context layer (weather + astro).
+func (e *Engine) eventContext(ev *store.Event) evContext {
+	loc := site.Load(e.st)
+	if !loc.Configured {
+		return evContext{}
+	}
+	ec := evContext{configured: true}
+	tsSec := ev.StartTS / 1000
+	if ws, err := e.st.WeatherAt(tsSec); err == nil && ws != nil && ws.PrecipMm != nil {
+		ec.precip = *ws.PrecipMm > 0
+	}
+	tz, err := time.LoadLocation(loc.Timezone)
+	if err != nil {
+		tz = time.UTC
+	}
+	t := time.Unix(tsSec, 0).In(tz)
+	noon := time.Date(t.Year(), t.Month(), t.Day(), 12, 0, 0, 0, tz)
+	sun := astro.Sun(noon, loc.Lat, loc.Lon)
+	ec.isNight = sun.Sunrise > 0 && sun.Sunset > 0 && (tsSec < sun.Sunrise || tsSec > sun.Sunset)
+	return ec
+}
+
+// conditionsMet reports whether a rule's environmental gates pass. When no site
+// is configured the gates can't be evaluated, so we don't suppress.
+func conditionsMet(c store.RuleConditions, ec evContext) bool {
+	if (c.TimeOfDay == "" && !c.OnlyPrecip) || !ec.configured {
+		return true
+	}
+	if c.TimeOfDay == "day" && ec.isNight {
+		return false
+	}
+	if c.TimeOfDay == "night" && !ec.isNight {
+		return false
+	}
+	if c.OnlyPrecip && !ec.precip {
+		return false
+	}
+	return true
 }
 
 func (e *Engine) buildNote(ev *store.Event, cam *store.Camera) Note {
