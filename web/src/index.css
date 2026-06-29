@@ -73,6 +73,9 @@ input.vrange {
   .btn-subtle {
     @apply btn bg-ink-700 text-fg hover:bg-ink-650;
   }
+  .btn-secondary {
+    @apply btn bg-ink-700 text-fg border border-line hover:bg-ink-650 hover:border-line-strong;
+  }
   .btn-danger {
     @apply btn bg-rec/90 text-white hover:bg-rec;
   }
