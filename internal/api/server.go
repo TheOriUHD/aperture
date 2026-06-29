@@ -27,26 +27,27 @@ const sessionTTL = 7 * 24 * time.Hour
 
 // Server wires the HTTP API and the embedded web UI.
 type Server struct {
-	cfg     *config.Config
-	st      *store.Store
-	am      *auth.Manager
-	sm      *stream.Manager
-	rec     *record.Recorder
-	det     *motion.Detector
-	ha      *ha.Publisher
-	oidc    *oidc.Authenticator
-	audit   *audit.Logger
-	exp     *export.Manager
-	notify  *notify.Engine
-	weather *weather.Poller
-	waSess  *waSessions
-	log     *slog.Logger
-	router  http.Handler
+	cfg       *config.Config
+	st        *store.Store
+	am        *auth.Manager
+	sm        *stream.Manager
+	rec       *record.Recorder
+	det       *motion.Detector
+	ha        *ha.Publisher
+	oidc      *oidc.Authenticator
+	audit     *audit.Logger
+	exp       *export.Manager
+	notify    *notify.Engine
+	weather   *weather.Poller
+	waSess    *waSessions
+	startedAt time.Time
+	log       *slog.Logger
+	router    http.Handler
 }
 
 // NewServer builds a Server and its routes.
 func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, waSess: newWASessions(), log: log}
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, waSess: newWASessions(), startedAt: time.Now(), log: log}
 	s.router = s.routes()
 	return s
 }
@@ -175,6 +176,7 @@ func (s *Server) routes() http.Handler {
 			r.Get("/system/weather", s.handleGetWeather)
 			r.Put("/system/weather", s.handleSetWeather)
 			r.Post("/system/purge", s.handlePurge)
+			r.Get("/system/status", s.handleSystemStatus)
 			r.Get("/system/ha", s.handleGetHA)
 			r.Put("/system/ha", s.handleSetHA)
 			r.Get("/system/oidc", s.handleGetOIDC)

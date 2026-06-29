@@ -191,6 +191,31 @@ func sameSources(raw json.RawMessage, srcs []string) bool {
 	return true
 }
 
+// StreamHealth is a snapshot of go2rtc's reachability and the camera streams it
+// currently holds (name -> has at least one producer source).
+type StreamHealth struct {
+	Reachable  bool
+	Registered map[string]bool
+}
+
+// Health probes go2rtc for the live-view health signal that a silent stream
+// drop (e.g. after a go2rtc restart) would otherwise hide.
+func (m *Manager) Health(ctx context.Context) StreamHealth {
+	raw, err := m.streams(ctx)
+	if err != nil {
+		return StreamHealth{Reachable: false, Registered: map[string]bool{}}
+	}
+	h := StreamHealth{Reachable: true, Registered: make(map[string]bool, len(raw))}
+	for name, def := range raw {
+		var d struct {
+			Producers []json.RawMessage `json:"producers"`
+		}
+		_ = json.Unmarshal(def, &d)
+		h.Registered[name] = len(d.Producers) > 0
+	}
+	return h
+}
+
 // Online reports whether go2rtc currently has a producer for the camera (a
 // best-effort health signal for the UI).
 func (m *Manager) Online(ctx context.Context, cameraID string) bool {

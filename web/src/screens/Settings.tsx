@@ -7,6 +7,7 @@ import { UserModal } from "../components/UserModal";
 import { StorageManager } from "../components/StorageManager";
 import { HomeAssistant } from "../components/HomeAssistant";
 import { LocationWeather } from "../components/LocationWeather";
+import { SystemHealth } from "../components/SystemHealth";
 import { OidcSettings } from "../components/OidcSettings";
 import { PreferencesSettings } from "../components/PreferencesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
@@ -36,6 +37,8 @@ export function Settings() {
             <Row label={t("settings.email", "Email")} value={user?.email || "—"} />
             <Row label={t("settings.role", "Role")} value={user?.role || "—"} className="capitalize" />
           </Section>
+
+          {isAdmin && <SystemHealth />}
 
           <SecuritySettings />
           <PreferencesSettings />

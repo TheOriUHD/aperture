@@ -17,6 +17,37 @@ export function useSetSiteName() {
   });
 }
 
+export interface CameraHealth {
+  cameraId: string;
+  name: string;
+  enabled: boolean;
+  recordMode: string;
+  recordingExpected: boolean;
+  recordingOk: boolean;
+  lastSegmentTs: number;
+  liveOk: boolean;
+}
+
+export interface SystemStatus {
+  version: string;
+  uptimeSec: number;
+  go2rtc: { reachable: boolean; streams: number };
+  liveDownCount: number;
+  recDownCount: number;
+  storage: { totalBytes: number; freeBytes: number; recordedBytes: number };
+  homeAssistant: { enabled: boolean; connected: boolean };
+  weather: { configured: boolean; enabled: boolean; connected: boolean; lastUpdated: number; source: string };
+  cameras: CameraHealth[];
+}
+
+export function useSystemStatus() {
+  return useQuery({
+    queryKey: ["system-status"],
+    queryFn: () => api.get<SystemStatus>("/api/system/status"),
+    refetchInterval: 10000,
+  });
+}
+
 export interface PurgeResult {
   deletedSegments: number;
   deletedEvents: number;
