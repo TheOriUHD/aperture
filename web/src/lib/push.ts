@@ -29,12 +29,25 @@ export async function enablePush(): Promise<void> {
   if (perm !== "granted") throw new Error("Notification permission was denied.");
   const reg = await navigator.serviceWorker.ready;
   const { publicKey } = await api.get<{ publicKey: string }>("/api/push/key");
+  if (!publicKey) throw new Error("The server has no push key configured.");
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
-    });
+    try {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
+      });
+    } catch (e) {
+      const msg = (e as Error)?.message || "";
+      // Brave (and hardened Chromium) disable Google's push service by default,
+      // which fails here with exactly "Registration failed - push service error".
+      if (/push service|Registration failed/i.test(msg)) {
+        throw new Error(
+          "Your browser blocked the push service. In Brave: Settings → Privacy and security → enable “Use Google services for push messaging”, then fully restart Brave and try again.",
+        );
+      }
+      throw e;
+    }
   }
   const j = sub.toJSON() as { endpoint?: string; keys?: Record<string, string> };
   await api.post("/api/push/subscribe", { endpoint: j.endpoint, keys: j.keys });
