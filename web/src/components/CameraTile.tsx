@@ -3,13 +3,54 @@ import { LiveVideo } from "./LiveVideo";
 import { LiveConditions } from "./ConditionsOverlay";
 import type { Camera } from "../lib/types";
 
-export function CameraTile({ camera, onOpen }: { camera: Camera; onOpen?: (c: Camera) => void }) {
+export function CameraTile({
+  camera,
+  onOpen,
+  draggable,
+  isDragging,
+  isOver,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}: {
+  camera: Camera;
+  onOpen?: (c: Camera) => void;
+  draggable?: boolean;
+  isDragging?: boolean;
+  isOver?: boolean;
+  onDragStart?: () => void;
+  onDragOver?: () => void;
+  onDrop?: () => void;
+  onDragEnd?: () => void;
+}) {
   const recording = camera.enabled && camera.recordMode !== "never";
 
   return (
     <div
-      className={`group relative aspect-video rounded-lg overflow-hidden bg-ink-750 border border-line ${
-        onOpen ? "cursor-pointer hover:border-line-strong" : ""
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={
+        onDragOver
+          ? (e) => {
+              e.preventDefault();
+              onDragOver();
+            }
+          : undefined
+      }
+      onDrop={
+        onDrop
+          ? (e) => {
+              e.preventDefault();
+              onDrop();
+            }
+          : undefined
+      }
+      onDragEnd={onDragEnd}
+      className={`group relative aspect-video rounded-lg overflow-hidden bg-ink-750 border transition-[opacity,box-shadow] ${
+        isOver ? "border-brand ring-1 ring-brand" : "border-line"
+      } ${isDragging ? "opacity-40" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${
+        onOpen ? "hover:border-line-strong" : ""
       }`}
       onClick={() => onOpen?.(camera)}
     >

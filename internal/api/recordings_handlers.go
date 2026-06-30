@@ -1,9 +1,13 @@
 package api
 
 import (
+	"bytes"
+	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -12,6 +16,90 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+// frameSem bounds concurrent ffmpeg frame extractions so a hover-storm can't
+// saturate CPU and starve live recording.
+var frameSem = make(chan struct{}, 2)
+
+// handleFrame extracts (and caches) a single downscaled JPEG of recorded footage
+// at ?t=<unix ms>, for hover-scrub timeline previews. The timestamp is quantized
+// to 1s so a fast hover collapses to a handful of cache keys.
+func (s *Server) handleFrame(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !s.allowedCamera(r, id) {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+	t, err := strconv.ParseInt(r.URL.Query().Get("t"), 10, 64)
+	if err != nil || t <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid t")
+		return
+	}
+	t = (t / 1000) * 1000
+
+	cacheDir := filepath.Join(s.cfg.FrameCacheDir(), id)
+	cachePath := filepath.Join(cacheDir, strconv.FormatInt(t, 10)+".jpg")
+	if _, err := os.Stat(cachePath); err == nil {
+		w.Header().Set("Cache-Control", "public, max-age=1800")
+		w.Header().Set("Content-Type", "image/jpeg")
+		http.ServeFile(w, r, cachePath)
+		return
+	}
+
+	segs, err := s.st.ListSegments(id, t, t+1)
+	if err != nil || len(segs) == 0 {
+		writeError(w, http.StatusNotFound, "no footage at that time")
+		return
+	}
+	seg := segs[0]
+	for _, sg := range segs {
+		if sg.StartTS <= t && t < sg.EndTS {
+			seg = sg
+			break
+		}
+	}
+	if _, err := os.Stat(seg.Path); err != nil {
+		writeError(w, http.StatusGone, "footage file missing")
+		return
+	}
+	offset := float64(t-seg.StartTS) / 1000.0
+
+	frameSem <- struct{}{}
+	defer func() { <-frameSem }()
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	jpeg, err := extractFrameAtOffset(ctx, seg.Path, offset)
+	if err != nil || len(jpeg) == 0 {
+		writeError(w, http.StatusInternalServerError, "could not extract frame")
+		return
+	}
+
+	_ = os.MkdirAll(cacheDir, 0o755)
+	tmp := cachePath + ".tmp"
+	if os.WriteFile(tmp, jpeg, 0o644) == nil {
+		_ = os.Rename(tmp, cachePath)
+	}
+	w.Header().Set("Cache-Control", "public, max-age=1800")
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(jpeg)
+}
+
+// extractFrameAtOffset pulls one downscaled JPEG from a segment file. -ss before
+// -i makes this a cheap input-seek; scale keeps previews small.
+func extractFrameAtOffset(ctx context.Context, path string, offset float64) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "ffmpeg",
+		"-hide_banner", "-loglevel", "error",
+		"-ss", strconv.FormatFloat(offset, 'f', 3, 64),
+		"-i", path, "-frames:v", "1", "-vf", "scale=320:-2", "-q:v", "5", "-f", "mjpeg", "-")
+	var out, errb bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errb
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("ffmpeg: %v: %s", err, errb.String())
+	}
+	return out.Bytes(), nil
+}
 
 // parseRange reads from/to (unix ms) query params, defaulting to the last 24h.
 func parseRange(r *http.Request) (from, to int64) {

@@ -52,6 +52,21 @@ func (s *Store) GetCamera(id string) (*Camera, error) {
 	return s.scanCamera(s.db.QueryRow(cameraSelect+` WHERE id = ?`, id))
 }
 
+// ReorderCameras sets sort_order to each id's position in the list, atomically.
+func (s *Store) ReorderCameras(ids []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for i, id := range ids {
+		if _, err := tx.Exec(`UPDATE cameras SET sort_order = ? WHERE id = ?`, i, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // ListCameras returns all cameras ordered by sort order then name.
 func (s *Store) ListCameras() ([]*Camera, error) {
 	rows, err := s.db.Query(cameraSelect + ` ORDER BY sort_order ASC, name ASC`)

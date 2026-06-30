@@ -50,6 +50,7 @@ export function VerticalTimeline({
   onScrubTo,
   onSeekAbs,
   onEventClick,
+  onHoverTime,
 }: {
   selectedMs: number;
   windowMs: number;
@@ -64,6 +65,7 @@ export function VerticalTimeline({
   onScrubTo: (ms: number) => void;
   onSeekAbs: (ms: number) => void;
   onEventClick: (startMs: number) => void;
+  onHoverTime?: (ms: number | null, clientY?: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const selRef = useRef(selectedMs);
@@ -167,10 +169,23 @@ export function VerticalTimeline({
   }
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
     const d = drag.current;
-    if (!d || !ref.current) return;
-    const dy = e.clientY - d.anchorY;
-    if (Math.abs(dy) > 2) d.moved = true;
-    onScrubTo(d.anchorSel + (dy / ref.current.clientHeight) * windowMs);
+    if (d && ref.current) {
+      const dy = e.clientY - d.anchorY;
+      if (Math.abs(dy) > 2) d.moved = true;
+      onScrubTo(d.anchorSel + (dy / ref.current.clientHeight) * windowMs);
+      return;
+    }
+    // Hover preview when not dragging.
+    if (onHoverTime && ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      const ms = topTime - ((e.clientY - rect.top) / rect.height) * windowMs;
+      onHoverTime(ms, e.clientY);
+    }
+  }
+
+  function onPointerLeave() {
+    if (drag.current) return;
+    onHoverTime?.(null);
   }
   function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     const d = drag.current;
@@ -192,6 +207,7 @@ export function VerticalTimeline({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerLeave={onPointerLeave}
       className="relative h-full w-full select-none overflow-hidden cursor-grab active:cursor-grabbing touch-none"
     >
       {/* Day/night shading from the astro layer, behind everything. */}

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,23 @@ import (
 
 	"github.com/TheOriUHD/aperture/internal/store"
 )
+
+// handleReorderCameras persists a new camera display order (admin).
+func (s *Server) handleReorderCameras(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CameraIDs []string `json:"cameraIds"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := s.st.ReorderCameras(req.CameraIDs); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not reorder cameras")
+		return
+	}
+	s.logAudit(r, "camera.reorder", "", fmt.Sprintf("%d cameras", len(req.CameraIDs)))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
 
 // handleTestCamera probes an RTSP URL via go2rtc and returns a preview frame so
 // the operator can verify a camera connection before saving it.

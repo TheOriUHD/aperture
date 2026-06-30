@@ -16,6 +16,10 @@ import {
   Calendar,
   Cctv,
   Scissors,
+  Gauge,
+  Link2,
+  ChevronFirst,
+  ChevronLast,
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
 import { VerticalTimeline, type TR, type TLEvent } from "../components/VerticalTimeline";
@@ -70,6 +74,16 @@ export function Playback() {
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const [camerasOpen, setCamerasOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [speedOpen, setSpeedOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [hover, setHover] = useState<{ ms: number; y: number } | null>(null);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
+  const frameTimer = useRef<number | undefined>(undefined);
+  const frameAbort = useRef<AbortController | null>(null);
+
+  const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 4];
 
   const playerVideoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -268,8 +282,118 @@ export function Playback() {
     seekToTime(selectedMs + dir * DAY_MS);
   }
   function goLive() {
+    setPlaybackRate(1);
     if (!following) animateToLive();
   }
+
+  // Apply the chosen playback speed to the recorded-video element.
+  useEffect(() => {
+    if (playerVideoRef.current && !isLive) playerVideoRef.current.playbackRate = playbackRate;
+  }, [playbackRate, isLive, selectedId]);
+
+  function frameStep(dir: number) {
+    const v = playerVideoRef.current;
+    if (!v || !selected || isLive) return;
+    v.pause();
+    const wall = offsetToWall(segmentsRef.current, v.currentTime + dir / (selected.fps || 15));
+    if (wall) seekToTime(wall);
+  }
+
+  function findNextEvent(ms: number): number | null {
+    const next = events.find((e) => e.startTs > ms);
+    return next ? next.startTs : null;
+  }
+  function findPrevEvent(ms: number): number | null {
+    let hit: number | null = null;
+    for (const e of events) {
+      const end = e.endTs || nowMs;
+      if (end < ms) hit = e.startTs;
+    }
+    return hit;
+  }
+
+  async function copyLink() {
+    if (!selected) return;
+    const url = `${window.location.origin}/playback?camera=${selected.id}&t=${Math.round(selectedMs)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      window.prompt("Copy this link:", url);
+      return;
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  // Hover-scrub: debounced, quantized, aborts in-flight, revokes old object URLs.
+  function onHoverTime(ms: number | null, y?: number) {
+    if (ms == null || !selected || !isDesktop) {
+      setHover(null);
+      return;
+    }
+    setHover({ ms, y: y ?? 0 });
+    window.clearTimeout(frameTimer.current);
+    frameTimer.current = window.setTimeout(() => {
+      const q = Math.floor(ms / 1000) * 1000;
+      frameAbort.current?.abort();
+      const ac = new AbortController();
+      frameAbort.current = ac;
+      fetch(`/api/cameras/${selected.id}/frame?t=${q}`, { signal: ac.signal, credentials: "same-origin" })
+        .then((res) => (res.ok ? res.blob() : Promise.reject(new Error("no frame"))))
+        .then((b) => {
+          const url = URL.createObjectURL(b);
+          if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+          previewUrlRef.current = url;
+          setPreviewSrc(url);
+        })
+        .catch(() => {});
+    }, 150);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
+
+  // Keyboard shortcuts (ignored while typing in a field).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable)) return;
+      switch (e.key) {
+        case " ":
+          e.preventDefault();
+          if (!isLive) togglePlay();
+          break;
+        case "ArrowLeft":
+          if (!isLive) seekToTime(selectedMs - 10_000);
+          break;
+        case "ArrowRight":
+          if (!isLive) seekToTime(selectedMs + 10_000);
+          break;
+        case ",":
+          frameStep(-1);
+          break;
+        case ".":
+          frameStep(1);
+          break;
+        case "<":
+          setPlaybackRate((r) => RATES[Math.max(0, RATES.indexOf(r) - 1)] ?? r);
+          break;
+        case ">":
+          setPlaybackRate((r) => RATES[Math.min(RATES.length - 1, RATES.indexOf(r) + 1)] ?? r);
+          break;
+        case "f":
+        case "F":
+          fullscreen();
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLive, selectedMs, selected]);
 
   function togglePlay() {
     const v = playerVideoRef.current;
@@ -458,6 +582,7 @@ export function Playback() {
               onScrubTo={scrubToTime}
               onSeekAbs={seekToTime}
               onEventClick={seekToTime}
+              onHoverTime={onHoverTime}
             />
           )}
           <ZoomControl
@@ -499,6 +624,15 @@ export function Playback() {
   return (
     <div className="flex h-full min-h-0">
       {exportModal}
+      {/* Hover-scrub preview, floated just right of the timeline column */}
+      {hover && previewSrc && (
+        <img
+          src={previewSrc}
+          alt=""
+          className="fixed z-50 w-40 rounded-md border border-line-strong shadow-pop pointer-events-none bg-black"
+          style={{ top: Math.max(8, hover.y - 56), left: 268 }}
+        />
+      )}
       <CameraRail cameras={cameras ?? []} selectedId={selectedId} onSelect={setSelectedId} />
 
       {/* timeline column */}
@@ -547,6 +681,7 @@ export function Playback() {
             onScrubTo={scrubToTime}
             onSeekAbs={seekToTime}
             onEventClick={seekToTime}
+              onHoverTime={onHoverTime}
           />
           {!following && (
             <button
@@ -597,12 +732,62 @@ export function Playback() {
               </BarBtn>
             )}
             {!isLive && (
+              <>
+                <BarBtn
+                  onClick={() => {
+                    const p = findPrevEvent(selectedMs);
+                    if (p) seekToTime(p);
+                  }}
+                  label="Previous motion event"
+                >
+                  <ChevronFirst className="h-4 w-4" />
+                </BarBtn>
+                <BarBtn
+                  onClick={() => {
+                    const n = findNextEvent(selectedMs);
+                    if (n) seekToTime(n);
+                  }}
+                  label="Next motion event"
+                >
+                  <ChevronLast className="h-4 w-4" />
+                </BarBtn>
+              </>
+            )}
+            {!isLive && (
               <button onClick={goLive} className="ml-1 h-8 rounded-md px-2.5 text-xs text-fg-muted hover:text-fg hover:bg-ink-700">
                 Go live
               </button>
             )}
             <span className="ml-2 text-xs font-mono text-fg-muted tabular-nums">{fmtClock(overlayTime)}</span>
             <div className="ml-auto flex items-center gap-0.5">
+              {!isLive && (
+                <div className="relative">
+                  <BarBtn onClick={() => setSpeedOpen((o) => !o)} label="Playback speed">
+                    <Gauge className="h-4 w-4" />
+                  </BarBtn>
+                  {speedOpen && (
+                    <div className="absolute bottom-10 right-0 z-20 rounded-md border border-line bg-ink-850 p-1 shadow-pop">
+                      {RATES.map((rate) => (
+                        <button
+                          key={rate}
+                          onClick={() => {
+                            setPlaybackRate(rate);
+                            setSpeedOpen(false);
+                          }}
+                          className={`block w-full rounded px-3 py-1 text-left text-xs tabular-nums ${
+                            playbackRate === rate ? "bg-brand text-white" : "text-fg-muted hover:bg-ink-700"
+                          }`}
+                        >
+                          {rate}×
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <BarBtn onClick={copyLink} label="Copy link to this moment">
+                <Link2 className={`h-4 w-4 ${copied ? "text-online" : ""}`} />
+              </BarBtn>
               <BarBtn onClick={snapshot} label="Snapshot">
                 <CameraIcon className="h-4 w-4" />
               </BarBtn>

@@ -41,6 +41,9 @@ func (c *Config) DBPath() string { return filepath.Join(c.DataDir, "aperture.db"
 // Go2RTCConfigPath returns where nvrd may render go2rtc config if needed.
 func (c *Config) Go2RTCConfigPath() string { return filepath.Join(c.DataDir, "go2rtc.yaml") }
 
+// FrameCacheDir holds extracted hover-scrub preview JPEGs.
+func (c *Config) FrameCacheDir() string { return filepath.Join(c.DataDir, "frame-cache") }
+
 func env(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
 		return v
@@ -62,7 +65,7 @@ func Load() (*Config, error) {
 		WebDir:        env("APERTURE_WEB_DIR", ""),
 	}
 
-	for _, dir := range []string{c.DataDir, c.RecordingsDir} {
+	for _, dir := range []string{c.DataDir, c.RecordingsDir, c.FrameCacheDir()} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create dir %s: %w", dir, err)
 		}

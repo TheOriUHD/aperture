@@ -142,6 +142,32 @@ func main() {
 		}
 	}()
 
+	// Prune stale hover-scrub frame-cache files.
+	go func() {
+		t := time.NewTicker(30 * time.Minute)
+		defer t.Stop()
+		prune := func() {
+			cutoff := time.Now().Add(-2 * time.Hour)
+			_ = filepath.Walk(cfg.FrameCacheDir(), func(p string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() {
+					return nil
+				}
+				if info.ModTime().Before(cutoff) {
+					_ = os.Remove(p)
+				}
+				return nil
+			})
+		}
+		for {
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-t.C:
+				prune()
+			}
+		}
+	}()
+
 	oidcAuth := oidc.New(cfg, st)
 	auditLog := audit.New(st)
 	exporter := export.New(st, filepath.Join(cfg.DataDir, "exports"), log)

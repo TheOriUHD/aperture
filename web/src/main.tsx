@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "./lib/auth";
 import { PrefsProvider } from "./lib/prefs";
 import { DownloadsProvider } from "./lib/downloads";
+import { UnreadAlarmsProvider } from "./lib/unreadAlarms";
 import App from "./App";
 import "./lib/i18n";
 import "./index.css";
@@ -28,7 +29,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <AuthProvider>
           <PrefsProvider>
             <DownloadsProvider>
-              <App />
+              <UnreadAlarmsProvider>
+                <App />
+              </UnreadAlarmsProvider>
             </DownloadsProvider>
           </PrefsProvider>
         </AuthProvider>
