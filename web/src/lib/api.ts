@@ -30,3 +30,31 @@ export const api = {
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body ?? {}),
   del: <T>(path: string) => request<T>("DELETE", path),
 };
+
+// downloadFile streams a binary endpoint to a browser save dialog. The JSON
+// `request` above JSON-parses every response, so blobs must bypass it.
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch(path, { credentials: "same-origin" });
+  if (!res.ok) throw new ApiError(res.status, res.statusText);
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") || "";
+  const m = /filename=([^;]+)/.exec(cd);
+  const name = m ? m[1].trim().replace(/["']/g, "") : fallbackName;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// uploadFile posts a single file as multipart/form-data and parses a JSON reply.
+export async function uploadFile<T>(path: string, field: string, file: File): Promise<T> {
+  const fd = new FormData();
+  fd.append(field, file);
+  const res = await fetch(path, { method: "POST", credentials: "same-origin", body: fd });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new ApiError(res.status, (data && data.error) || res.statusText);
+  return data as T;
+}

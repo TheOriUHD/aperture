@@ -45,6 +45,7 @@ export function VerticalTimeline({
   live,
   shadeBands,
   ribbon,
+  gaps,
   playheadFrac = 0.16,
   onScrubTo,
   onSeekAbs,
@@ -58,6 +59,7 @@ export function VerticalTimeline({
   live: boolean;
   shadeBands?: ShadeBand[];
   ribbon?: { ts: number; tempC?: number; precipMm?: number }[];
+  gaps?: TR[];
   playheadFrac?: number;
   onScrubTo: (ms: number) => void;
   onSeekAbs: (ms: number) => void;
@@ -225,6 +227,20 @@ export function VerticalTimeline({
           key={`s${i}`}
           className="absolute w-[3px] rounded-full bg-brand-deep"
           style={{ left: railX, top: `${pct(s.end)}%`, height: `${Math.max(pct(s.start) - pct(s.end), 0.2)}%` }}
+        />
+      ))}
+      {/* "No recording" gaps (continuous cameras only) — hatched red over the rail. */}
+      {gaps?.filter(visible).map((g, i) => (
+        <div
+          key={`g${i}`}
+          className="absolute w-[3px] rounded-full"
+          style={{
+            left: railX,
+            top: `${pct(g.end)}%`,
+            height: `${Math.max(pct(g.start) - pct(g.end), 0.2)}%`,
+            background: "repeating-linear-gradient(180deg, rgba(224,80,80,0.65) 0 3px, transparent 3px 6px)",
+          }}
+          title="No recording"
         />
       ))}
       {/* motion: lighter-blue highlight over the rail + dot + thumbnail square */}

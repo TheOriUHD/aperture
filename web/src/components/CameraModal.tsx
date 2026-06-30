@@ -5,7 +5,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Switch } from "./ui/Switch";
 import { ScheduleModal } from "./ScheduleModal";
 import { ZoneEditor } from "./ZoneEditor";
-import { useCreateCamera, useUpdateCamera, useDeleteCamera } from "../hooks/useCameras";
+import { useCreateCamera, useUpdateCamera, useDeleteCamera, useTestCamera } from "../hooks/useCameras";
 import type { Camera, RecordMode } from "../lib/types";
 
 const SENS: { v: number; label: string }[] = [
@@ -32,6 +32,9 @@ export function CameraModal({
   const create = useCreateCamera();
   const update = useUpdateCamera();
   const del = useDeleteCamera();
+  const test = useTestCamera();
+  const [testSnap, setTestSnap] = useState<string | null>(null);
+  const [testErr, setTestErr] = useState("");
 
   const [name, setName] = useState("");
   const [main, setMain] = useState("");
@@ -53,6 +56,8 @@ export function CameraModal({
     if (!open) return;
     setError("");
     setConfirmDel(false);
+    setTestSnap(null);
+    setTestErr("");
     if (camera) {
       setName(camera.name);
       setMain(camera.rtspMainUrl);
@@ -106,6 +111,22 @@ export function CameraModal({
       onClose();
     } catch {
       setError("Could not save the camera.");
+    }
+  }
+
+  async function handleTest() {
+    if (!main.trim()) {
+      setError("Enter the main RTSP URL first.");
+      return;
+    }
+    setTestSnap(null);
+    setTestErr("");
+    try {
+      const r = await test.mutateAsync(main.trim());
+      if (r.ok && r.snapshot) setTestSnap(r.snapshot);
+      else setTestErr(r.error || "No video from the camera.");
+    } catch {
+      setTestErr("Test failed — could not reach the server.");
     }
   }
 
@@ -178,6 +199,24 @@ export function CameraModal({
               value={sub}
               onChange={(e) => setSub(e.target.value)}
             />
+          </div>
+          <div>
+            <button
+              type="button"
+              className="btn-subtle"
+              onClick={handleTest}
+              disabled={!main.trim() || test.isPending}
+            >
+              {test.isPending ? "Testing…" : "Test connection"}
+            </button>
+            {testErr && <p className="text-xs text-rec mt-2">{testErr}</p>}
+            {testSnap && (
+              <img
+                src={`data:image/jpeg;base64,${testSnap}`}
+                alt="Camera preview"
+                className="mt-2 w-full rounded-md border border-line"
+              />
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

@@ -273,6 +273,13 @@ func (r *Recorder) indexOnce() {
 	}
 }
 
+// ActiveCount returns how many cameras currently have a supervised recorder.
+func (r *Recorder) ActiveCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.active)
+}
+
 func (r *Recorder) camDir(cameraID string) string {
 	return filepath.Join(r.cfg.RecordingsDir, cameraID)
 }

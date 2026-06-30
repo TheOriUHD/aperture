@@ -10,10 +10,6 @@ import (
 	"github.com/TheOriUHD/aperture/internal/version"
 )
 
-// recordingGraceMs is how stale the newest segment may be before a camera in a
-// recording mode is considered to have stopped delivering.
-const recordingGraceMs = 90_000
-
 // handleSystemStatus aggregates a live health snapshot: per-camera recording and
 // live-view status, go2rtc reachability, storage, and integration state. The
 // two camera signals are deliberately independent — recording pulls straight
@@ -22,10 +18,16 @@ const recordingGraceMs = 90_000
 func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
+	writeJSON(w, http.StatusOK, s.buildStatus(ctx))
+}
 
+// buildStatus assembles the health snapshot, shared by the status endpoint and
+// the diagnostics bundle.
+func (s *Server) buildStatus(ctx context.Context) map[string]any {
 	health := s.sm.Health(ctx)
 	cams, _ := s.st.ListCameras()
 	now := time.Now().UnixMilli()
+	dayStart := time.Now().Truncate(24 * time.Hour).UnixMilli()
 
 	camStatus := make([]map[string]any, 0, len(cams))
 	liveDown, recDown := 0, 0
@@ -37,7 +39,7 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			newest = st.NewestTS
 		}
 		recordingExpected := c.Enabled && c.RecordMode != store.ModeNever
-		recordingOk := newest > 0 && now-newest < recordingGraceMs
+		recordingOk := newest > 0 && now-newest < store.RecordingGraceMs
 		liveOk := health.Reachable && registered
 
 		if c.Enabled && !liveOk {
@@ -46,7 +48,8 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		if recordingExpected && !recordingOk {
 			recDown++
 		}
-		camStatus = append(camStatus, map[string]any{
+
+		cam := map[string]any{
 			"cameraId":          c.ID,
 			"name":              c.Name,
 			"enabled":           c.Enabled,
@@ -55,14 +58,30 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			"recordingOk":       recordingOk,
 			"lastSegmentTs":     newest,
 			"liveOk":            liveOk,
-		})
+		}
+		// Watchdog self-heal stats.
+		if s.watchdog != nil {
+			seen, restarts, stale := s.watchdog.Stats(c.ID)
+			cam["watchdogStale"] = stale
+			cam["restartsToday"] = restarts
+			if seen > 0 {
+				cam["watchdogLastSeen"] = seen
+			}
+		}
+		// Today's coverage % for continuous cameras (recording-gap signal).
+		if c.Enabled && c.RecordMode == store.ModeContinuous && now > dayStart {
+			if covered, err := s.st.DayCoverage(c.ID, dayStart, now); err == nil {
+				cam["coveragePercent"] = int(float64(covered) / float64(now-dayStart) * 100)
+			}
+		}
+		camStatus = append(camStatus, cam)
 	}
 
 	total, free := diskUsage(s.cfg.RecordingsDir)
 	recorded, _ := s.st.TotalBytes()
 	ha := s.ha.LoadSettings()
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"version":       version.Version,
 		"uptimeSec":     int64(time.Since(s.startedAt).Seconds()),
 		"go2rtc":        map[string]any{"reachable": health.Reachable, "streams": len(health.Registered)},
@@ -72,5 +91,5 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"homeAssistant": map[string]any{"enabled": ha.Enabled, "connected": s.ha.Connected()},
 		"weather":       s.weather.Status(),
 		"cameras":       camStatus,
-	})
+	}
 }

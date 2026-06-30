@@ -48,6 +48,59 @@ func (s *Store) ListSegments(cameraID string, fromMs, toMs int64) ([]*Segment, e
 	return collectSegments(rows)
 }
 
+// RecordingGraceMs is how stale the newest segment may be before a camera in a
+// recording mode is treated as having stopped delivering. Shared by the health
+// handler and the watchdog (kept here in store to avoid an import cycle).
+const RecordingGraceMs = 90_000
+
+// Gap is an uncovered interval (unix ms) in a camera's recorded coverage.
+type Gap struct {
+	StartTS int64 `json:"startTs"`
+	EndTS   int64 `json:"endTs"`
+}
+
+// DayCoverage returns the recorded coverage in milliseconds within [fromMs,toMs]
+// for a camera, merging segments separated by <=1s (matching the HLS gap
+// threshold). Used to compute the health "coverage %" for continuous cameras.
+func (s *Store) DayCoverage(cameraID string, fromMs, toMs int64) (coveredMs int64, err error) {
+	segs, err := s.ListSegments(cameraID, fromMs, toMs)
+	if err != nil {
+		return 0, err
+	}
+	var curStart, curEnd int64 = -1, -1
+	flush := func() {
+		if curStart >= 0 {
+			coveredMs += curEnd - curStart
+		}
+	}
+	for _, seg := range segs {
+		st, en := seg.StartTS, seg.EndTS
+		if st < fromMs {
+			st = fromMs
+		}
+		if en > toMs {
+			en = toMs
+		}
+		if en <= st {
+			continue
+		}
+		if curStart < 0 {
+			curStart, curEnd = st, en
+			continue
+		}
+		if st <= curEnd+1000 {
+			if en > curEnd {
+				curEnd = en
+			}
+		} else {
+			flush()
+			curStart, curEnd = st, en
+		}
+	}
+	flush()
+	return coveredMs, nil
+}
+
 // MaxSegmentStart returns the latest indexed segment start (unix ms) for a
 // camera, or 0. Used to seed the indexer so it skips already-known files.
 func (s *Store) MaxSegmentStart(cameraID string) (int64, error) {

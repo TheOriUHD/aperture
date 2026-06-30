@@ -41,6 +41,31 @@ export function mergeRanges(segs: { startTs: number; endTs: number }[], gapMs = 
   return out;
 }
 
+/**
+ * computeGaps returns the uncovered intervals (the inverse of mergeRanges)
+ * within [windowStart, windowEnd]. Used to render the "no recording" band on a
+ * continuous camera's timeline. Gaps below minGapMs are ignored as noise.
+ */
+export function computeGaps(
+  ranges: Range[],
+  windowStart: number,
+  windowEnd: number,
+  minGapMs = 5000,
+): Range[] {
+  const gaps: Range[] = [];
+  let cursor = windowStart;
+  for (const r of ranges) {
+    if (r.start > cursor && r.start - cursor >= minGapMs) {
+      gaps.push({ start: cursor, end: r.start });
+    }
+    cursor = Math.max(cursor, r.end);
+  }
+  if (windowEnd - cursor >= minGapMs) {
+    gaps.push({ start: cursor, end: windowEnd });
+  }
+  return gaps;
+}
+
 /** Wall-clock time (ms) for a playlist offset (seconds). */
 export function offsetToWall(segs: Seg[], offsetSec: number): number | null {
   let acc = 0;

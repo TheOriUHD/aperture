@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +11,34 @@ import (
 
 	"github.com/TheOriUHD/aperture/internal/store"
 )
+
+// handleTestCamera probes an RTSP URL via go2rtc and returns a preview frame so
+// the operator can verify a camera connection before saving it.
+func (s *Server) handleTestCamera(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RTSPMainURL string `json:"rtspMainUrl"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.RTSPMainURL) == "" {
+		writeError(w, http.StatusBadRequest, "rtspMainUrl required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	jpeg, err := s.sm.TestStream(ctx, req.RTSPMainURL)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	s.logAudit(r, "camera.test", "", "rtsp connection test")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"snapshot": base64.StdEncoding.EncodeToString(jpeg),
+	})
+}
 
 func (s *Server) handleListCameras(w http.ResponseWriter, r *http.Request) {
 	cams, err := s.st.ListCameras()

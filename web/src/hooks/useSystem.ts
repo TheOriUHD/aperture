@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, uploadFile } from "../lib/api";
 
 export function useSiteName() {
   return useQuery({
@@ -26,6 +26,10 @@ export interface CameraHealth {
   recordingOk: boolean;
   lastSegmentTs: number;
   liveOk: boolean;
+  watchdogStale?: boolean;
+  restartsToday?: number;
+  watchdogLastSeen?: number;
+  coveragePercent?: number;
 }
 
 export interface SystemStatus {
@@ -45,6 +49,12 @@ export function useSystemStatus() {
     queryKey: ["system-status"],
     queryFn: () => api.get<SystemStatus>("/api/system/status"),
     refetchInterval: 10000,
+  });
+}
+
+export function useRestoreBackup() {
+  return useMutation({
+    mutationFn: (file: File) => uploadFile<{ ok: boolean; tables: number }>("/api/system/restore", "backup", file),
   });
 }
 

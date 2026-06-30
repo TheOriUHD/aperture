@@ -21,6 +21,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ha"
+	"github.com/TheOriUHD/aperture/internal/logbuf"
 	"github.com/TheOriUHD/aperture/internal/motion"
 	"github.com/TheOriUHD/aperture/internal/notify"
 	"github.com/TheOriUHD/aperture/internal/oidc"
@@ -29,11 +30,13 @@ import (
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
 	"github.com/TheOriUHD/aperture/internal/version"
+	"github.com/TheOriUHD/aperture/internal/watchdog"
 	"github.com/TheOriUHD/aperture/internal/weather"
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logRing := logbuf.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}), 500)
+	log := slog.New(logRing)
 	log.Info("starting nvrd", "version", version.String())
 
 	cfg, err := config.Load()
@@ -151,7 +154,11 @@ func main() {
 	weatherPoller := weather.New(st, log)
 	go weatherPoller.Run(bgCtx)
 
-	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, log)
+	// Watchdog: detect stale recordings (wedged producers) and self-heal.
+	wd := watchdog.New(st, sm, log)
+	go wd.Run(bgCtx)
+
+	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

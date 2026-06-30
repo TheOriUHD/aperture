@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -103,6 +104,66 @@ func (m *Manager) Sync(ctx context.Context, cameras []*store.Camera) (int, error
 		}
 	}
 	return registered, nil
+}
+
+// Restart force re-registers a camera's go2rtc stream (delete + re-add) even if
+// the sources are unchanged, tearing down a wedged producer so the recorder and
+// live viewers reconnect to a fresh one. Used by the watchdog for recovery.
+func (m *Manager) Restart(ctx context.Context, cam *store.Camera) error {
+	if !cam.Enabled || cam.RTSPMainURL == "" {
+		return nil
+	}
+	srcs := []string{cam.RTSPMainURL}
+	if cam.RTSPSubURL != "" {
+		srcs = append(srcs, cam.RTSPSubURL)
+	}
+	return m.putStream(ctx, StreamName(cam.ID), srcs)
+}
+
+// TestStream probes an arbitrary RTSP URL by registering it under a temporary
+// go2rtc stream, fetching one frame, and tearing the stream down — so a camera's
+// connection can be verified with a live preview before it is saved. The temp
+// stream is always cleaned up.
+func (m *Manager) TestStream(ctx context.Context, rtspURL string) ([]byte, error) {
+	rtspURL = strings.TrimSpace(rtspURL)
+	if !strings.HasPrefix(rtspURL, "rtsp://") {
+		return nil, fmt.Errorf("must be an rtsp:// URL")
+	}
+	name := "test_" + store.NewID()
+	if err := m.putStream(ctx, name, []string{rtspURL}); err != nil {
+		return nil, fmt.Errorf("register test stream: %w", err)
+	}
+	// Always clean up, even if the context is already cancelled.
+	defer func() {
+		cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = m.deleteStream(cctx, name)
+	}()
+
+	// Give go2rtc a moment to dial the producer before grabbing a frame.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(800 * time.Millisecond):
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.apiBase+"/api/frame.jpeg?src="+url.QueryEscape(name), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := m.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("could not reach the camera")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("no video from the camera (check URL/credentials)")
+	}
+	jpeg, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil || len(jpeg) == 0 {
+		return nil, fmt.Errorf("no frame received")
+	}
+	return jpeg, nil
 }
 
 // putStream registers (or replaces) a stream's sources in go2rtc.

@@ -47,3 +47,16 @@ export function useDeleteCamera() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["cameras"] }),
   });
 }
+
+export interface CameraTestResult {
+  ok: boolean;
+  snapshot?: string; // base64 JPEG
+  error?: string;
+}
+
+export function useTestCamera() {
+  return useMutation({
+    mutationFn: (rtspMainUrl: string) =>
+      api.post<CameraTestResult>("/api/cameras/test", { rtspMainUrl }),
+  });
+}

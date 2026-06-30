@@ -31,7 +31,7 @@ import { buildShadeBands } from "../lib/shading";
 import { usePrefs } from "../lib/prefs";
 import { api } from "../lib/api";
 import { fmtTimeSec, fmtDate } from "../lib/format";
-import { wallToOffset, offsetToWall, mergeRanges, type Seg } from "../lib/playlist";
+import { wallToOffset, offsetToWall, mergeRanges, computeGaps, type Seg } from "../lib/playlist";
 import type { MotionEvent } from "../lib/types";
 
 interface Segment extends Seg {
@@ -133,6 +133,12 @@ export function Playback() {
   });
 
   const recorded: TR[] = mergeRanges(segments);
+  // "No recording" gaps only make sense for continuous cameras, and only up to
+  // the present moment for today (the rest of today isn't a gap, just future).
+  const gaps: TR[] =
+    selected?.recordMode === "continuous"
+      ? computeGaps(recorded, dayStart, Math.min(dayEnd, nowMs))
+      : [];
   const tlEvents: TLEvent[] = events.map((e) => ({
     id: e.id,
     start: e.startTs,
@@ -447,6 +453,7 @@ export function Playback() {
               live={following}
               shadeBands={shadeBands}
               ribbon={dayWeather}
+              gaps={gaps}
               onScrubTo={scrubToTime}
               onSeekAbs={seekToTime}
               onEventClick={seekToTime}
@@ -535,6 +542,7 @@ export function Playback() {
             live={following}
             shadeBands={shadeBands}
             ribbon={dayWeather}
+            gaps={gaps}
             onScrubTo={scrubToTime}
             onSeekAbs={seekToTime}
             onEventClick={seekToTime}

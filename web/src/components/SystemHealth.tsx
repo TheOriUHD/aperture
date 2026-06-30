@@ -1,5 +1,7 @@
-import { Activity, Server, Cctv, HardDrive, Home, CloudSun } from "lucide-react";
-import { useSystemStatus, type SystemStatus } from "../hooks/useSystem";
+import { useRef, useState } from "react";
+import { Activity, Server, Cctv, HardDrive, Home, CloudSun, Download, Upload, FileDown } from "lucide-react";
+import { useSystemStatus, useRestoreBackup, type SystemStatus } from "../hooks/useSystem";
+import { downloadFile } from "../lib/api";
 import { formatBytes, fmtRelative, fmtDuration } from "../lib/format";
 
 type Level = "ok" | "warn" | "down";
@@ -21,6 +23,34 @@ function issueCount(s: SystemStatus): number {
 
 export function SystemHealth() {
   const { data: s } = useSystemStatus();
+  const restore = useRestoreBackup();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [restoreMsg, setRestoreMsg] = useState("");
+  const [restoreErr, setRestoreErr] = useState(false);
+
+  async function onRestoreFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (
+      !window.confirm(
+        "Restore configuration from this backup?\n\nThis REPLACES all current configuration (cameras, users, rules, settings) and may log you out.",
+      )
+    )
+      return;
+    setRestoreMsg("");
+    setRestoreErr(false);
+    try {
+      const r = await restore.mutateAsync(file);
+      setRestoreErr(false);
+      setRestoreMsg(`Restored ${r.tables} tables — reloading…`);
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (err) {
+      setRestoreErr(true);
+      setRestoreMsg((err as Error).message || "Restore failed.");
+    }
+  }
+
   if (!s) {
     return (
       <div className="panel">
@@ -50,7 +80,6 @@ export function SystemHealth() {
         </span>
       </div>
 
-      {/* go2rtc — the live-streaming ingress */}
       <Row icon={Server} label="Live streaming (go2rtc)">
         <Dot level={go2rtcLevel} />
         <span className="text-xs text-fg-muted">
@@ -60,7 +89,7 @@ export function SystemHealth() {
         </span>
       </Row>
 
-      {/* Per-camera: independent live + recording signals */}
+      {/* Per-camera: independent live + recording signals + self-heal + coverage */}
       <div className="mt-2 border-t border-line pt-2 space-y-1.5">
         {s.cameras.map((c) => {
           const live: Level = !c.enabled ? "warn" : c.liveOk ? "ok" : "down";
@@ -68,18 +97,31 @@ export function SystemHealth() {
           return (
             <div key={c.cameraId} className="flex items-center gap-3 text-xs">
               <Cctv className="h-3.5 w-3.5 text-fg-faint shrink-0" />
-              <span className="flex-1 truncate text-fg">{c.name}</span>
+              <span className="flex-1 truncate text-fg">
+                {c.name}
+                {(c.restartsToday ?? 0) > 0 && (
+                  <span className="ml-1.5 text-[#e0a23a]" title="Watchdog auto-restarts today">
+                    ↻{c.restartsToday}
+                  </span>
+                )}
+              </span>
+              {c.coveragePercent != null && (
+                <span
+                  className={`w-10 text-right tabular-nums ${c.coveragePercent < 95 ? "text-[#e0a23a]" : "text-fg-faint"}`}
+                  title="Today's recording coverage"
+                >
+                  {c.coveragePercent}%
+                </span>
+              )}
               <span className="flex items-center gap-1.5" title="Live view">
                 <Dot level={live} />
-                <span className="text-fg-faint w-8">live</span>
+                <span className="text-fg-faint w-7">live</span>
               </span>
               <span className="flex items-center gap-1.5" title="Recording">
                 <Dot level={rec} />
-                <span className="text-fg-faint w-9">
-                  {c.recordingExpected ? "rec" : "off"}
-                </span>
+                <span className="text-fg-faint w-8">{c.recordingExpected ? "rec" : "off"}</span>
               </span>
-              <span className="text-fg-faint w-20 text-right tabular-nums">
+              <span className="text-fg-faint w-16 text-right tabular-nums">
                 {c.lastSegmentTs ? fmtRelative(c.lastSegmentTs) : "—"}
               </span>
             </div>
@@ -120,6 +162,43 @@ export function SystemHealth() {
             </span>
           </Row>
         )}
+      </div>
+
+      {/* Maintenance: backup / restore / diagnostics */}
+      <div className="mt-3 border-t border-line pt-3">
+        <p className="text-xs font-medium text-fg-muted mb-2">Maintenance</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="btn-subtle h-8"
+            onClick={() => downloadFile("/api/system/backup", "aperture-backup.json")}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download backup
+          </button>
+          <button
+            className="btn-subtle h-8"
+            onClick={() => downloadFile("/api/system/diagnostics", "aperture-diagnostics.tar.gz")}
+          >
+            <FileDown className="h-3.5 w-3.5" />
+            Diagnostics
+          </button>
+          <button className="btn-subtle h-8" disabled={restore.isPending} onClick={() => fileRef.current?.click()}>
+            <Upload className="h-3.5 w-3.5" />
+            {restore.isPending ? "Restoring…" : "Restore…"}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json,application/json"
+            className="sr-only"
+            onChange={onRestoreFile}
+          />
+        </div>
+        {restoreMsg && <p className={`text-xs mt-2 ${restoreErr ? "text-rec" : "text-online"}`}>{restoreMsg}</p>}
+        <p className="text-[11px] text-fg-faint mt-1.5 leading-relaxed">
+          Backup includes cameras, users, rules &amp; settings (not footage). Restoring replaces all configuration
+          and may sign you out.
+        </p>
       </div>
 
       <p className="mt-3 border-t border-line pt-2 text-[11px] text-fg-faint">

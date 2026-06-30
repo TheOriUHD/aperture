@@ -1,14 +1,64 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/TheOriUHD/aperture/internal/format"
+	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/version"
 )
+
+// handleBackup streams a configuration backup (settings, cameras, users, rules,
+// schedules, ACLs — not footage) as a downloadable JSON file.
+func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
+	b, err := s.st.ExportConfig(version.Version, time.Now().Unix())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not export configuration")
+		return
+	}
+	s.logAudit(r, "system.backup", "", fmt.Sprintf("%d tables", len(b.Tables)))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf("attachment; filename=aperture-backup-%s.json", time.Now().UTC().Format("20060102-150405")))
+	_ = json.NewEncoder(w).Encode(b)
+}
+
+// handleRestore replaces all configuration from an uploaded backup. This is
+// destructive and runs in a single transaction; existing sessions may break if
+// the acting admin's account changes, so the UI warns and reloads.
+func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid upload")
+		return
+	}
+	file, _, err := r.FormFile("backup")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing backup file")
+		return
+	}
+	defer file.Close()
+
+	var b store.ConfigBackup
+	if err := json.NewDecoder(file).Decode(&b); err != nil {
+		writeError(w, http.StatusBadRequest, "not a valid Aperture backup file")
+		return
+	}
+	if len(b.Tables) == 0 {
+		writeError(w, http.StatusBadRequest, "backup contains no configuration")
+		return
+	}
+	if err := s.st.ImportConfig(&b); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	s.logAudit(r, "system.restore", "", fmt.Sprintf("schema v%d, %d tables", b.SchemaVersion, len(b.Tables)))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "tables": len(b.Tables)})
+}
 
 const (
 	siteNameKey     = "site_name"
