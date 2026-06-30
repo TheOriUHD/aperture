@@ -32,7 +32,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	cams, _ := s.st.ListCameras()
 	now := time.Now().UnixMilli()
 	dayStart := s.dayStartMs()
-	total, free := diskUsage(s.cfg.RecordingsDir)
+	total, free := diskUsage(s.recordingsDir())
 	recorded, _ := s.st.TotalBytes()
 	events, _ := s.st.CountEventsSince(dayStart)
 

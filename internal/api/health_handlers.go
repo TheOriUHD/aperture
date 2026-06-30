@@ -92,7 +92,7 @@ func (s *Server) buildStatus(ctx context.Context) map[string]any {
 		camStatus = append(camStatus, cam)
 	}
 
-	total, free := diskUsage(s.cfg.RecordingsDir)
+	total, free := diskUsage(s.recordingsDir())
 	recorded, _ := s.st.TotalBytes()
 	ha := s.ha.LoadSettings()
 

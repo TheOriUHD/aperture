@@ -27,35 +27,87 @@ export function Settings() {
     queryFn: () => api.get<{ version: string; commit: string }>("/api/system/version"),
   });
 
+  const tabs = [
+    { id: "general", label: t("settings.tabGeneral", "General"), admin: false },
+    { id: "security", label: t("settings.tabSecurity", "Security"), admin: false },
+    { id: "notifications", label: t("settings.tabNotifications", "Notifications"), admin: false },
+    { id: "system", label: t("settings.tabSystem", "System"), admin: true },
+    { id: "environment", label: t("settings.tabEnvironment", "Environment"), admin: true },
+    { id: "integrations", label: t("settings.tabIntegrations", "Integrations"), admin: true },
+    { id: "activity", label: t("settings.tabActivity", "Activity"), admin: true },
+  ].filter((tb) => !tb.admin || isAdmin);
+
+  const [tab, setTab] = useState("general");
+  const active = tabs.some((tb) => tb.id === tab) ? tab : "general";
+
   return (
     <>
       <TopBar title={t("settings.title", "Settings")} />
-      <div className="flex-1 overflow-auto p-4">
-        <div className="max-w-2xl mx-auto space-y-4">
-          <Section title={t("settings.account", "Account")}>
-            <Row label={t("settings.name", "Name")} value={user?.name || "—"} />
-            <Row label={t("settings.email", "Email")} value={user?.email || "—"} />
-            <Row label={t("settings.role", "Role")} value={user?.role || "—"} className="capitalize" />
-          </Section>
+      <div className="flex-1 overflow-auto">
+        {/* Tab bar */}
+        <div className="sticky top-0 z-10 border-b border-line bg-ink-900/95 backdrop-blur">
+          <div className="max-w-2xl mx-auto flex gap-1 overflow-x-auto px-4">
+            {tabs.map((tb) => (
+              <button
+                key={tb.id}
+                onClick={() => setTab(tb.id)}
+                className={`shrink-0 px-3 py-2.5 text-sm border-b-2 transition-colors ${
+                  active === tb.id
+                    ? "border-brand text-fg"
+                    : "border-transparent text-fg-muted hover:text-fg"
+                }`}
+              >
+                {tb.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-          {isAdmin && <SystemHealth />}
+        <div className="p-4">
+          <div className="max-w-2xl mx-auto space-y-4">
+            {active === "general" && (
+              <>
+                <Section title={t("settings.account", "Account")}>
+                  <Row label={t("settings.name", "Name")} value={user?.name || "—"} />
+                  <Row label={t("settings.email", "Email")} value={user?.email || "—"} />
+                  <Row label={t("settings.role", "Role")} value={user?.role || "—"} className="capitalize" />
+                </Section>
+                <PreferencesSettings />
+                {isAdmin && <SiteSection />}
+                <Section title={t("settings.about", "About")}>
+                  <Row label={t("settings.application", "Application")} value="Aperture NVR" />
+                  <Row label={t("settings.version", "Version")} value={ver ? `${ver.version} (${ver.commit})` : "…"} />
+                </Section>
+              </>
+            )}
 
-          <SecuritySettings />
-          <PreferencesSettings />
-          <NotificationsSettings />
+            {active === "security" && (
+              <>
+                <SecuritySettings />
+                {isAdmin && <UsersSection currentUserId={user?.id} />}
+              </>
+            )}
 
-          {isAdmin && <SiteSection />}
-          {isAdmin && <LocationWeather />}
-          {isAdmin && <UsersSection currentUserId={user?.id} />}
-          {isAdmin && <OidcSettings />}
-          {isAdmin && <StorageManager />}
-          {isAdmin && <HomeAssistant />}
-          {isAdmin && <AuditLog />}
+            {active === "notifications" && <NotificationsSettings />}
 
-          <Section title={t("settings.about", "About")}>
-            <Row label={t("settings.application", "Application")} value="Aperture NVR" />
-            <Row label={t("settings.version", "Version")} value={ver ? `${ver.version} (${ver.commit})` : "…"} />
-          </Section>
+            {active === "system" && isAdmin && (
+              <>
+                <SystemHealth />
+                <StorageManager />
+              </>
+            )}
+
+            {active === "environment" && isAdmin && <LocationWeather />}
+
+            {active === "integrations" && isAdmin && (
+              <>
+                <HomeAssistant />
+                <OidcSettings />
+              </>
+            )}
+
+            {active === "activity" && isAdmin && <AuditLog />}
+          </div>
         </div>
       </div>
     </>

@@ -359,8 +359,29 @@ func (r *Recorder) Reindex() (int, error) {
 	return total, nil
 }
 
+// activeDir is the directory new recordings are written to: the operator
+// override if set, otherwise the deploy default.
+func (r *Recorder) activeDir() string {
+	if o := r.st.RecordingsPathOverride(); o != "" {
+		return o
+	}
+	return r.cfg.RecordingsDir
+}
+
 func (r *Recorder) camDir(cameraID string) string {
-	return filepath.Join(r.cfg.RecordingsDir, cameraID)
+	return filepath.Join(r.activeDir(), cameraID)
+}
+
+// RestartAll stops and restarts every active recorder, so a recordings-path
+// change takes effect immediately (new ffmpeg processes pick up the new dir).
+func (r *Recorder) RestartAll() {
+	r.mu.Lock()
+	for id, cancel := range r.active {
+		cancel()
+		delete(r.active, id)
+	}
+	r.mu.Unlock()
+	r.Reconcile()
 }
 
 // probeDuration returns a media file's duration in seconds, or 0 on failure.

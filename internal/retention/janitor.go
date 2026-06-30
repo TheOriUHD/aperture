@@ -69,7 +69,47 @@ func (j *Janitor) enforce() {
 			j.enforceQuota(cam.ID, cam.StorageQuotaBytes)
 		}
 	}
+	j.enforceGlobalCap()
 	j.enforceFreeSpace()
+}
+
+// activeDir is the directory recordings live in (operator override or default).
+func (j *Janitor) activeDir() string {
+	if o := j.st.RecordingsPathOverride(); o != "" {
+		return o
+	}
+	return j.cfg.RecordingsDir
+}
+
+// enforceGlobalCap deletes the oldest footage across all cameras to keep total
+// recordings under the operator's global storage cap (0 = unlimited).
+func (j *Janitor) enforceGlobalCap() {
+	capBytes := j.st.GetSettingInt64("storage_cap_bytes")
+	if capBytes <= 0 {
+		return
+	}
+	total, err := j.st.TotalBytes()
+	if err != nil {
+		return
+	}
+	deleted := 0
+	for total > capBytes {
+		oldest, err := j.st.OldestSegmentsGlobal(deleteBatch)
+		if err != nil || len(oldest) == 0 {
+			break
+		}
+		for _, s := range oldest {
+			if total <= capBytes {
+				break
+			}
+			j.delete(s)
+			total -= s.SizeBytes
+			deleted++
+		}
+	}
+	if deleted > 0 {
+		j.log.Warn("retention: over global storage cap, removed oldest", "count", deleted)
+	}
 }
 
 // pruneNonMotion deletes a motion-mode camera's segments that don't overlap any
@@ -127,7 +167,7 @@ func (j *Janitor) enforceQuota(cameraID string, quota int64) {
 }
 
 func (j *Janitor) enforceFreeSpace() {
-	total, free, ok := diskUsage(j.cfg.RecordingsDir)
+	total, free, ok := diskUsage(j.activeDir())
 	if !ok || total == 0 {
 		return
 	}

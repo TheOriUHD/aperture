@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"strconv"
 )
 
 // GetSetting returns the value for key, or ("", ErrNotFound) if unset.
@@ -21,4 +22,22 @@ func (s *Store) SetSetting(key, value string) error {
 		`INSERT INTO settings (key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
 	return err
+}
+
+// GetSettingInt64 returns a numeric setting, or 0 if unset/invalid.
+func (s *Store) GetSettingInt64(key string) int64 {
+	v, err := s.GetSetting(key)
+	if err != nil || v == "" {
+		return 0
+	}
+	n, _ := strconv.ParseInt(v, 10, 64)
+	return n
+}
+
+// RecordingsPathOverride returns the operator-configured recordings directory,
+// or "" to use the deploy default. New footage is written here; existing
+// segments keep their stored absolute paths.
+func (s *Store) RecordingsPathOverride() string {
+	v, _ := s.GetSetting("recordings_path")
+	return v
 }

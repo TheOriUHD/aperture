@@ -187,6 +187,7 @@ func (s *Server) routes() http.Handler {
 			r.Get("/system/backup", s.handleBackup)
 			r.Post("/system/restore", s.handleRestore)
 			r.Post("/system/reindex", s.handleReindex)
+			r.Put("/system/storage", s.handleSetStorageConfig)
 			r.Get("/system/ha", s.handleGetHA)
 			r.Put("/system/ha", s.handleSetHA)
 			r.Get("/system/oidc", s.handleGetOIDC)

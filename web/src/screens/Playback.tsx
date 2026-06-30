@@ -162,8 +162,9 @@ export function Playback() {
     [site?.configured, astroPrev.data, astroDay.data, astroNext.data],
   );
 
-  // The day's weather samples feed the timeline's environmental ribbon.
-  const { data: dayWeather } = useWeatherRange(dayStart, dayEnd, !!site?.configured);
+  // The day's weather samples feed the timeline's environmental ribbon (opt-in).
+  const { data: dayWeather } = useWeatherRange(dayStart, dayEnd, !!site?.configured && !!prefs.timelineRibbon);
+  const ribbon = prefs.timelineRibbon ? dayWeather : undefined;
 
   // HLS playback for the active day.
   useEffect(() => {
@@ -452,7 +453,7 @@ export function Playback() {
               events={tlEvents}
               live={following}
               shadeBands={shadeBands}
-              ribbon={dayWeather}
+              ribbon={ribbon}
               gaps={gaps}
               onScrubTo={scrubToTime}
               onSeekAbs={seekToTime}
@@ -541,7 +542,7 @@ export function Playback() {
             events={tlEvents}
             live={following}
             shadeBands={shadeBands}
-            ribbon={dayWeather}
+            ribbon={ribbon}
             gaps={gaps}
             onScrubTo={scrubToTime}
             onSeekAbs={seekToTime}

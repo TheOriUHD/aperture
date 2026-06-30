@@ -49,6 +49,20 @@ export function PreferencesSettings() {
           />
         </div>
 
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="text-sm text-fg">{t("prefs.ribbon", "Weather ribbon on timeline")}</span>
+            <p className="text-xs text-fg-faint">
+              {t("prefs.ribbonSub", "Show a temperature/precip trend line beside the playback timeline")}
+            </p>
+          </div>
+          <Switch
+            checked={prefs.timelineRibbon}
+            onChange={(v) => setPref({ timelineRibbon: v })}
+            label="Weather ribbon"
+          />
+        </div>
+
         <div>
           <label className="label">{t("prefs.language", "Language")}</label>
           <select

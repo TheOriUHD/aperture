@@ -6,6 +6,7 @@ export interface Preferences {
   timelineZoom: number;
   density: "comfortable" | "compact";
   language: string; // "en" | "de" | "auto"
+  timelineRibbon: boolean; // show the temperature/precip ribbon on the timeline
 }
 
 export const DEFAULT_PREFS: Preferences = {
@@ -14,6 +15,7 @@ export const DEFAULT_PREFS: Preferences = {
   timelineZoom: 8,
   density: "comfortable",
   language: "auto",
+  timelineRibbon: false,
 };
 
 export interface User {

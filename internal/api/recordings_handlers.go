@@ -3,6 +3,8 @@ package api
 import (
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -111,7 +113,17 @@ func (s *Server) handleSegmentFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, seg.Path)
 }
 
-// handleStorage reports recorded bytes, per-camera usage, and disk totals.
+// recordingsDir is the directory recordings currently live in: the operator
+// override if set, otherwise the deploy default.
+func (s *Server) recordingsDir() string {
+	if o := s.st.RecordingsPathOverride(); o != "" {
+		return o
+	}
+	return s.cfg.RecordingsDir
+}
+
+// handleStorage reports recorded bytes, per-camera usage, disk totals, the
+// active path, and the global cap.
 func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 	recorded, _ := s.st.TotalBytes()
 	cams, _ := s.st.ListCameras()
@@ -128,13 +140,70 @@ func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	total, free := diskUsage(s.cfg.RecordingsDir)
+	total, free := diskUsage(s.recordingsDir())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"recordedBytes": recorded,
+		"recordedBytes":  recorded,
 		"diskTotalBytes": total,
 		"diskFreeBytes":  free,
 		"cameras":        perCam,
+		"path":           s.recordingsDir(),
+		"defaultPath":    s.cfg.RecordingsDir,
+		"capBytes":       s.st.GetSettingInt64("storage_cap_bytes"),
 	})
+}
+
+// handleSetStorageConfig updates the global storage cap and recordings path.
+// The path is validated as writable before it takes effect; changing it
+// restarts the recorders so new footage lands in the new location.
+func (s *Server) handleSetStorageConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CapBytes int64  `json:"capBytes"`
+		Path     string `json:"path"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.CapBytes < 0 {
+		req.CapBytes = 0
+	}
+
+	newPath := strings.TrimSpace(req.Path)
+	if newPath == s.cfg.RecordingsDir {
+		newPath = "" // equal to default = no override
+	}
+	if newPath != "" {
+		if err := checkWritableDir(newPath); err != nil {
+			writeError(w, http.StatusBadRequest, "path not usable: "+err.Error())
+			return
+		}
+	}
+
+	oldPath := s.st.RecordingsPathOverride()
+	_ = s.st.SetSetting("storage_cap_bytes", strconv.FormatInt(req.CapBytes, 10))
+	_ = s.st.SetSetting("recordings_path", newPath)
+
+	if newPath != oldPath {
+		s.rec.RestartAll()
+		s.logAudit(r, "storage.path", newPath, "recordings path changed")
+	}
+	s.logAudit(r, "storage.config", "", "cap="+strconv.FormatInt(req.CapBytes, 10))
+	s.handleStorage(w, r)
+}
+
+// checkWritableDir ensures a directory exists and is writable by the daemon.
+func checkWritableDir(path string) error {
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return err
+	}
+	probe := filepath.Join(path, ".aperture-write-test")
+	f, err := os.Create(probe)
+	if err != nil {
+		return err
+	}
+	_ = f.Close()
+	_ = os.Remove(probe)
+	return nil
 }
 
 func diskUsage(path string) (total, free int64) {
