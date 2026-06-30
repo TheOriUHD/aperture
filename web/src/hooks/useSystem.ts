@@ -58,6 +58,17 @@ export function useRestoreBackup() {
   });
 }
 
+export function useReindex() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ recovered: number }>("/api/system/reindex"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["storage"] });
+      qc.invalidateQueries({ queryKey: ["system-status"] });
+    },
+  });
+}
+
 export interface PurgeResult {
   deletedSegments: number;
   deletedEvents: number;

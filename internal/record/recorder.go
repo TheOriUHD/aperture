@@ -5,10 +5,12 @@ package record
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -278,6 +280,83 @@ func (r *Recorder) ActiveCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.active)
+}
+
+// Reindex scans every camera's recordings directory and indexes any on-disk
+// segment file that the database doesn't know about. It recovers footage that
+// became orphaned (e.g. a DB/disk mismatch) so it shows up in playback and can
+// be managed/pruned by storage. Durations are estimated from the gap to the
+// next segment (segments are fixed-length) to avoid ffprobing tens of thousands
+// of files; this is approximate but cheap and self-correcting.
+func (r *Recorder) Reindex() (int, error) {
+	cams, err := r.st.ListCameras()
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, cam := range cams {
+		dir := r.camDir(cam.ID)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue // no directory yet for this camera
+		}
+		have, err := r.st.SegmentStarts(cam.ID)
+		if err != nil {
+			return total, err
+		}
+
+		type segFile struct {
+			epoch int64
+			name  string
+			size  int64
+		}
+		files := make([]segFile, 0, len(entries))
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+				continue
+			}
+			ep, err := strconv.ParseInt(strings.TrimSuffix(e.Name(), ".ts"), 10, 64)
+			if err != nil {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			files = append(files, segFile{ep, e.Name(), info.Size()})
+		}
+		sort.Slice(files, func(i, j int) bool { return files[i].epoch < files[j].epoch })
+
+		var add []*store.Segment
+		for i, f := range files {
+			startMs := f.epoch * 1000
+			if have[startMs] {
+				continue
+			}
+			dur := int64(segmentSeconds)
+			if i+1 < len(files) {
+				if gap := files[i+1].epoch - f.epoch; gap >= 1 && gap <= segmentSeconds*2 {
+					dur = gap
+				}
+			}
+			add = append(add, &store.Segment{
+				CameraID:   cam.ID,
+				Path:       filepath.Join(dir, f.name),
+				StartTS:    startMs,
+				EndTS:      startMs + dur*1000,
+				DurationMS: dur * 1000,
+				SizeBytes:  f.size,
+			})
+		}
+		if err := r.st.InsertSegmentsBatch(add); err != nil {
+			return total, fmt.Errorf("reindex %s: %w", cam.ID, err)
+		}
+		total += len(add)
+		if len(add) > 0 {
+			r.log.Info("reindex: recovered orphaned segments", "camera", cam.ID, "name", cam.Name, "count", len(add))
+		}
+	}
+	return total, nil
 }
 
 func (r *Recorder) camDir(cameraID string) string {

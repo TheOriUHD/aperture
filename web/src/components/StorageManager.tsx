@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Trash2, HardDrive } from "lucide-react";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { RefreshCw } from "lucide-react";
 import { useStorage } from "../hooks/useStorage";
 import { useCameras } from "../hooks/useCameras";
-import { usePurge, type PurgeResult } from "../hooks/useSystem";
+import { usePurge, useReindex, type PurgeResult } from "../hooks/useSystem";
 import { formatBytes } from "../lib/format";
 
 type Preset = "24h" | "7d" | "month" | "all" | "custom";
@@ -30,6 +31,8 @@ export function StorageManager() {
   const { data: storage } = useStorage();
   const { data: cameras } = useCameras();
   const purge = usePurge();
+  const reindex = useReindex();
+  const [reindexMsg, setReindexMsg] = useState("");
 
   const [cameraId, setCameraId] = useState("");
   const [preset, setPreset] = useState<Preset>("24h");
@@ -74,9 +77,30 @@ export function StorageManager() {
       ? Math.min(100, Math.round((storage.recordedBytes / storage.diskTotalBytes) * 100))
       : 0;
 
+  async function doReindex() {
+    setReindexMsg("");
+    try {
+      const res = await reindex.mutateAsync();
+      setReindexMsg(
+        res.recovered > 0
+          ? `Recovered ${res.recovered.toLocaleString()} orphaned segments.`
+          : "Everything on disk is already indexed.",
+      );
+    } catch {
+      setReindexMsg("Re-scan failed.");
+    }
+  }
+
   return (
     <div className="panel">
-      <h2 className="text-sm font-medium text-fg mb-3">Storage</h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-medium text-fg">Storage</h2>
+        <button className="btn-subtle h-8" disabled={reindex.isPending} onClick={doReindex} title="Index any footage on disk the database lost track of">
+          <RefreshCw className={`h-3.5 w-3.5 ${reindex.isPending ? "animate-spin" : ""}`} />
+          {reindex.isPending ? "Scanning…" : "Re-scan recordings"}
+        </button>
+      </div>
+      {reindexMsg && <p className="text-xs text-online mb-3">{reindexMsg}</p>}
 
       {/* overall usage */}
       <div className="mb-4">

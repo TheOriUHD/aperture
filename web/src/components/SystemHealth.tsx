@@ -196,8 +196,8 @@ export function SystemHealth() {
         </div>
         {restoreMsg && <p className={`text-xs mt-2 ${restoreErr ? "text-rec" : "text-online"}`}>{restoreMsg}</p>}
         <p className="text-[11px] text-fg-faint mt-1.5 leading-relaxed">
-          Backup includes cameras, users, rules &amp; settings (not footage). Restoring replaces all configuration
-          and may sign you out.
+          Backup includes cameras, users, rules &amp; settings (not footage). It contains camera credentials and
+          password hashes — store it securely. Restoring replaces all configuration and may sign you out.
         </p>
       </div>
 

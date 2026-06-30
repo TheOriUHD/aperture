@@ -44,8 +44,13 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   const a = document.createElement("a");
   a.href = url;
   a.download = name;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  // Revoke after the browser has had a chance to start the download.
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
 
 // uploadFile posts a single file as multipart/form-data and parses a JSON reply.
@@ -54,7 +59,15 @@ export async function uploadFile<T>(path: string, field: string, file: File): Pr
   fd.append(field, file);
   const res = await fetch(path, { method: "POST", credentials: "same-origin", body: fd });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(res.status, (data && data.error) || res.statusText);
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    if (!res.ok) throw new ApiError(res.status, res.statusText);
+    throw new ApiError(res.status, "unexpected response from server");
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, (data as { error?: string })?.error || res.statusText);
+  }
   return data as T;
 }

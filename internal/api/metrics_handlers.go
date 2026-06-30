@@ -31,7 +31,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	health := s.sm.Health(ctx)
 	cams, _ := s.st.ListCameras()
 	now := time.Now().UnixMilli()
-	dayStart := time.Now().Truncate(24 * time.Hour).UnixMilli()
+	dayStart := s.dayStartMs()
 	total, free := diskUsage(s.cfg.RecordingsDir)
 	recorded, _ := s.st.TotalBytes()
 	events, _ := s.st.CountEventsSince(dayStart)

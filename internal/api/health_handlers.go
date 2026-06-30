@@ -5,10 +5,25 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/TheOriUHD/aperture/internal/site"
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
 	"github.com/TheOriUHD/aperture/internal/version"
 )
+
+// dayStartMs returns local midnight in the configured site timezone as unix ms,
+// so "today" coverage and event metrics line up with the day the user sees in
+// the timeline (which uses the browser's local day).
+func (s *Server) dayStartMs() int64 {
+	loc := time.Local
+	if p := site.Load(s.st); p.Timezone != "" {
+		if l, err := time.LoadLocation(p.Timezone); err == nil {
+			loc = l
+		}
+	}
+	now := time.Now().In(loc)
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).UnixMilli()
+}
 
 // handleSystemStatus aggregates a live health snapshot: per-camera recording and
 // live-view status, go2rtc reachability, storage, and integration state. The
@@ -27,7 +42,7 @@ func (s *Server) buildStatus(ctx context.Context) map[string]any {
 	health := s.sm.Health(ctx)
 	cams, _ := s.st.ListCameras()
 	now := time.Now().UnixMilli()
-	dayStart := time.Now().Truncate(24 * time.Hour).UnixMilli()
+	dayStart := s.dayStartMs()
 
 	camStatus := make([]map[string]any, 0, len(cams))
 	liveDown, recDown := 0, 0

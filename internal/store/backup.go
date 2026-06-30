@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -105,14 +106,27 @@ func (s *Store) ImportConfig(b *ConfigBackup) error {
 		return fmt.Errorf("backup is from a newer version (schema v%d > v%d); upgrade this server first", b.SchemaVersion, cur)
 	}
 
-	tx, err := s.db.Begin()
+	// Restore on a dedicated connection with foreign keys OFF. This is CRITICAL:
+	// segments and events have `ON DELETE CASCADE` on camera_id, so deleting the
+	// cameras table to replace it would otherwise cascade-delete all recorded
+	// footage rows (orphaning the files on disk). PRAGMA foreign_keys is a no-op
+	// inside a transaction, so it must be toggled on the connection first.
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`) //nolint:errcheck
+
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback() //nolint:errcheck — no-op after a successful Commit
-	if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
-		return err
-	}
 	// Clear children-first.
 	for i := len(configTables) - 1; i >= 0; i-- {
 		if _, err := tx.Exec("DELETE FROM " + configTables[i]); err != nil {

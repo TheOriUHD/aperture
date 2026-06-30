@@ -101,6 +101,56 @@ func (s *Store) DayCoverage(cameraID string, fromMs, toMs int64) (coveredMs int6
 	return coveredMs, nil
 }
 
+// SegmentStarts returns the set of start_ts (unix ms) already indexed for a
+// camera, so a re-index can skip files that are already known.
+func (s *Store) SegmentStarts(cameraID string) (map[int64]bool, error) {
+	rows, err := s.db.Query(`SELECT start_ts FROM segments WHERE camera_id = ?`, cameraID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var t int64
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out[t] = true
+	}
+	return out, rows.Err()
+}
+
+// InsertSegmentsBatch indexes many segments in one transaction — used by the
+// re-index recovery, where inserting tens of thousands of rows one-by-one would
+// be far too slow.
+func (s *Store) InsertSegmentsBatch(segs []*Segment) error {
+	if len(segs) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	stmt, err := tx.Prepare(`INSERT INTO segments
+		(id, camera_id, path, start_ts, end_ts, duration_ms, size_bytes, has_motion, locked)
+		VALUES (?,?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, seg := range segs {
+		if seg.ID == "" {
+			seg.ID = NewID()
+		}
+		if _, err := stmt.Exec(seg.ID, seg.CameraID, seg.Path, seg.StartTS, seg.EndTS,
+			seg.DurationMS, seg.SizeBytes, boolInt(seg.HasMotion), boolInt(seg.Locked)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // MaxSegmentStart returns the latest indexed segment start (unix ms) for a
 // camera, or 0. Used to seed the indexer so it skips already-known files.
 func (s *Store) MaxSegmentStart(cameraID string) (int64, error) {

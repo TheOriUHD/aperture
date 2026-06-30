@@ -13,6 +13,19 @@ import (
 	"github.com/TheOriUHD/aperture/internal/version"
 )
 
+// handleReindex rescans the recordings directory and indexes any orphaned
+// segment files the database lost track of (recovering footage and making it
+// manageable again). Synchronous — runs in one batch transaction.
+func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
+	added, err := s.rec.Reindex()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "reindex failed: "+err.Error())
+		return
+	}
+	s.logAudit(r, "system.reindex", "", fmt.Sprintf("%d segments recovered", added))
+	writeJSON(w, http.StatusOK, map[string]any{"recovered": added})
+}
+
 // handleBackup streams a configuration backup (settings, cameras, users, rules,
 // schedules, ACLs — not footage) as a downloadable JSON file.
 func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +49,11 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid upload")
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	file, _, err := r.FormFile("backup")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "missing backup file")
