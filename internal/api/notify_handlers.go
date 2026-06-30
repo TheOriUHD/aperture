@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,6 +13,46 @@ import (
 	"github.com/TheOriUHD/aperture/internal/notify"
 	"github.com/TheOriUHD/aperture/internal/store"
 )
+
+// handleNotifyStream is a Server-Sent Events stream of motion events the user is
+// allowed to see. It powers on-device notifications via the browser Notification
+// API while the app is open — no external push service (FCM/APNs) required.
+func (s *Server) handleNotifyStream(w http.ResponseWriter, r *http.Request) {
+	c := auth.FromContext(r.Context())
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // ask proxies not to buffer
+
+	id, ch := s.notify.Subscribe(c.UserID)
+	defer s.notify.Unsubscribe(id)
+
+	fmt.Fprint(w, ": connected\n\n")
+	flusher.Flush()
+
+	ka := time.NewTicker(25 * time.Second)
+	defer ka.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ka.C:
+			fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+		case msg, open := <-ch:
+			if !open {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		}
+	}
+}
 
 var channelTypes = map[string]bool{
 	"webpush": true, "ntfy": true, "telegram": true, "discord": true, "webhook": true, "email": true,

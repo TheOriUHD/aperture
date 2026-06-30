@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -29,6 +30,10 @@ type Engine struct {
 	log       *slog.Logger
 	vapidPub  string
 	vapidPriv string
+
+	subMu   sync.Mutex
+	subs    map[int]*subscriber
+	nextSub int
 }
 
 // New builds the engine and ensures a VAPID keypair exists (persisted in
@@ -67,6 +72,11 @@ func (e *Engine) OnEvent(ev *store.Event) {
 	if err != nil {
 		return
 	}
+	// Live device notifications (SSE), independent of the configured rules: every
+	// event is streamed to subscribers allowed to see the camera, and the browser
+	// shows it via the Notification API — no external push service required.
+	e.broadcast(ev, cam)
+
 	rules, err := e.st.ListEnabledRules()
 	if err != nil {
 		return

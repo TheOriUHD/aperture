@@ -146,6 +146,7 @@ func (s *Server) routes() http.Handler {
 			r.Put("/notify/rules/{id}", s.handleUpdateRule)
 			r.Delete("/notify/rules/{id}", s.handleDeleteRule)
 			r.Post("/notify/rules/{id}/test", s.handleTestRule)
+			r.Get("/notify/stream", s.handleNotifyStream)
 			r.Get("/push/key", s.handlePushKey)
 			r.Post("/push/subscribe", s.handlePushSubscribe)
 			r.Post("/push/unsubscribe", s.handlePushUnsubscribe)

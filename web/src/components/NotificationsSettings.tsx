@@ -15,6 +15,12 @@ import {
   type Rule,
 } from "../hooks/useNotify";
 import { pushSupported, pushEnabled, enablePush, disablePush } from "../lib/push";
+import {
+  deviceNotifySupported,
+  deviceNotifyEnabled,
+  enableDeviceNotify,
+  disableDeviceNotify,
+} from "../lib/deviceNotify";
 
 export function NotificationsSettings() {
   const { data: channels } = useChannels();
@@ -30,11 +36,28 @@ export function NotificationsSettings() {
   const [ruleEdit, setRuleEdit] = useState<Rule | null | undefined>(undefined);
   const [pushOn, setPushOn] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [notifyOn, setNotifyOn] = useState(deviceNotifyEnabled());
   const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
 
   useEffect(() => {
     void pushEnabled().then(setPushOn);
   }, []);
+
+  async function toggleNotify() {
+    try {
+      if (notifyOn) {
+        disableDeviceNotify();
+        setNotifyOn(false);
+        showFlash("On-device notifications off.", true);
+      } else {
+        await enableDeviceNotify();
+        setNotifyOn(true);
+        showFlash("On-device notifications on.", true);
+      }
+    } catch (e) {
+      showFlash((e as Error).message, false);
+    }
+  }
 
   function showFlash(text: string, ok: boolean) {
     setFlash({ text, ok });
@@ -82,19 +105,36 @@ export function NotificationsSettings() {
         )}
       </div>
 
-      {/* push on this device */}
-      {pushSupported() && (
-        <div className="flex items-center justify-between rounded-lg bg-ink-850 px-3 py-2.5 mb-4">
+      {/* notify on this device (SSE + Notification API — no external push service) */}
+      {deviceNotifySupported() && (
+        <div className="flex items-center justify-between rounded-lg bg-ink-850 px-3 py-2.5 mb-2">
           <div className="flex items-center gap-2.5">
             <Smartphone className="h-4 w-4 text-brand" />
             <div>
-              <div className="text-sm text-fg">Push on this device</div>
+              <div className="text-sm text-fg">Notify on this device</div>
               <div className="text-xs text-fg-faint">
-                Lock-screen alerts here, even when Aperture is closed.
+                Alerts while Aperture is open in a tab or installed — no Google/Apple push service needed.
               </div>
             </div>
           </div>
-          <Switch checked={pushOn} onChange={togglePush} label="Push on this device" />
+          <Switch checked={notifyOn} onChange={toggleNotify} label="Notify on this device" />
+        </div>
+      )}
+
+      {/* optional Web Push — also alerts when fully closed (needs the browser's push service) */}
+      {pushSupported() && (
+        <div className="flex items-center justify-between rounded-lg bg-ink-850 px-3 py-2.5 mb-4">
+          <div className="flex items-center gap-2.5">
+            <BellRing className="h-4 w-4 text-fg-muted" />
+            <div>
+              <div className="text-sm text-fg">Also alert when closed (Web Push)</div>
+              <div className="text-xs text-fg-faint">
+                Lock-screen alerts even when Aperture isn’t open. Needs your browser’s push service (Brave: enable
+                “Use Google services for push messaging”).
+              </div>
+            </div>
+          </div>
+          <Switch checked={pushOn} onChange={togglePush} label="Web Push" />
         </div>
       )}
 

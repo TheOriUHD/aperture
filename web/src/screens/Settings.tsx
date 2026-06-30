@@ -46,7 +46,7 @@ export function Settings() {
       <div className="flex-1 overflow-auto">
         {/* Tab bar */}
         <div className="sticky top-0 z-10 border-b border-line bg-ink-900/95 backdrop-blur">
-          <div className="max-w-2xl mx-auto flex gap-1 overflow-x-auto px-4">
+          <div className="max-w-2xl mx-auto flex gap-1 overflow-x-auto px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {tabs.map((tb) => (
               <button
                 key={tb.id}
