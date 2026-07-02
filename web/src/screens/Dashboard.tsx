@@ -38,7 +38,7 @@ export function Dashboard() {
 
   // Drag-to-reorder (admin + mouse/trackpad only).
   const { user } = useAuth();
-  const pointerFine = useMediaQuery("(pointer: fine)");
+  const pointerFine = useMediaQuery("(any-pointer: fine)");
   const canReorder = user?.role === "admin" && pointerFine;
   const reorder = useReorderCameras();
   const [draggingId, setDraggingId] = useState<string | null>(null);

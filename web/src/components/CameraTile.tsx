@@ -1,4 +1,4 @@
-import { Maximize2 } from "lucide-react";
+import { Maximize2, GripVertical } from "lucide-react";
 import { LiveVideo } from "./LiveVideo";
 import { LiveConditions } from "./ConditionsOverlay";
 import type { Camera } from "../lib/types";
@@ -29,7 +29,16 @@ export function CameraTile({
   return (
     <div
       draggable={draggable}
-      onDragStart={onDragStart}
+      onDragStart={
+        onDragStart
+          ? (e) => {
+              // Required for the drag to initiate in Chromium/Firefox.
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", camera.id);
+              onDragStart();
+            }
+          : undefined
+      }
       onDragOver={
         onDragOver
           ? (e) => {
@@ -55,6 +64,15 @@ export function CameraTile({
       onClick={() => onOpen?.(camera)}
     >
       <LiveVideo camera={camera} />
+
+      {/* Drag-to-reorder affordance (admin, desktop) */}
+      {draggable && (
+        <div className="pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <span className="h-6 w-6 grid place-items-center rounded-md bg-black/55 text-white/70">
+            <GripVertical className="h-3.5 w-3.5" />
+          </span>
+        </div>
+      )}
 
       {/* Top-left status pill */}
       <div className="absolute top-2.5 left-2.5 flex items-center gap-2">

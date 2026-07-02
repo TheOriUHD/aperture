@@ -74,10 +74,18 @@ func (s *Server) handleFrame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Write via a unique temp file so two concurrent requests for the same frame
+	// can't corrupt each other's cache write; rename is atomic (last writer wins,
+	// both valid).
 	_ = os.MkdirAll(cacheDir, 0o755)
-	tmp := cachePath + ".tmp"
-	if os.WriteFile(tmp, jpeg, 0o644) == nil {
-		_ = os.Rename(tmp, cachePath)
+	if f, e := os.CreateTemp(cacheDir, "frame-*.tmp"); e == nil {
+		if _, e2 := f.Write(jpeg); e2 == nil {
+			_ = f.Close()
+			_ = os.Rename(f.Name(), cachePath)
+		} else {
+			_ = f.Close()
+			_ = os.Remove(f.Name())
+		}
 	}
 	w.Header().Set("Cache-Control", "public, max-age=1800")
 	w.Header().Set("Content-Type", "image/jpeg")

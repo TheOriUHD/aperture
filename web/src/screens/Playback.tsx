@@ -356,6 +356,17 @@ export function Playback() {
     };
   }, []);
 
+  // Clear the hover preview (and free its object URL) when switching camera or
+  // leaving the desktop layout, so it can't leak or show the wrong camera.
+  useEffect(() => {
+    setHover(null);
+    setPreviewSrc(null);
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+  }, [selectedId, isDesktop]);
+
   // Keyboard shortcuts (ignored while typing in a field).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -393,7 +404,7 @@ export function Playback() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLive, selectedMs, selected]);
+  }, [isLive, selectedMs, selected, nowMs]);
 
   function togglePlay() {
     const v = playerVideoRef.current;
@@ -490,7 +501,10 @@ export function Playback() {
 
   if (!isDesktop) {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-ink-900">
+      <div
+        className="flex h-full min-h-0 flex-col bg-ink-900"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
+      >
         {exportModal}
         {/* camera switcher (slides in/out) */}
         <div

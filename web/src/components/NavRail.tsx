@@ -54,7 +54,13 @@ export function BottomNav() {
   const { t } = useTranslation();
   const all = [...items, settingsItem];
   return (
-    <nav className="flex lg:hidden items-stretch justify-around h-14 shrink-0 border-t border-line bg-ink-850">
+    <nav
+      className="flex lg:hidden items-stretch justify-around shrink-0 border-t border-line bg-ink-850"
+      style={{
+        height: "calc(3.5rem + env(safe-area-inset-bottom))",
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}
+    >
       {all.map((item) => {
         const label = t(item.tkey, item.label);
         return (

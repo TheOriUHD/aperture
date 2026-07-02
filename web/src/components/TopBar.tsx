@@ -21,7 +21,15 @@ export function TopBar({ title, right }: { title: ReactNode; right?: ReactNode }
     .join("");
 
   return (
-    <header className="flex items-center gap-3 h-14 px-4 border-b border-line bg-ink-900/80 backdrop-blur shrink-0">
+    <header
+      className="flex items-center gap-3 border-b border-line bg-ink-900/80 backdrop-blur shrink-0"
+      style={{
+        height: "calc(3.5rem + env(safe-area-inset-top))",
+        paddingTop: "env(safe-area-inset-top)",
+        paddingLeft: "max(1rem, env(safe-area-inset-left))",
+        paddingRight: "max(1rem, env(safe-area-inset-right))",
+      }}
+    >
       <div className="relative">
         <button
           onClick={() => setSiteMenu((m) => !m)}
