@@ -35,13 +35,9 @@ export function ZoomControl({
         className="h-9 w-9 grid place-items-center text-fg-muted shrink-0"
         aria-label="Zoom in"
         onClick={() => {
-          if (!expanded) {
-            setExpanded(true);
-            arm();
-          } else {
-            onChange(Math.min(max, value + 1));
-            arm();
-          }
+          if (!expanded) setExpanded(true);
+          onChange(Math.min(max, value + 1));
+          arm();
         }}
       >
         <ZoomIn className="h-4 w-4" />
