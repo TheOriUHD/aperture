@@ -113,7 +113,8 @@ export function DetectionSettings() {
               onChange={(e) => setCfg((c) => ({ ...c, bridgeUrl: e.target.value }))}
             />
             <p className="mt-1 text-[11px] text-fg-faint">
-              DeepStack / CodeProject.AI detection endpoint (reuse your Frigate/CPAI server).
+              DeepStack / CodeProject.AI detection endpoint. Reuse a server you run (Frigate/CPAI),
+              or add a local detector sidecar container — see docs/detection.md. Fully local, no cloud.
             </p>
           </div>
           <div>
