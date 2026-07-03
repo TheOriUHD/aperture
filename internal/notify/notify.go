@@ -90,6 +90,9 @@ func (e *Engine) OnEvent(ev *store.Event) {
 		if !conditionsMet(r.Conditions, ec) {
 			continue
 		}
+		if !objectsMatch(r.Conditions.Objects, ev.Labels) {
+			continue
+		}
 		if inQuietHours(r, now) {
 			continue
 		}
@@ -154,9 +157,29 @@ func conditionsMet(c store.RuleConditions, ec evContext) bool {
 	return true
 }
 
+// objectsMatch requires the event to carry one of the rule's object labels.
+// With no required objects it always passes; with required objects but no
+// detection labels on the event (detection off, or nothing found) it fails — so
+// an object rule never fires on bare motion.
+func objectsMatch(required, labels []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	for _, want := range required {
+		for _, have := range labels {
+			if want == have {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (e *Engine) buildNote(ev *store.Event, cam *store.Camera) Note {
 	title := "Motion detected"
-	if ev.Type != "motion" && ev.Type != "" {
+	if ev.ObjectSummary != "" {
+		title = strings.ToUpper(ev.ObjectSummary[:1]) + ev.ObjectSummary[1:]
+	} else if ev.Type != "motion" && ev.Type != "" {
 		title = strings.ToUpper(ev.Type[:1]) + ev.Type[1:]
 	}
 	return Note{

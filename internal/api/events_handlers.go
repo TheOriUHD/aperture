@@ -29,7 +29,34 @@ func eventView(e *store.Event, now int64) map[string]any {
 	if e.ThumbPath != "" {
 		v["thumbUrl"] = "/api/events/" + e.ID + "/thumb.jpg"
 	}
+	if e.TopLabel != "" {
+		v["topLabel"] = e.TopLabel
+	}
+	if e.ObjectSummary != "" {
+		v["objectSummary"] = e.ObjectSummary
+	}
+	if len(e.Objects) > 0 {
+		v["objects"] = e.Objects
+	}
 	return v
+}
+
+// attachObjects batch-loads detection boxes for a set of events (one query) so
+// the list surfaces can draw labels/boxes without an N+1 fan-out.
+func (s *Server) attachObjects(evs []*store.Event) {
+	ids := make([]string, len(evs))
+	for i, e := range evs {
+		ids[i] = e.ID
+	}
+	objs, err := s.st.EventObjectsFor(ids)
+	if err != nil {
+		return
+	}
+	for _, e := range evs {
+		if o := objs[e.ID]; len(o) > 0 {
+			e.Objects = o
+		}
+	}
 }
 
 // handleCameraEvents lists motion events for a camera in a time range.
@@ -46,6 +73,7 @@ func (s *Server) handleCameraEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UnixMilli()
+	s.attachObjects(evs)
 	enr := s.newCondEnricher()
 	out := make([]map[string]any, 0, len(evs))
 	for _, e := range evs {
@@ -79,6 +107,7 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UnixMilli()
+	s.attachObjects(evs)
 	enr := s.newCondEnricher()
 	out := make([]map[string]any, 0, len(evs))
 	for _, e := range evs {

@@ -12,6 +12,7 @@ import { OidcSettings } from "../components/OidcSettings";
 import { PreferencesSettings } from "../components/PreferencesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { NotificationsSettings } from "../components/NotificationsSettings";
+import { DetectionSettings } from "../components/DetectionSettings";
 import { AuditLog } from "../components/AuditLog";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -33,6 +34,7 @@ export function Settings() {
     { id: "notifications", label: t("settings.tabNotifications", "Notifications"), admin: false },
     { id: "system", label: t("settings.tabSystem", "System"), admin: true },
     { id: "environment", label: t("settings.tabEnvironment", "Environment"), admin: true },
+    { id: "detection", label: t("settings.tabDetection", "Detection"), admin: true },
     { id: "integrations", label: t("settings.tabIntegrations", "Integrations"), admin: true },
     { id: "activity", label: t("settings.tabActivity", "Activity"), admin: true },
   ].filter((tb) => !tb.admin || isAdmin);
@@ -98,6 +100,8 @@ export function Settings() {
             )}
 
             {active === "environment" && isAdmin && <LocationWeather />}
+
+            {active === "detection" && isAdmin && <DetectionSettings />}
 
             {active === "integrations" && isAdmin && (
               <>

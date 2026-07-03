@@ -79,8 +79,9 @@ func scanChannel(row rowScanner) (*NotifyChannel, error) {
 // RuleConditions gates a rule on the environmental context at the event. Empty
 // fields mean "don't care".
 type RuleConditions struct {
-	TimeOfDay  string `json:"timeOfDay"`  // "" | "day" | "night"
-	OnlyPrecip bool   `json:"onlyPrecip"` // only when precipitation > 0
+	TimeOfDay  string   `json:"timeOfDay"`  // "" | "day" | "night"
+	OnlyPrecip bool     `json:"onlyPrecip"` // only when precipitation > 0
+	Objects    []string `json:"objects"`    // require one of these detected object labels
 }
 
 type NotifyRule struct {

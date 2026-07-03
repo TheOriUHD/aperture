@@ -12,6 +12,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/audit"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/detect"
 	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/logbuf"
@@ -35,6 +36,7 @@ type Server struct {
 	sm        *stream.Manager
 	rec       *record.Recorder
 	det       *motion.Detector
+	detect    *detect.Engine
 	ha        *ha.Publisher
 	oidc      *oidc.Authenticator
 	audit     *audit.Logger
@@ -50,8 +52,8 @@ type Server struct {
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, wd *watchdog.Watchdog, logs *logbuf.Ring, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, detectEng *detect.Engine, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, wd *watchdog.Watchdog, logs *logbuf.Ring, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, detect: detectEng, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
 	s.router = s.routes()
 	return s
 }
@@ -195,6 +197,9 @@ func (s *Server) routes() http.Handler {
 			r.Put("/system/ha", s.handleSetHA)
 			r.Get("/system/oidc", s.handleGetOIDC)
 			r.Put("/system/oidc", s.handleSetOIDC)
+			r.Get("/system/detection", s.handleGetDetection)
+			r.Put("/system/detection", s.handleSetDetection)
+			r.Post("/system/detection/test", s.handleTestDetection)
 			r.Get("/system/audit", s.handleGetAudit)
 			r.Get("/system/audit/verify", s.handleVerifyAudit)
 		})

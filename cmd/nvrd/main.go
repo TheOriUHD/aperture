@@ -19,6 +19,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/audit"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/detect"
 	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/logbuf"
@@ -173,7 +174,13 @@ func main() {
 	exporter := export.New(st, filepath.Join(cfg.DataDir, "exports"), log)
 	exporter.Start(bgCtx)
 	notifyEng := notify.New(cfg, st, log)
-	det.SetOnEvent(notifyEng.OnEvent)
+	// Event-gated object detection (opt-in; no-op when mode=off). Runs before
+	// notify so rules can filter on the detected labels.
+	detectEng := detect.New(st, sm, cfg.DataDir, log)
+	det.SetOnEvent(func(ev *store.Event) {
+		detectEng.Enrich(ev)
+		notifyEng.OnEvent(ev)
+	})
 
 	// Environmental context: poll weather into a time-series for "past weather
 	// at the playhead". No-ops until a site location is configured.
@@ -184,7 +191,7 @@ func main() {
 	wd := watchdog.New(st, sm, log)
 	go wd.Run(bgCtx)
 
-	srv := api.NewServer(cfg, st, am, sm, rec, det, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
+	srv := api.NewServer(cfg, st, am, sm, rec, det, detectEng, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

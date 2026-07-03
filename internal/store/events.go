@@ -17,6 +17,14 @@ type Event struct {
 	Score        float64 `json:"score"`
 	Reviewed     bool    `json:"reviewed"`
 	Saved        bool    `json:"saved"`
+
+	// Object detection (opt-in). TopLabel is the highest-confidence label,
+	// ObjectSummary a short "person, car" list for the row. Labels/Objects are
+	// transient (populated by the detector or a batch load), not stored inline.
+	TopLabel      string        `json:"topLabel,omitempty"`
+	ObjectSummary string        `json:"objectSummary,omitempty"`
+	Labels        []string      `json:"-"`
+	Objects       []EventObject `json:"objects,omitempty"`
 }
 
 // InsertEvent creates a new event (end_ts NULL while ongoing).
@@ -107,14 +115,14 @@ func (s *Store) CountEventsSince(ts int64) (int, error) {
 	return n, err
 }
 
-const eventSelect = `SELECT id, camera_id, type, start_ts, end_ts, thumb_path, snapshot_path, score, reviewed, saved FROM events`
+const eventSelect = `SELECT id, camera_id, type, start_ts, end_ts, thumb_path, snapshot_path, score, reviewed, saved, top_label, object_summary FROM events`
 
 func scanEvent(row rowScanner) (*Event, error) {
 	var e Event
 	var end sql.NullInt64
 	var reviewed, saved int
 	err := row.Scan(&e.ID, &e.CameraID, &e.Type, &e.StartTS, &end, &e.ThumbPath, &e.SnapshotPath,
-		&e.Score, &reviewed, &saved)
+		&e.Score, &reviewed, &saved, &e.TopLabel, &e.ObjectSummary)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

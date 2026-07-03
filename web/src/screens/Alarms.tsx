@@ -123,9 +123,25 @@ export function Alarms() {
                         <Footprints className="h-6 w-6" />
                       </div>
                     )}
-                    <span className="absolute top-2 left-2 pill-motion">
+                    {e.objects?.map((o, i) => (
+                      <div
+                        key={i}
+                        className="absolute rounded-sm border border-brand/90 pointer-events-none"
+                        style={{
+                          left: `${o.x * 100}%`,
+                          top: `${o.y * 100}%`,
+                          width: `${o.w * 100}%`,
+                          height: `${o.h * 100}%`,
+                        }}
+                      >
+                        <span className="absolute left-0 top-0 -translate-y-full rounded-sm bg-brand px-1 text-[9px] capitalize text-white whitespace-nowrap">
+                          {o.label}
+                        </span>
+                      </div>
+                    ))}
+                    <span className="absolute top-2 left-2 pill-motion capitalize">
                       <Footprints className="h-3 w-3" />
-                      Motion
+                      {e.objectSummary || "Motion"}
                     </span>
                     {c && (
                       <span className="absolute top-2 right-2 flex items-center gap-1 rounded-md bg-black/45 px-1.5 py-0.5 backdrop-blur-sm">

@@ -62,6 +62,15 @@ export interface EventConditions {
   isNight?: boolean;
 }
 
+export interface DetectedObject {
+  label: string;
+  confidence: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface MotionEvent {
   id: string;
   cameraId: string;
@@ -74,4 +83,7 @@ export interface MotionEvent {
   reviewed: boolean;
   saved: boolean;
   conditions?: EventConditions;
+  topLabel?: string;
+  objectSummary?: string;
+  objects?: DetectedObject[];
 }
