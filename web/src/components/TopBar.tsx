@@ -22,7 +22,7 @@ export function TopBar({ title, right }: { title: ReactNode; right?: ReactNode }
 
   return (
     <header
-      className="flex items-center gap-3 border-b border-line bg-ink-900/80 backdrop-blur shrink-0"
+      className="relative z-30 flex items-center gap-3 border-b border-line bg-ink-900/80 backdrop-blur shrink-0"
       style={{
         height: "calc(3.5rem + env(safe-area-inset-top))",
         paddingTop: "env(safe-area-inset-top)",
