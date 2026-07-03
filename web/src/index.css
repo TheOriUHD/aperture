@@ -26,10 +26,17 @@ input.vrange {
   :root {
     color-scheme: dark;
   }
-  html,
+  html {
+    height: 100%;
+    height: 100dvh;
+    @apply bg-ink-900;
+  }
   body,
   #root {
+    /* 100% is short of the screen in an iOS standalone PWA and leaves a gap
+       under the app; 100dvh fills the full viewport incl. the bottom safe area. */
     height: 100%;
+    height: 100dvh;
   }
   body {
     @apply bg-ink-900 text-fg font-sans antialiased;

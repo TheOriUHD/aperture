@@ -72,6 +72,10 @@ export function VerticalTimeline({
   const ref = useRef<HTMLDivElement>(null);
   const selRef = useRef(selectedMs);
   selRef.current = selectedMs;
+  const nowRef = useRef(nowMs);
+  nowRef.current = nowMs;
+  const liveRef = useRef(live);
+  liveRef.current = live;
   const drag = useRef<{ anchorY: number; anchorSel: number; moved: boolean } | null>(null);
   const [height, setHeight] = useState(0);
 
@@ -97,7 +101,12 @@ export function VerticalTimeline({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const next = selRef.current - (e.deltaY / el.clientHeight) * windowMs * 0.6;
+      const raw = selRef.current - (e.deltaY / el.clientHeight) * windowMs * 0.6;
+      // Wheel never overscrolls past the live edge (that rubber-band is for
+      // touch-drag only); once live, ignore further forward scroll so it can't
+      // flip-flop between live and not-live on repeated ticks.
+      const next = Math.min(raw, nowRef.current);
+      if (liveRef.current && next >= nowRef.current) return;
       selRef.current = next;
       onScrubTo(next);
     };

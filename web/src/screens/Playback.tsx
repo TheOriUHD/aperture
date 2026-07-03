@@ -663,8 +663,8 @@ export function Playback() {
         <img
           src={previewSrc}
           alt=""
-          className="fixed z-50 w-40 rounded-md border border-line-strong shadow-pop pointer-events-none bg-black"
-          style={{ top: Math.max(8, hover.y - 56), left: 268 }}
+          className="fixed z-50 w-28 rounded border border-line-strong shadow-pop pointer-events-none bg-black"
+          style={{ top: Math.max(8, hover.y - 34), left: 266 }}
         />
       )}
       <CameraRail cameras={cameras ?? []} selectedId={selectedId} onSelect={setSelectedId} />

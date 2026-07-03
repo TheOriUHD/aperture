@@ -27,8 +27,6 @@ export function buildShadeBands(days: (SunTimes | undefined)[]): ShadeBand[] {
     const s = suns[i];
     const next = suns[i + 1];
     add(s.dawn, s.sunrise, "twilight");
-    add(s.sunrise, s.goldenHourEnd, "golden");
-    add(s.goldenHour, s.sunset, "golden");
     add(s.sunset, s.dusk, "twilight");
     if (next) add(s.dusk, next.dawn, "night");
   }
