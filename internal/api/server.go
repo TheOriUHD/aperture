@@ -24,6 +24,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/stream"
 	"github.com/TheOriUHD/aperture/internal/watchdog"
 	"github.com/TheOriUHD/aperture/internal/weather"
+	"github.com/TheOriUHD/aperture/internal/webhook"
 )
 
 const sessionTTL = 7 * 24 * time.Hour
@@ -37,6 +38,7 @@ type Server struct {
 	rec       *record.Recorder
 	det       *motion.Detector
 	detect    *detect.Engine
+	webhook   *webhook.Dispatcher
 	ha        *ha.Publisher
 	oidc      *oidc.Authenticator
 	audit     *audit.Logger
@@ -52,8 +54,8 @@ type Server struct {
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, detectEng *detect.Engine, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, wd *watchdog.Watchdog, logs *logbuf.Ring, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, detect: detectEng, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, detectEng *detect.Engine, webhookDisp *webhook.Dispatcher, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, wd *watchdog.Watchdog, logs *logbuf.Ring, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, detect: detectEng, webhook: webhookDisp, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
 	s.router = s.routes()
 	return s
 }
@@ -162,6 +164,11 @@ func (s *Server) routes() http.Handler {
 			r.Get("/system/weather/at", s.handleWeatherAt)
 			r.Get("/system/weather/range", s.handleWeatherRange)
 			r.Get("/system/astro", s.handleAstro)
+			// Personal API tokens (any user manages their own) + API docs.
+			r.Get("/tokens", s.handleListTokens)
+			r.Post("/tokens", s.handleCreateToken)
+			r.Delete("/tokens/{id}", s.handleDeleteToken)
+			r.Get("/openapi.json", s.handleOpenAPI)
 		})
 
 		// Admin-only.
@@ -200,6 +207,12 @@ func (s *Server) routes() http.Handler {
 			r.Get("/system/detection", s.handleGetDetection)
 			r.Put("/system/detection", s.handleSetDetection)
 			r.Post("/system/detection/test", s.handleTestDetection)
+			r.Get("/webhooks", s.handleListWebhooks)
+			r.Post("/webhooks", s.handleCreateWebhook)
+			r.Put("/webhooks/{id}", s.handleUpdateWebhook)
+			r.Delete("/webhooks/{id}", s.handleDeleteWebhook)
+			r.Post("/webhooks/{id}/test", s.handleTestWebhook)
+			r.Get("/webhooks/{id}/deliveries", s.handleWebhookDeliveries)
 			r.Get("/system/audit", s.handleGetAudit)
 			r.Get("/system/audit/verify", s.handleVerifyAudit)
 		})

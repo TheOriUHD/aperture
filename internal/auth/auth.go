@@ -20,11 +20,26 @@ type Manager struct {
 	streamSecret []byte
 	cliToken     []byte
 	secure       bool // mark cookies Secure (set when served over HTTPS)
+
+	// apiToken resolves a Bearer string to session claims for a stored API token
+	// (bound to a user). Injected from main so auth stays store-agnostic.
+	apiToken func(bearer string) *SessionClaims
 }
 
 // NewManager builds a Manager from the configured secrets.
 func NewManager(jwtSecret, streamSecret, cliToken []byte, secureCookies bool) *Manager {
 	return &Manager{jwtSecret: jwtSecret, streamSecret: streamSecret, cliToken: cliToken, secure: secureCookies}
+}
+
+// SetAPITokenResolver wires the API-token → claims lookup (store-backed).
+func (m *Manager) SetAPITokenResolver(fn func(bearer string) *SessionClaims) { m.apiToken = fn }
+
+// APIToken resolves a Bearer token to claims for a stored API token, or nil.
+func (m *Manager) APIToken(bearer string) *SessionClaims {
+	if m.apiToken == nil {
+		return nil
+	}
+	return m.apiToken(bearer)
 }
 
 // CLISession returns synthetic admin claims if the bearer token matches the

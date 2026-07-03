@@ -13,6 +13,8 @@ import { PreferencesSettings } from "../components/PreferencesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { NotificationsSettings } from "../components/NotificationsSettings";
 import { DetectionSettings } from "../components/DetectionSettings";
+import { ApiTokens } from "../components/ApiTokens";
+import { Webhooks } from "../components/Webhooks";
 import { AuditLog } from "../components/AuditLog";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -106,6 +108,8 @@ export function Settings() {
             {active === "integrations" && isAdmin && (
               <>
                 <HomeAssistant />
+                <Webhooks />
+                <ApiTokens />
                 <OidcSettings />
               </>
             )}

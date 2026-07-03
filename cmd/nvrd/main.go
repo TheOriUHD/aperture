@@ -33,6 +33,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/version"
 	"github.com/TheOriUHD/aperture/internal/watchdog"
 	"github.com/TheOriUHD/aperture/internal/weather"
+	"github.com/TheOriUHD/aperture/internal/webhook"
 )
 
 func main() {
@@ -174,12 +175,30 @@ func main() {
 	exporter := export.New(st, filepath.Join(cfg.DataDir, "exports"), log)
 	exporter.Start(bgCtx)
 	notifyEng := notify.New(cfg, st, log)
+	// Outbound event webhooks (open-platform integration firehose).
+	webhookDisp := webhook.New(st, cfg.PublicURL, log)
+	// API tokens authenticate as their owning user (inherit role + camera ACLs).
+	am.SetAPITokenResolver(func(bearer string) *auth.SessionClaims {
+		if !strings.HasPrefix(bearer, store.APITokenPrefix) {
+			return nil
+		}
+		uid, ok := st.ResolveAPIToken(bearer)
+		if !ok {
+			return nil
+		}
+		u, err := st.GetUserByID(uid)
+		if err != nil || u.Disabled {
+			return nil
+		}
+		return &auth.SessionClaims{UserID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role}
+	})
 	// Event-gated object detection (opt-in; no-op when mode=off). Runs before
 	// notify so rules can filter on the detected labels.
 	detectEng := detect.New(st, sm, cfg.DataDir, log)
 	det.SetOnEvent(func(ev *store.Event) {
 		detectEng.Enrich(ev)
 		notifyEng.OnEvent(ev)
+		webhookDisp.OnEvent(ev)
 	})
 
 	// Environmental context: poll weather into a time-series for "past weather
@@ -191,7 +210,7 @@ func main() {
 	wd := watchdog.New(st, sm, log)
 	go wd.Run(bgCtx)
 
-	srv := api.NewServer(cfg, st, am, sm, rec, det, detectEng, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
+	srv := api.NewServer(cfg, st, am, sm, rec, det, detectEng, webhookDisp, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

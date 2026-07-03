@@ -21,6 +21,8 @@ func (m *Manager) Context(next http.Handler) http.Handler {
 		} else if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 			if claims := m.CLISession(bearer); claims != nil {
 				r = r.WithContext(context.WithValue(r.Context(), claimsKey, claims))
+			} else if claims := m.APIToken(bearer); claims != nil {
+				r = r.WithContext(context.WithValue(r.Context(), claimsKey, claims))
 			}
 		}
 		next.ServeHTTP(w, r)
