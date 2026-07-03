@@ -28,7 +28,7 @@ type WebhookDelivery struct {
 	TS        int64  `json:"ts"`
 }
 
-func csv(v []string) string  { return strings.Join(v, ",") }
+func csv(v []string) string { return strings.Join(v, ",") }
 func uncsv(v string) []string {
 	if v == "" {
 		return nil

@@ -77,6 +77,12 @@ func (e *Engine) OnEvent(ev *store.Event) {
 	// shows it via the Notification API — no external push service required.
 	e.broadcast(ev, cam)
 
+	// Arm/disarm (driven from Home Assistant, §14.2): when disarmed, keep the
+	// in-app live feed but suppress external channel notifications.
+	if v, _ := e.st.GetSetting("armed"); v == "false" {
+		return
+	}
+
 	rules, err := e.st.ListEnabledRules()
 	if err != nil {
 		return
@@ -198,6 +204,21 @@ func (e *Engine) fire(r *store.NotifyRule, n Note) {
 		}
 		if err := e.send(ch, n); err != nil {
 			e.log.Warn("notify: channel send failed", "type", ch.Type, "err", err)
+		}
+	}
+}
+
+// SendNote delivers a note to specific channels. Used by the automation engine
+// so a rule can "notify on these channels" as an action.
+func (e *Engine) SendNote(channelIDs []string, title, body, url string) {
+	n := Note{Title: title, Body: body, URL: url}
+	for _, id := range channelIDs {
+		ch, err := e.st.GetChannel(id)
+		if err != nil || !ch.Enabled {
+			continue
+		}
+		if err := e.send(ch, n); err != nil {
+			e.log.Warn("notify: send note failed", "type", ch.Type, "err", err)
 		}
 	}
 }

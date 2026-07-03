@@ -24,6 +24,13 @@ type Config struct {
 
 	MQTTURL string // tcp://host:1883, empty disables HA publishing
 
+	// ONVIF Profile S provider (external VMS/NVR consumption). OFF by default.
+	ONVIFEnabled bool   // enable the ONVIF SOAP server + WS-Discovery
+	ONVIFAddr    string // ONVIF SOAP HTTP listen address, e.g. ":10101"
+
+	// HomeKit bridge (Apple Home app). OFF by default.
+	HomeKitEnabled bool
+
 	WebDir string // serve UI from disk (dev) instead of the embedded bundle
 
 	// Secrets (auto-generated + persisted if unset).
@@ -55,14 +62,17 @@ func env(key, def string) string {
 // directories exist, and loads or generates persisted secrets.
 func Load() (*Config, error) {
 	c := &Config{
-		HTTPAddr:      env("APERTURE_HTTP_ADDR", ":8080"),
-		DataDir:       env("APERTURE_DATA_DIR", "./data"),
-		RecordingsDir: env("APERTURE_RECORDINGS_DIR", "./recordings"),
-		PublicURL:     strings.TrimRight(env("APERTURE_PUBLIC_URL", "http://localhost:8080"), "/"),
-		Go2RTCURL:     strings.TrimRight(env("APERTURE_GO2RTC_URL", "http://localhost:1984"), "/"),
-		Go2RTCRTSP:    strings.TrimRight(env("APERTURE_GO2RTC_RTSP", "rtsp://localhost:8554"), "/"),
-		MQTTURL:       env("APERTURE_MQTT_URL", ""),
-		WebDir:        env("APERTURE_WEB_DIR", ""),
+		HTTPAddr:       env("APERTURE_HTTP_ADDR", ":8080"),
+		DataDir:        env("APERTURE_DATA_DIR", "./data"),
+		RecordingsDir:  env("APERTURE_RECORDINGS_DIR", "./recordings"),
+		PublicURL:      strings.TrimRight(env("APERTURE_PUBLIC_URL", "http://localhost:8080"), "/"),
+		Go2RTCURL:      strings.TrimRight(env("APERTURE_GO2RTC_URL", "http://localhost:1984"), "/"),
+		Go2RTCRTSP:     strings.TrimRight(env("APERTURE_GO2RTC_RTSP", "rtsp://localhost:8554"), "/"),
+		MQTTURL:        env("APERTURE_MQTT_URL", ""),
+		ONVIFEnabled:   env("APERTURE_ONVIF_ENABLED", "false") == "true",
+		ONVIFAddr:      env("APERTURE_ONVIF_ADDR", ":10101"),
+		HomeKitEnabled: env("APERTURE_HOMEKIT_ENABLED", "false") == "true",
+		WebDir:         env("APERTURE_WEB_DIR", ""),
 	}
 
 	for _, dir := range []string{c.DataDir, c.RecordingsDir, c.FrameCacheDir()} {

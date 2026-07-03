@@ -15,6 +15,8 @@ import { NotificationsSettings } from "../components/NotificationsSettings";
 import { DetectionSettings } from "../components/DetectionSettings";
 import { ApiTokens } from "../components/ApiTokens";
 import { Webhooks } from "../components/Webhooks";
+import { Automations } from "../components/Automations";
+import { InteropEgress } from "../components/InteropEgress";
 import { AuditLog } from "../components/AuditLog";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -37,6 +39,7 @@ export function Settings() {
     { id: "system", label: t("settings.tabSystem", "System"), admin: true },
     { id: "environment", label: t("settings.tabEnvironment", "Environment"), admin: true },
     { id: "detection", label: t("settings.tabDetection", "Detection"), admin: true },
+    { id: "automations", label: t("settings.tabAutomations", "Automations"), admin: true },
     { id: "integrations", label: t("settings.tabIntegrations", "Integrations"), admin: true },
     { id: "activity", label: t("settings.tabActivity", "Activity"), admin: true },
   ].filter((tb) => !tb.admin || isAdmin);
@@ -105,11 +108,14 @@ export function Settings() {
 
             {active === "detection" && isAdmin && <DetectionSettings />}
 
+            {active === "automations" && isAdmin && <Automations />}
+
             {active === "integrations" && isAdmin && (
               <>
                 <HomeAssistant />
                 <Webhooks />
                 <ApiTokens />
+                <InteropEgress />
                 <OidcSettings />
               </>
             )}

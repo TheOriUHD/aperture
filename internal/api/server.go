@@ -11,6 +11,7 @@ import (
 
 	"github.com/TheOriUHD/aperture/internal/audit"
 	"github.com/TheOriUHD/aperture/internal/auth"
+	"github.com/TheOriUHD/aperture/internal/automate"
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/detect"
 	"github.com/TheOriUHD/aperture/internal/export"
@@ -39,6 +40,7 @@ type Server struct {
 	det       *motion.Detector
 	detect    *detect.Engine
 	webhook   *webhook.Dispatcher
+	automate  *automate.Engine
 	ha        *ha.Publisher
 	oidc      *oidc.Authenticator
 	audit     *audit.Logger
@@ -54,8 +56,8 @@ type Server struct {
 }
 
 // NewServer builds a Server and its routes.
-func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, detectEng *detect.Engine, webhookDisp *webhook.Dispatcher, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, wd *watchdog.Watchdog, logs *logbuf.Ring, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, detect: detectEng, webhook: webhookDisp, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
+func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, detectEng *detect.Engine, webhookDisp *webhook.Dispatcher, automateEng *automate.Engine, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, wd *watchdog.Watchdog, logs *logbuf.Ring, log *slog.Logger) *Server {
+	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, detect: detectEng, webhook: webhookDisp, automate: automateEng, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
 	s.router = s.routes()
 	return s
 }
@@ -213,6 +215,11 @@ func (s *Server) routes() http.Handler {
 			r.Delete("/webhooks/{id}", s.handleDeleteWebhook)
 			r.Post("/webhooks/{id}/test", s.handleTestWebhook)
 			r.Get("/webhooks/{id}/deliveries", s.handleWebhookDeliveries)
+			r.Get("/automations", s.handleListAutomations)
+			r.Post("/automations", s.handleCreateAutomation)
+			r.Put("/automations/{id}", s.handleUpdateAutomation)
+			r.Delete("/automations/{id}", s.handleDeleteAutomation)
+			r.Post("/automations/{id}/test", s.handleTestAutomation)
 			r.Get("/system/audit", s.handleGetAudit)
 			r.Get("/system/audit/verify", s.handleVerifyAudit)
 		})

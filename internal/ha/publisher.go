@@ -19,11 +19,11 @@ import (
 )
 
 const (
-	statusTopic     = "aperture/status"
-	defaultPrefix   = "homeassistant"
-	clientID        = "aperture-nvr"
-	manufacturer    = "Aperture"
-	stateTopicBase  = "aperture"
+	statusTopic    = "aperture/status"
+	defaultPrefix  = "homeassistant"
+	clientID       = "aperture-nvr"
+	manufacturer   = "Aperture"
+	stateTopicBase = "aperture"
 )
 
 type snapshotter interface {
@@ -46,14 +46,19 @@ type Publisher struct {
 	sm  snapshotter
 	log *slog.Logger
 
-	mu       sync.Mutex
-	client   mqtt.Client
-	current  Settings
-	siteName func() string
+	mu        sync.Mutex
+	client    mqtt.Client
+	current   Settings
+	siteName  func() string
+	reconcile func() // re-sync recorder + detector after an inbound record-mode change
 
 	motion    map[string]bool // last published motion state per camera
 	recording map[string]bool
 }
+
+// SetReconcile wires the callback that applies a record-mode change immediately
+// (recorder + detector) when Home Assistant sends a command.
+func (p *Publisher) SetReconcile(fn func()) { p.reconcile = fn }
 
 // New constructs a Publisher. siteName returns the configured site name.
 func New(cfg *config.Config, st *store.Store, sm snapshotter, siteName func() string, log *slog.Logger) *Publisher {
@@ -107,6 +112,7 @@ func (p *Publisher) Run(ctx context.Context) {
 			}
 			if n%30 == 0 {
 				p.publishStorage()
+				p.publishControlState()
 			}
 			if n%300 == 0 {
 				p.publishDiscovery() // refresh + pick up new cameras
@@ -161,15 +167,17 @@ func (p *Publisher) connect(s Settings) {
 		SetPassword(s.Password).
 		SetAutoReconnect(true).
 		SetConnectRetry(true).
-		SetConnectTimeout(8 * time.Second).
+		SetConnectTimeout(8*time.Second).
 		SetWill(statusTopic, "offline", 1, true).
-		SetOnConnectHandler(func(mqtt.Client) {
+		SetOnConnectHandler(func(c mqtt.Client) {
 			p.log.Info("home assistant: connected", "broker", s.Broker)
 			p.publishOnline()
 			p.publishDiscovery()
 			p.publishMotionRecording()
 			p.publishStorage()
 			p.publishSnapshots()
+			p.publishControlState()
+			p.subscribeCommands(c)
 		}).
 		SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 			p.log.Warn("home assistant: connection lost", "err", err)
@@ -208,6 +216,12 @@ func (p *Publisher) pub(topic string, retained bool, payload any) {
 		return
 	}
 	c.Publish(topic, 1, retained, payload)
+}
+
+// PublishRaw publishes an arbitrary payload to a topic (used by the automation
+// engine's "mqtt" action). No-op when disconnected.
+func (p *Publisher) PublishRaw(topic string, payload []byte) {
+	p.pub(topic, false, payload)
 }
 
 func (p *Publisher) prefix() string {
@@ -306,6 +320,9 @@ func (p *Publisher) publishDiscovery() {
 		"device":             nvr,
 	}
 	p.pub(fmt.Sprintf("%s/sensor/aperture_events_today/config", pfx), true, mustJSON(eventsCfg))
+
+	// Inbound controls: record-mode Select per camera + a system Arm switch.
+	p.publishControlDiscovery(pfx, cams)
 }
 
 // publishMotionRecording publishes per-camera motion + recording state on change.

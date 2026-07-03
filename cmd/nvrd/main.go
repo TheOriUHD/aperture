@@ -18,14 +18,17 @@ import (
 	"github.com/TheOriUHD/aperture/internal/api"
 	"github.com/TheOriUHD/aperture/internal/audit"
 	"github.com/TheOriUHD/aperture/internal/auth"
+	"github.com/TheOriUHD/aperture/internal/automate"
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/detect"
 	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ha"
+	"github.com/TheOriUHD/aperture/internal/homekit"
 	"github.com/TheOriUHD/aperture/internal/logbuf"
 	"github.com/TheOriUHD/aperture/internal/motion"
 	"github.com/TheOriUHD/aperture/internal/notify"
 	"github.com/TheOriUHD/aperture/internal/oidc"
+	"github.com/TheOriUHD/aperture/internal/onvif"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/retention"
 	"github.com/TheOriUHD/aperture/internal/store"
@@ -192,13 +195,43 @@ func main() {
 		}
 		return &auth.SessionClaims{UserID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role}
 	})
+	// Applying a record-mode change (from an automation or HA command) means
+	// re-syncing both the recorder and the motion detector immediately.
+	reconcile := func() {
+		rec.Reconcile()
+		det.Reconcile()
+	}
+	// Home Assistant inbound control (record-mode Select / Arm switch) applies
+	// record-mode changes through the same reconcile path.
+	haPub.SetReconcile(reconcile)
+	// Local automation engine: events → matching automations → actions (notify,
+	// webhook, MQTT publish, set record mode).
+	automateEng := automate.New(st, notifyEng, haPub, reconcile, cfg.PublicURL, log)
+
+	// HomeKit bridge (Apple Home app), off unless APERTURE_HOMEKIT_ENABLED=true.
+	var hkBridge *homekit.Bridge
+	if cfg.HomeKitEnabled {
+		if b, err := homekit.New(cfg, st, log); err == nil {
+			hkBridge = b
+			go hkBridge.Run(bgCtx)
+		} else {
+			log.Error("homekit: init failed", "err", err)
+		}
+	}
+
 	// Event-gated object detection (opt-in; no-op when mode=off). Runs before
-	// notify so rules can filter on the detected labels.
+	// notify/automations so both can filter on the detected labels.
 	detectEng := detect.New(st, sm, cfg.DataDir, log)
 	det.SetOnEvent(func(ev *store.Event) {
 		detectEng.Enrich(ev)
 		notifyEng.OnEvent(ev)
 		webhookDisp.OnEvent(ev)
+		automateEng.OnEvent(ev)
+		if hkBridge != nil {
+			hkBridge.SetMotion(ev.CameraID, true)
+			cam := ev.CameraID
+			time.AfterFunc(20*time.Second, func() { hkBridge.SetMotion(cam, false) })
+		}
 	})
 
 	// Environmental context: poll weather into a time-series for "past weather
@@ -210,7 +243,12 @@ func main() {
 	wd := watchdog.New(st, sm, log)
 	go wd.Run(bgCtx)
 
-	srv := api.NewServer(cfg, st, am, sm, rec, det, detectEng, webhookDisp, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
+	// ONVIF Profile S provider (external VMS/NVR consumption). No-op unless
+	// APERTURE_ONVIF_ENABLED=true.
+	onvifSrv := onvif.New(cfg, st, log)
+	go onvifSrv.Run(bgCtx)
+
+	srv := api.NewServer(cfg, st, am, sm, rec, det, detectEng, webhookDisp, automateEng, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,
