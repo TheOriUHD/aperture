@@ -87,6 +87,7 @@ export function LiveVideo({
         muted={muted}
         autoPlay
         playsInline
+        draggable={false}
         className={`h-full w-full bg-black ${fit === "cover" ? "object-cover" : "object-contain"}`}
       />
 
@@ -99,6 +100,7 @@ export function LiveVideo({
           <img
             src={`/api/cameras/${camera.id}/snapshot.jpg`}
             alt=""
+            draggable={false}
             className="absolute inset-0 h-full w-full object-cover scale-105 blur-2xl brightness-[0.7]"
             onError={() => setSnapOk(false)}
           />

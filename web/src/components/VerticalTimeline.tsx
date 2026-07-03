@@ -279,7 +279,7 @@ export function VerticalTimeline({
                   ev.stopPropagation();
                   onEventClick(e.start);
                 }}
-                className="absolute rounded-sm overflow-hidden border border-motion/70 hover:border-motion bg-ink-800 shadow"
+                className="absolute z-20 rounded-sm overflow-hidden border border-motion/70 hover:border-motion bg-ink-800 shadow"
                 style={{ left: railX + 12, top: `${cy}%`, transform: "translateY(-50%)", width: 38, height: 26 }}
                 aria-label="Jump to motion event"
               >
