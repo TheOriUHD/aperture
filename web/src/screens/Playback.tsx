@@ -235,28 +235,47 @@ export function Playback() {
     snapAnim.current = requestAnimationFrame(step);
   }
 
-  // After a scrub settles, either snap (smoothly) to live or seek the player.
+  // Settle a scrub: bounce (smoothly) to live if we're near/over the edge,
+  // otherwise seek the recorded player to the landing time.
+  function settleNow() {
+    window.clearTimeout(seekTimer.current);
+    const snapMs = clamp(windowMs * 0.05, 5000, 90_000);
+    if (allowSnap.current && selectedRef.current >= nowRef.current - snapMs) {
+      animateToLive();
+      return;
+    }
+    scrubbing.current = false;
+    const v = playerVideoRef.current;
+    if (v && hlsRef.current) {
+      v.currentTime = wallToOffset(segmentsRef.current, selectedRef.current);
+      void v.play().catch(() => undefined);
+    }
+  }
+  // Wheel/continuous scrubs have no discrete end, so settle after a short idle.
   function scheduleSettle() {
     window.clearTimeout(seekTimer.current);
-    seekTimer.current = window.setTimeout(() => {
-      const snapMs = clamp(windowMs * 0.04, 5000, 90_000);
-      if (allowSnap.current && selectedRef.current >= nowRef.current - snapMs) {
-        animateToLive();
-        return;
-      }
-      scrubbing.current = false;
-      const v = playerVideoRef.current;
-      if (v && hlsRef.current) {
-        v.currentTime = wallToOffset(segmentsRef.current, selectedRef.current);
-        void v.play().catch(() => undefined);
-      }
-    }, 150);
+    seekTimer.current = window.setTimeout(settleNow, 150);
+  }
+  // A pointer drag DID end (finger lifted): settle immediately so the bounce to
+  // live happens right away rather than after the idle debounce.
+  function endScrub() {
+    settleNow();
   }
 
   function applyScrub(ms: number, snap: boolean) {
     cancelAnimationFrame(snapAnim.current);
     allowSnap.current = snap;
-    const c = clamp(ms, nowMs - MONTH_MS, nowMs);
+    const now = nowRef.current;
+    let c: number;
+    if (ms > now) {
+      // Rubber-band past the live edge into the clear zone above, with
+      // diminishing resistance so you can slide in and it springs back.
+      const over = ms - now;
+      const maxOver = windowMs * 0.08;
+      c = now + maxOver * (1 - Math.exp(-over / maxOver));
+    } else {
+      c = Math.max(ms, now - MONTH_MS);
+    }
     scrubbing.current = true;
     setFollowing(false);
     setSelectedState(c);
@@ -594,6 +613,7 @@ export function Playback() {
               ribbon={ribbon}
               gaps={gaps}
               onScrubTo={scrubToTime}
+              onScrubEnd={endScrub}
               onSeekAbs={seekToTime}
               onEventClick={seekToTime}
               onHoverTime={onHoverTime}
@@ -693,9 +713,10 @@ export function Playback() {
             ribbon={ribbon}
             gaps={gaps}
             onScrubTo={scrubToTime}
+            onScrubEnd={endScrub}
             onSeekAbs={seekToTime}
             onEventClick={seekToTime}
-              onHoverTime={onHoverTime}
+            onHoverTime={onHoverTime}
           />
           {!following && (
             <button

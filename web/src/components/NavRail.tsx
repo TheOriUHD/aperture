@@ -57,8 +57,8 @@ export function BottomNav() {
     <nav
       className="flex lg:hidden items-stretch justify-around shrink-0 border-t border-line bg-ink-850"
       style={{
-        height: "calc(3.5rem + env(safe-area-inset-bottom))",
-        paddingBottom: "env(safe-area-inset-bottom)",
+        height: "calc(3.5rem + max(0.25rem, env(safe-area-inset-bottom) * 0.6))",
+        paddingBottom: "max(0.25rem, env(safe-area-inset-bottom) * 0.6)",
       }}
     >
       {all.map((item) => {

@@ -46,8 +46,9 @@ export function VerticalTimeline({
   shadeBands,
   ribbon,
   gaps,
-  playheadFrac = 0.16,
+  playheadFrac = 0.2,
   onScrubTo,
+  onScrubEnd,
   onSeekAbs,
   onEventClick,
   onHoverTime,
@@ -63,6 +64,7 @@ export function VerticalTimeline({
   gaps?: TR[];
   playheadFrac?: number;
   onScrubTo: (ms: number) => void;
+  onScrubEnd?: () => void;
   onSeekAbs: (ms: number) => void;
   onEventClick: (startMs: number) => void;
   onHoverTime?: (ms: number | null, clientY?: number) => void;
@@ -198,7 +200,16 @@ export function VerticalTimeline({
     if (d && !d.moved && ref.current) {
       const rect = ref.current.getBoundingClientRect();
       onSeekAbs(topTime - ((e.clientY - rect.top) / rect.height) * windowMs);
+    } else if (d && d.moved) {
+      // Gesture ended: settle now (bounce back to live if we're near/over the
+      // edge) instead of waiting out the scrub debounce.
+      onScrubEnd?.();
     }
+  }
+  function onPointerCancel() {
+    const d = drag.current;
+    drag.current = null;
+    if (d?.moved) onScrubEnd?.();
   }
 
   return (
@@ -207,6 +218,7 @@ export function VerticalTimeline({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onPointerLeave={onPointerLeave}
       className="relative h-full w-full select-none overflow-hidden cursor-grab active:cursor-grabbing touch-none"
     >
@@ -279,7 +291,7 @@ export function VerticalTimeline({
                   ev.stopPropagation();
                   onEventClick(e.start);
                 }}
-                className="absolute z-20 rounded-sm overflow-hidden border border-motion/70 hover:border-motion bg-ink-800 shadow"
+                className="absolute rounded-sm overflow-hidden border border-motion/70 hover:border-motion bg-ink-800 shadow"
                 style={{ left: railX + 12, top: `${cy}%`, transform: "translateY(-50%)", width: 38, height: 26 }}
                 aria-label="Jump to motion event"
               >

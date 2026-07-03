@@ -7,10 +7,8 @@ import { TopBar } from "../components/TopBar";
 import { CameraTile } from "../components/CameraTile";
 import { CameraPopout } from "../components/CameraPopout";
 import { EmptyState } from "../components/ui/EmptyState";
-import { useCameras, useReorderCameras } from "../hooks/useCameras";
+import { useCameras } from "../hooks/useCameras";
 import { useStorage } from "../hooks/useStorage";
-import { useMediaQuery } from "../hooks/useMediaQuery";
-import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import type { Camera, MotionEvent } from "../lib/types";
@@ -35,32 +33,6 @@ export function Dashboard() {
   const list = cameras ?? [];
   const online = list.filter((c) => c.enabled).length;
   const recording = list.filter((c) => c.enabled && c.recordMode !== "never").length;
-
-  // Drag-to-reorder (admin + mouse/trackpad only).
-  const { user } = useAuth();
-  const pointerFine = useMediaQuery("(any-pointer: fine)");
-  const canReorder = user?.role === "admin" && pointerFine;
-  const reorder = useReorderCameras();
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
-
-  function onDrop(targetId: string) {
-    if (!draggingId || draggingId === targetId) {
-      setDraggingId(null);
-      setOverId(null);
-      return;
-    }
-    const ids = list.map((c) => c.id);
-    const from = ids.indexOf(draggingId);
-    const to = ids.indexOf(targetId);
-    if (from >= 0 && to >= 0) {
-      ids.splice(from, 1);
-      ids.splice(to, 0, draggingId);
-      reorder.mutate(ids);
-    }
-    setDraggingId(null);
-    setOverId(null);
-  }
 
   return (
     <>
@@ -89,21 +61,7 @@ export function Dashboard() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
               {list.map((cam) => (
-                <CameraTile
-                  key={cam.id}
-                  camera={cam}
-                  onOpen={setPopout}
-                  draggable={canReorder}
-                  isDragging={draggingId === cam.id}
-                  isOver={!!draggingId && overId === cam.id && draggingId !== cam.id}
-                  onDragStart={canReorder ? () => setDraggingId(cam.id) : undefined}
-                  onDragOver={canReorder ? () => setOverId(cam.id) : undefined}
-                  onDrop={canReorder ? () => onDrop(cam.id) : undefined}
-                  onDragEnd={() => {
-                    setDraggingId(null);
-                    setOverId(null);
-                  }}
-                />
+                <CameraTile key={cam.id} camera={cam} onOpen={setPopout} />
               ))}
             </div>
           )}
