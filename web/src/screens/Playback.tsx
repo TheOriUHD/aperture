@@ -77,11 +77,6 @@ export function Playback() {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [speedOpen, setSpeedOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [hover, setHover] = useState<{ ms: number; y: number } | null>(null);
-  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
-  const previewUrlRef = useRef<string | null>(null);
-  const frameTimer = useRef<number | undefined>(undefined);
-  const frameAbort = useRef<AbortController | null>(null);
 
   const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 4];
 
@@ -344,48 +339,6 @@ export function Playback() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  // Hover-scrub: debounced, quantized, aborts in-flight, revokes old object URLs.
-  function onHoverTime(ms: number | null, y?: number) {
-    if (ms == null || !selected || !isDesktop) {
-      setHover(null);
-      return;
-    }
-    setHover({ ms, y: y ?? 0 });
-    window.clearTimeout(frameTimer.current);
-    frameTimer.current = window.setTimeout(() => {
-      const q = Math.floor(ms / 1000) * 1000;
-      frameAbort.current?.abort();
-      const ac = new AbortController();
-      frameAbort.current = ac;
-      fetch(`/api/cameras/${selected.id}/frame?t=${q}`, { signal: ac.signal, credentials: "same-origin" })
-        .then((res) => (res.ok ? res.blob() : Promise.reject(new Error("no frame"))))
-        .then((b) => {
-          const url = URL.createObjectURL(b);
-          if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-          previewUrlRef.current = url;
-          setPreviewSrc(url);
-        })
-        .catch(() => {});
-    }, 150);
-  }
-
-  useEffect(() => {
-    return () => {
-      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-    };
-  }, []);
-
-  // Clear the hover preview (and free its object URL) when switching camera or
-  // leaving the desktop layout, so it can't leak or show the wrong camera.
-  useEffect(() => {
-    setHover(null);
-    setPreviewSrc(null);
-    if (previewUrlRef.current) {
-      URL.revokeObjectURL(previewUrlRef.current);
-      previewUrlRef.current = null;
-    }
-  }, [selectedId, isDesktop]);
-
   // Keyboard shortcuts (ignored while typing in a field).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -616,7 +569,6 @@ export function Playback() {
               onScrubEnd={endScrub}
               onSeekAbs={seekToTime}
               onEventClick={seekToTime}
-              onHoverTime={onHoverTime}
             />
           )}
           <ZoomControl
@@ -658,15 +610,6 @@ export function Playback() {
   return (
     <div className="flex h-full min-h-0">
       {exportModal}
-      {/* Hover-scrub preview, floated just right of the timeline column */}
-      {hover && previewSrc && (
-        <img
-          src={previewSrc}
-          alt=""
-          className="fixed z-50 w-28 rounded border border-line-strong shadow-pop pointer-events-none bg-black"
-          style={{ top: Math.max(8, hover.y - 34), left: 266 }}
-        />
-      )}
       <CameraRail cameras={cameras ?? []} selectedId={selectedId} onSelect={setSelectedId} />
 
       {/* timeline column */}
@@ -716,7 +659,6 @@ export function Playback() {
             onScrubEnd={endScrub}
             onSeekAbs={seekToTime}
             onEventClick={seekToTime}
-            onHoverTime={onHoverTime}
           />
           {!following && (
             <button
