@@ -178,16 +178,18 @@ export function StorageManager() {
     }
   }
 
-  const other = storage ? Math.max(0, storage.diskTotalBytes - storage.diskFreeBytes - storage.recordedBytes) : 0;
-  const usedPct =
-    storage && storage.diskTotalBytes > 0
-      ? Math.round(((storage.diskTotalBytes - storage.diskFreeBytes) / storage.diskTotalBytes) * 100)
-      : 0;
+  const allocated = storage?.allocatedBytes ?? 0;
+  const hasAllocation = allocated > 0;
+  const appBytes = storage?.appBytes ?? 0;
+  const used = storage?.usedBytes ?? 0;
+  const freeInAlloc = storage?.freeInAllocationBytes ?? 0;
+  const legendTotal = hasAllocation ? allocated : Math.max(1, used);
+  const usedPct = hasAllocation ? Math.round((used / allocated) * 100) : 0;
   const segments = storage
     ? [
         ...storage.cameras.map((c, i) => ({ label: c.name, value: c.bytes, color: CAM_COLORS[i % CAM_COLORS.length] })),
-        { label: "Other", value: other, color: OTHER_COLOR },
-        { label: "Free", value: storage.diskFreeBytes, color: FREE_COLOR },
+        { label: "Aperture app files", value: appBytes, color: OTHER_COLOR },
+        ...(hasAllocation ? [{ label: "Free", value: freeInAlloc, color: FREE_COLOR }] : []),
       ]
     : [];
 
@@ -212,8 +214,8 @@ export function StorageManager() {
         <div className="flex flex-col sm:flex-row items-center gap-5 mb-4">
           <Donut
             segments={segments}
-            centerLabel={`${usedPct}%`}
-            centerSub={`${formatBytes(storage.diskFreeBytes)} free`}
+            centerLabel={hasAllocation ? `${usedPct}%` : formatBytes(used)}
+            centerSub={hasAllocation ? `of ${formatBytes(allocated)}` : "used"}
           />
           <div className="flex-1 w-full space-y-1.5">
             {storage.cameras.map((c, i) => (
@@ -222,15 +224,20 @@ export function StorageManager() {
                 color={CAM_COLORS[i % CAM_COLORS.length]}
                 label={c.name}
                 value={c.bytes}
-                total={storage.diskTotalBytes}
+                total={legendTotal}
               />
             ))}
-            <LegendRow color={OTHER_COLOR} label="Other / system" value={other} total={storage.diskTotalBytes} />
-            <LegendRow color={FREE_COLOR} label="Free" value={storage.diskFreeBytes} total={storage.diskTotalBytes} ring />
+            <LegendRow color={OTHER_COLOR} label="Aperture app files" value={appBytes} total={legendTotal} />
+            {hasAllocation && (
+              <LegendRow color={FREE_COLOR} label="Free in allocation" value={freeInAlloc} total={legendTotal} ring />
+            )}
             <div className="border-t border-line mt-1 pt-1.5 flex justify-between text-xs text-fg-muted">
-              <span>Recordings total</span>
-              <span className="tabular-nums">{formatBytes(storage.recordedBytes)}</span>
+              <span>{hasAllocation ? "Allocated to Aperture" : "Used by Aperture"}</span>
+              <span className="tabular-nums">{formatBytes(hasAllocation ? allocated : used)}</span>
             </div>
+            {!hasAllocation && (
+              <p className="text-[11px] text-amber pt-1">Set an allocation below so usage is capped and shown clearly.</p>
+            )}
           </div>
         </div>
       )}
@@ -239,11 +246,11 @@ export function StorageManager() {
       <div className="border-t border-line pt-4">
         <p className="flex items-center gap-1.5 text-xs font-medium text-fg-muted mb-2.5">
           <FolderCog className="h-3.5 w-3.5" />
-          Limit &amp; location
+          Allocation &amp; location
         </p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="label">Storage limit</label>
+            <label className="label">Allocated to Aperture</label>
             <div className="flex gap-2">
               <input
                 className="input"
@@ -258,7 +265,9 @@ export function StorageManager() {
                 <option value="TB">TB</option>
               </select>
             </div>
-            <p className="text-[11px] text-fg-faint mt-1">Blank = unlimited. Over the cap, oldest footage is deleted.</p>
+            <p className="text-[11px] text-fg-faint mt-1">
+              Aperture uses up to this. Oldest footage is auto-deleted when you exceed it — no restart needed.
+            </p>
           </div>
           <div>
             <label className="label">Recordings path</label>

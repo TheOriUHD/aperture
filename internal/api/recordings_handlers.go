@@ -218,8 +218,35 @@ func (s *Server) recordingsDir() string {
 	return s.cfg.RecordingsDir
 }
 
-// handleStorage reports recorded bytes, per-camera usage, disk totals, the
-// active path, and the global cap.
+// dirBytes sums the sizes of all regular files under root (best-effort).
+func dirBytes(root string) int64 {
+	var total int64
+	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
+}
+
+// appFilesBytes is everything Aperture stores that isn't a recorded .ts segment:
+// the SQLite DB, exports, frame-cache, secrets, HomeKit state (all under DataDir)
+// plus per-camera event thumbnails/snapshots under the recordings dir.
+func (s *Server) appFilesBytes() int64 {
+	total := dirBytes(s.cfg.DataDir)
+	base := s.recordingsDir()
+	if cams, err := s.st.ListCameras(); err == nil {
+		for _, c := range cams {
+			total += dirBytes(filepath.Join(base, c.ID, "events"))
+		}
+	}
+	return total
+}
+
+// handleStorage reports usage scoped to the operator's allocation (the storage
+// cap): per-camera recordings + Aperture's own files + free-within-allocation.
+// Disk totals are still returned but secondary.
 func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 	recorded, _ := s.st.TotalBytes()
 	cams, _ := s.st.ListCameras()
@@ -237,14 +264,25 @@ func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	total, free := diskUsage(s.recordingsDir())
+	allocated := s.st.GetSettingInt64("storage_cap_bytes")
+	appBytes := s.appFilesBytes()
+	used := recorded + appBytes
+	freeInAllocation := int64(0)
+	if allocated > 0 && allocated > used {
+		freeInAllocation = allocated - used
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"recordedBytes":  recorded,
-		"diskTotalBytes": total,
-		"diskFreeBytes":  free,
-		"cameras":        perCam,
-		"path":           s.recordingsDir(),
-		"defaultPath":    s.cfg.RecordingsDir,
-		"capBytes":       s.st.GetSettingInt64("storage_cap_bytes"),
+		"recordedBytes":         recorded,
+		"appBytes":              appBytes,
+		"usedBytes":             used,
+		"allocatedBytes":        allocated, // 0 = no allocation set (unlimited)
+		"freeInAllocationBytes": freeInAllocation,
+		"diskTotalBytes":        total,
+		"diskFreeBytes":         free,
+		"cameras":               perCam,
+		"path":                  s.recordingsDir(),
+		"defaultPath":           s.cfg.RecordingsDir,
+		"capBytes":              allocated,
 	})
 }
 

@@ -12,6 +12,10 @@ export interface CameraStorage {
 
 export interface Storage {
   recordedBytes: number;
+  appBytes: number;
+  usedBytes: number;
+  allocatedBytes: number; // 0 = no allocation set
+  freeInAllocationBytes: number;
   diskTotalBytes: number;
   diskFreeBytes: number;
   cameras: CameraStorage[];
