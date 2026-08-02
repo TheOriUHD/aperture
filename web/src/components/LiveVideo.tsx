@@ -38,19 +38,22 @@ export function LiveVideo({
       setState("error");
       return;
     }
-    let stream: LiveStream | undefined;
-    let cancelled = false;
-    setState("connecting");
-    // Instant first frame: reuse a live stream already connected for this camera
-    // (e.g. the tile behind this pop-out). A MediaStream feeds many <video>s.
+    // Reuse an already-connected WebRTC stream for this camera (e.g. the tile
+    // behind this pop-out). A MediaStream feeds many <video>s, so we attach it
+    // directly for an instant image and DON'T open a second connection or tear
+    // the shared stream down on unmount.
     const cached = getCachedStream(camera.id);
     if (cached && videoRef.current) {
       videoRef.current.srcObject = cached;
       void videoRef.current.play().catch(() => undefined);
       setInstant(true);
-    } else {
-      setInstant(false);
+      setState("playing");
+      return;
     }
+    setInstant(false);
+    let stream: LiveStream | undefined;
+    let cancelled = false;
+    setState("connecting");
     (async () => {
       try {
         const tok = await api.get<StreamToken>(`/api/cameras/${camera.id}/stream-token`);
@@ -121,10 +124,12 @@ export function LiveVideo({
         }`}
       >
         {camera.enabled && snapOk ? (
+          // A sharp recent frame as the placeholder, so opening a camera shows
+          // the scene immediately instead of a blurred "loading" panel + dots.
           <img
             src={`/api/cameras/${camera.id}/snapshot.jpg`}
             alt=""
-            className="absolute inset-0 h-full w-full object-cover scale-105 blur-2xl brightness-[0.7]"
+            className={`absolute inset-0 h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"}`}
             onError={() => setSnapOk(false)}
           />
         ) : (
@@ -136,13 +141,14 @@ export function LiveVideo({
               <VideoOff className="h-6 w-6" />
               <span className="text-xs">{camera.enabled ? "No signal" : "Disabled"}</span>
             </div>
-          ) : (
+          ) : !snapOk ? (
+            // Only show the connecting dots when there's no frame to show yet.
             <div className="flex items-center gap-1.5">
               <span className="cdot" style={{ animationDelay: "0ms" }} />
               <span className="cdot" style={{ animationDelay: "160ms" }} />
               <span className="cdot" style={{ animationDelay: "320ms" }} />
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

@@ -416,35 +416,16 @@ export function Playback() {
     );
   }
   function fullscreen() {
+    // Mobile: an instant CSS landscape fill (rotate) — no native fullscreen
+    // (unreliable / blocked in an installed iOS PWA), no waiting.
+    if (!isDesktop) {
+      setFs((f) => !f);
+      return;
+    }
+    // Desktop: native element fullscreen (worked all along).
     const el = containerRef.current;
-    const v = playerVideoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
-    const standalone =
-      window.matchMedia?.("(display-mode: standalone)").matches ||
-      (navigator as Navigator & { standalone?: boolean }).standalone === true;
-    // Desktop / Android browser: real element fullscreen (+ landscape lock on mobile).
-    if (el?.requestFullscreen && !standalone) {
-      if (document.fullscreenElement) {
-        void document.exitFullscreen();
-      } else {
-        void el
-          .requestFullscreen()
-          .then(() => {
-            if (!isDesktop) {
-              const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void> }) | undefined;
-              void so?.lock?.("landscape").catch(() => {});
-            }
-          })
-          .catch(() => setFs((f) => !f));
-      }
-      return;
-    }
-    // iOS Safari (not installed): native video fullscreen.
-    if (v?.webkitEnterFullscreen && !standalone) {
-      v.webkitEnterFullscreen();
-      return;
-    }
-    // Installed PWA / no native fullscreen → CSS pseudo-fullscreen (rotated landscape).
-    setFs((f) => !f);
+    if (!document.fullscreenElement) void el?.requestFullscreen?.();
+    else void document.exitFullscreen();
   }
 
   function openDatePicker() {
@@ -553,12 +534,11 @@ export function Playback() {
             fs
               ? {
                   position: "fixed",
-                  top: 0,
-                  left: "100%",
+                  top: "50%",
+                  left: "50%",
                   width: "100vh",
                   height: "100vw",
-                  transform: "rotate(90deg)",
-                  transformOrigin: "top left",
+                  transform: "translate(-50%, -50%) rotate(90deg)",
                   zIndex: 100,
                 }
               : undefined
@@ -651,7 +631,7 @@ export function Playback() {
             value={zoomIdx}
             max={ZOOMS.length - 1}
             onChange={setZoomIdx}
-            className="absolute top-3 right-3"
+            className="absolute top-3 right-3 z-20"
           />
           {!following && (
             <button

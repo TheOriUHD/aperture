@@ -28,15 +28,16 @@ input.vrange {
   }
   html {
     height: 100%;
-    height: 100dvh;
     @apply bg-ink-900;
   }
-  body,
-  #root {
-    /* 100% is short of the screen in an iOS standalone PWA and leaves a gap
-       under the app; 100dvh fills the full viewport incl. the bottom safe area. */
+  body {
     height: 100%;
-    height: 100dvh;
+  }
+  /* Pin the app to the viewport edges. In an installed iOS PWA this fills the
+     screen reliably, where 100vh/100dvh can leave a grey gap under the app. */
+  #root {
+    position: fixed;
+    inset: 0;
   }
   body {
     @apply bg-ink-900 text-fg font-sans antialiased;
