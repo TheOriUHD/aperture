@@ -22,6 +22,7 @@ import {
   ChevronLast,
   Volume2,
   VolumeX,
+  Minimize2,
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
 import { VerticalTimeline, type TR, type TLEvent } from "../components/VerticalTimeline";
@@ -80,8 +81,9 @@ export function Playback() {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [speedOpen, setSpeedOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [liveMuted, setLiveMuted] = useState(true); // live starts muted (autoplay), tap to hear
+  const [muted, setMuted] = useState(true); // both live + playback start muted; tap to hear
   const [dateOpen, setDateOpen] = useState(false); // custom date/time picker popover
+  const [fs, setFs] = useState(false); // CSS pseudo-fullscreen (iOS PWA where native FS is blocked)
 
   const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 4];
 
@@ -416,26 +418,33 @@ export function Playback() {
   function fullscreen() {
     const el = containerRef.current;
     const v = playerVideoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
-    if (el?.requestFullscreen) {
+    const standalone =
+      window.matchMedia?.("(display-mode: standalone)").matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    // Desktop / Android browser: real element fullscreen (+ landscape lock on mobile).
+    if (el?.requestFullscreen && !standalone) {
       if (document.fullscreenElement) {
         void document.exitFullscreen();
       } else {
         void el
           .requestFullscreen()
           .then(() => {
-            // Rotate to landscape on mobile where supported (Android/Chromium).
             if (!isDesktop) {
               const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void> }) | undefined;
               void so?.lock?.("landscape").catch(() => {});
             }
           })
-          .catch(() => {});
+          .catch(() => setFs((f) => !f));
       }
-    } else if (v?.webkitEnterFullscreen) {
-      // iOS Safari can't fullscreen a div — use the native video fullscreen
-      // (it goes sideways when the phone rotates).
-      v.webkitEnterFullscreen();
+      return;
     }
+    // iOS Safari (not installed): native video fullscreen.
+    if (v?.webkitEnterFullscreen && !standalone) {
+      v.webkitEnterFullscreen();
+      return;
+    }
+    // Installed PWA / no native fullscreen → CSS pseudo-fullscreen (rotated landscape).
+    setFs((f) => !f);
   }
 
   function openDatePicker() {
@@ -448,11 +457,12 @@ export function Playback() {
       return <div className="absolute inset-0 grid place-items-center text-sm text-fg-faint">No cameras</div>;
     }
     return isLive ? (
-      <LiveVideo key={selected.id} camera={selected} fit="contain" videoRef={playerVideoRef} muted={liveMuted} />
+      <LiveVideo key={selected.id} camera={selected} fit="contain" videoRef={playerVideoRef} muted={muted} />
     ) : (
       <video
         ref={playerVideoRef}
         playsInline
+        muted={muted}
         className="absolute inset-0 h-full w-full object-contain bg-black"
         onTimeUpdate={(e) => {
           if (scrubbing.current) return;
@@ -538,11 +548,26 @@ export function Playback() {
         {/* video — swipe down opens the camera strip, up hides it (UniFi-style) */}
         <div
           ref={containerRef}
-          className="relative shrink-0 aspect-video bg-black"
+          className={fs ? "bg-black" : "relative shrink-0 aspect-video bg-black"}
+          style={
+            fs
+              ? {
+                  position: "fixed",
+                  top: 0,
+                  left: "100%",
+                  width: "100vh",
+                  height: "100vw",
+                  transform: "rotate(90deg)",
+                  transformOrigin: "top left",
+                  zIndex: 100,
+                }
+              : undefined
+          }
           onTouchStart={(e) => {
             swipeY.current = e.touches[0]?.clientY ?? 0;
           }}
           onTouchEnd={(e) => {
+            if (fs) return;
             const dy = (e.changedTouches[0]?.clientY ?? 0) - swipeY.current;
             if (dy > 45) setCamerasOpen(true);
             else if (dy < -45) setCamerasOpen(false);
@@ -558,6 +583,15 @@ export function Playback() {
             </div>
           )}
           {selected && <PlaybackConditions tsMs={selectedMs} className="top-2 right-2" variant="compact" />}
+          {fs && (
+            <button
+              onClick={() => setFs(false)}
+              className="absolute top-2 right-2 z-10 h-9 w-9 grid place-items-center rounded-full bg-black/55 text-white"
+              aria-label="Exit fullscreen"
+            >
+              <Minimize2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {/* control header */}
@@ -578,11 +612,9 @@ export function Playback() {
                   </BarBtn>
                 </>
               )}
-              {isLive && (
-                <BarBtn onClick={() => setLiveMuted((m) => !m)} label={liveMuted ? "Unmute" : "Mute"}>
-                  {liveMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                </BarBtn>
-              )}
+              <BarBtn onClick={() => setMuted((m) => !m)} label={muted ? "Unmute" : "Mute"}>
+                {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              </BarBtn>
               <BarBtn onClick={() => setCamerasOpen((o) => !o)} label="Cameras">
                 <LayoutGrid className="h-4 w-4" />
               </BarBtn>
@@ -744,11 +776,9 @@ export function Playback() {
                 {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
               </BarBtn>
             )}
-            {isLive && (
-              <BarBtn onClick={() => setLiveMuted((m) => !m)} label={liveMuted ? "Unmute" : "Mute"}>
-                {liveMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-              </BarBtn>
-            )}
+            <BarBtn onClick={() => setMuted((m) => !m)} label={muted ? "Unmute" : "Mute"}>
+              {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            </BarBtn>
             <BarBtn onClick={() => seekToTime((isLive ? nowMs : selectedMs) - 30_000)} label="Back 30 seconds">
               <Rewind className="h-4 w-4" />
             </BarBtn>

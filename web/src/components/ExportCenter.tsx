@@ -108,20 +108,20 @@ export function ExportCenter({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
+              <div className="min-w-0">
                 <label className="label">From</label>
                 <input
-                  className="input text-xs"
+                  className="input text-xs min-w-0"
                   type="datetime-local"
                   step={1}
                   value={toLocalInput(from)}
                   onChange={(e) => setFrom(new Date(e.target.value).getTime())}
                 />
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="label">To</label>
                 <input
-                  className="input text-xs"
+                  className="input text-xs min-w-0"
                   type="datetime-local"
                   step={1}
                   value={toLocalInput(to)}
