@@ -31,8 +31,14 @@ export function useExports() {
 export function useCreateExport() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: { cameraId: string; from: number; to: number; burnIn: boolean; audio: boolean }) =>
-      api.post<ExportJob>("/api/export", b),
+    mutationFn: (b: {
+      cameraIds: string[];
+      mode: "single" | "zip" | "composite";
+      from: number;
+      to: number;
+      burnIn: boolean;
+      audio: boolean;
+    }) => api.post<ExportJob>("/api/export", b),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["exports"] }),
   });
 }

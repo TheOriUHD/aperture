@@ -1,33 +1,51 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"strings"
+)
 
-// ExportJob is a queued/processing/finished clip export.
+// ExportJob is a queued/processing/finished clip export. A job covers one camera
+// (legacy: CameraID) or several (CameraIDs) rendered per Mode.
 type ExportJob struct {
-	ID         string  `json:"id"`
-	UserID     string  `json:"userId"`
-	CameraID   string  `json:"cameraId"`
-	CameraName string  `json:"cameraName"`
-	FromTS     int64   `json:"fromTs"`
-	ToTS       int64   `json:"toTs"`
-	BurnIn     bool    `json:"burnIn"`
-	Audio      bool    `json:"audio"`
-	Status     string  `json:"status"` // queued | running | done | error
-	Progress   float64 `json:"progress"`
-	OutputPath string  `json:"-"`
-	SizeBytes  int64   `json:"sizeBytes"`
-	Error      string  `json:"error"`
-	CreatedAt  int64   `json:"createdAt"`
-	FinishedAt int64   `json:"finishedAt"`
+	ID         string   `json:"id"`
+	UserID     string   `json:"userId"`
+	CameraID   string   `json:"cameraId"`
+	CameraName string   `json:"cameraName"`
+	CameraIDs  []string `json:"cameraIds"`
+	Mode       string   `json:"mode"` // single | zip | composite
+	FromTS     int64    `json:"fromTs"`
+	ToTS       int64    `json:"toTs"`
+	BurnIn     bool     `json:"burnIn"`
+	Audio      bool     `json:"audio"`
+	Status     string   `json:"status"` // queued | running | done | error
+	Progress   float64  `json:"progress"`
+	OutputPath string   `json:"-"`
+	SizeBytes  int64    `json:"sizeBytes"`
+	Error      string   `json:"error"`
+	CreatedAt  int64    `json:"createdAt"`
+	FinishedAt int64    `json:"finishedAt"`
 }
 
-const exportSelect = `SELECT id, user_id, camera_id, camera_name, from_ts, to_ts, burn_in, audio,
+// Cameras returns the effective camera-id list (CameraIDs, or [CameraID]).
+func (j *ExportJob) Cameras() []string {
+	if len(j.CameraIDs) > 0 {
+		return j.CameraIDs
+	}
+	if j.CameraID != "" {
+		return []string{j.CameraID}
+	}
+	return nil
+}
+
+const exportSelect = `SELECT id, user_id, camera_id, camera_name, cameras, mode, from_ts, to_ts, burn_in, audio,
     status, progress, output_path, size_bytes, error, created_at, finished_at FROM export_jobs`
 
 func scanExport(row rowScanner) (*ExportJob, error) {
 	var j ExportJob
 	var burn, audio int
-	if err := row.Scan(&j.ID, &j.UserID, &j.CameraID, &j.CameraName, &j.FromTS, &j.ToTS,
+	var cameras string
+	if err := row.Scan(&j.ID, &j.UserID, &j.CameraID, &j.CameraName, &cameras, &j.Mode, &j.FromTS, &j.ToTS,
 		&burn, &audio, &j.Status, &j.Progress, &j.OutputPath, &j.SizeBytes, &j.Error,
 		&j.CreatedAt, &j.FinishedAt); err != nil {
 		if err == sql.ErrNoRows {
@@ -36,6 +54,9 @@ func scanExport(row rowScanner) (*ExportJob, error) {
 		return nil, err
 	}
 	j.BurnIn, j.Audio = burn != 0, audio != 0
+	if cameras != "" {
+		j.CameraIDs = strings.Split(cameras, ",")
+	}
 	return &j, nil
 }
 
@@ -43,10 +64,13 @@ func (s *Store) CreateExport(j *ExportJob) error {
 	if j.ID == "" {
 		j.ID = NewID()
 	}
+	if j.Mode == "" {
+		j.Mode = "single"
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO export_jobs (id, user_id, camera_id, camera_name, from_ts, to_ts, burn_in, audio, status, progress, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		j.ID, j.UserID, j.CameraID, j.CameraName, j.FromTS, j.ToTS,
+		`INSERT INTO export_jobs (id, user_id, camera_id, camera_name, cameras, mode, from_ts, to_ts, burn_in, audio, status, progress, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		j.ID, j.UserID, j.CameraID, j.CameraName, strings.Join(j.CameraIDs, ","), j.Mode, j.FromTS, j.ToTS,
 		boolInt(j.BurnIn), boolInt(j.Audio), j.Status, j.Progress, j.CreatedAt)
 	return err
 }

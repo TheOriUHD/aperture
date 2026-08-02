@@ -43,7 +43,8 @@ export function ExportCenter({
   cameras: Camera[];
   defaultTo: number;
 }) {
-  const [cameraId, setCameraId] = useState(camera?.id ?? "");
+  const [selectedCams, setSelectedCams] = useState<string[]>(camera ? [camera.id] : []);
+  const [composite, setComposite] = useState(false);
   const [from, setFrom] = useState(defaultTo - 60_000);
   const [to, setTo] = useState(defaultTo);
   const [burnIn, setBurnIn] = useState(false);
@@ -61,14 +62,25 @@ export function ExportCenter({
   // defaultTo, which would otherwise reset the inputs the user is editing.
   useEffect(() => {
     if (!open) return;
-    setCameraId(camera?.id ?? cameras[0]?.id ?? "");
+    setSelectedCams(camera ? [camera.id] : cameras[0] ? [cameras[0].id] : []);
+    setComposite(false);
     setTo(defaultTo);
     setFrom(defaultTo - 60_000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const durMs = to - from;
-  const invalid = !cameraId || durMs <= 0 || durMs > 4 * 3600_000;
+  const multi = selectedCams.length > 1;
+  const mode: "single" | "zip" | "composite" = multi ? (composite ? "composite" : "zip") : "single";
+  const invalid =
+    selectedCams.length === 0 ||
+    durMs <= 0 ||
+    durMs > 4 * 3600_000 ||
+    (composite && selectedCams.length > 4);
+
+  function toggleCam(id: string) {
+    setSelectedCams((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  }
 
   return (
     <>
@@ -77,17 +89,25 @@ export function ExportCenter({
           {/* create form */}
           <div className="space-y-3">
             <div>
-              <label className="label">Camera</label>
-              <select className="input" value={cameraId} onChange={(e) => setCameraId(e.target.value)}>
+              <label className="label">Cameras</label>
+              <div className="flex flex-wrap gap-1.5">
                 {cameras.map((c) => (
-                  <option key={c.id} value={c.id}>
+                  <button
+                    key={c.id}
+                    onClick={() => toggleCam(c.id)}
+                    className={`rounded-full px-2.5 py-1 text-xs border transition-colors ${
+                      selectedCams.includes(c.id)
+                        ? "border-brand bg-brand/15 text-fg"
+                        : "border-line text-fg-muted hover:text-fg"
+                    }`}
+                  >
                     {c.name}
-                  </option>
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="label">From</label>
                 <input
@@ -110,8 +130,8 @@ export function ExportCenter({
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <span className="text-xs text-fg-faint self-center mr-1">Ending here, grab:</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-fg-faint mr-0.5">Last:</span>
               {PRESETS.map((p) => (
                 <button
                   key={p.ms}
@@ -127,31 +147,60 @@ export function ExportCenter({
               ))}
             </div>
 
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-sm text-fg">Burn in timestamp</span>
-                <p className="text-xs text-fg-faint">Overlays camera + time (re-encodes; slower)</p>
+            {multi && (
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm text-fg">Combine into one multi-view</span>
+                  <p className="text-xs text-fg-faint">
+                    {composite
+                      ? "Grid montage — transcoded, no audio, up to 4 cameras"
+                      : "Off = a .zip with one clip per camera"}
+                  </p>
+                </div>
+                <Switch checked={composite} onChange={setComposite} label="Combine into one multi-view" />
               </div>
-              <Switch checked={burnIn} onChange={setBurnIn} label="Burn in timestamp" />
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-fg">Include audio</span>
-              <Switch checked={audio} onChange={setAudio} label="Include audio" />
-            </div>
+            )}
+
+            {!composite && (
+              <>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm text-fg">Burn in timestamp</span>
+                    <p className="text-xs text-fg-faint">Overlays camera name + time onto each clip.</p>
+                  </div>
+                  <Switch checked={burnIn} onChange={setBurnIn} label="Burn in timestamp" />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-fg">Include audio</span>
+                  <Switch checked={audio} onChange={setAudio} label="Include audio" />
+                </div>
+              </>
+            )}
 
             <button
               className="btn-primary w-full"
               disabled={invalid || create.isPending}
-              onClick={() => create.mutate({ cameraId, from, to, burnIn, audio })}
+              onClick={() => create.mutate({ cameraIds: selectedCams, mode, from, to, burnIn, audio })}
             >
               <Scissors className="h-4 w-4" />
-              {durMs > 0 && !invalid ? `Export ${fmtDuration(durMs)} clip` : "Export clip"}
-              {!burnIn && !invalid && (
+              {durMs > 0 && !invalid
+                ? `Export ${fmtDuration(durMs)} ${multi && !composite ? "clips" : "clip"}`
+                : "Export"}
+              {!invalid && mode === "single" && !burnIn && (
                 <span className="text-[11px] text-ink-900/70"> · instant copy</span>
+              )}
+              {!invalid && mode === "zip" && (
+                <span className="text-[11px] text-ink-900/70"> · {selectedCams.length} clips · .zip</span>
+              )}
+              {!invalid && mode === "composite" && (
+                <span className="text-[11px] text-ink-900/70"> · multi-view</span>
               )}
             </button>
             {durMs > 4 * 3600_000 && (
               <p className="text-xs text-rec">Range too long — 4 hours max per export.</p>
+            )}
+            {composite && selectedCams.length > 4 && (
+              <p className="text-xs text-rec">Multi-view supports up to 4 cameras.</p>
             )}
             {create.isPending && <p className="text-xs text-fg-faint">Starting export…</p>}
             {create.isError && (

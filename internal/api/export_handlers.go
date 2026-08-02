@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,19 +22,31 @@ func (s *Server) isOwnerOrAdmin(r *http.Request, ownerID string) bool {
 
 func (s *Server) handleCreateExport(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		CameraID string `json:"cameraId"`
-		From     int64  `json:"from"`
-		To       int64  `json:"to"`
-		BurnIn   bool   `json:"burnIn"`
-		Audio    bool   `json:"audio"`
+		CameraID  string   `json:"cameraId"`
+		CameraIDs []string `json:"cameraIds"`
+		Mode      string   `json:"mode"` // single | zip | composite
+		From      int64    `json:"from"`
+		To        int64    `json:"to"`
+		BurnIn    bool     `json:"burnIn"`
+		Audio     bool     `json:"audio"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if !s.allowedCamera(r, req.CameraID) {
-		writeError(w, http.StatusForbidden, "access denied")
+	cams := req.CameraIDs
+	if len(cams) == 0 && req.CameraID != "" {
+		cams = []string{req.CameraID}
+	}
+	if len(cams) == 0 {
+		writeError(w, http.StatusBadRequest, "no camera selected")
 		return
+	}
+	for _, cid := range cams {
+		if !s.allowedCamera(r, cid) {
+			writeError(w, http.StatusForbidden, "access denied")
+			return
+		}
 	}
 	if req.To <= req.From {
 		writeError(w, http.StatusBadRequest, "invalid time range")
@@ -43,7 +56,17 @@ func (s *Server) handleCreateExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "range too long (max 4 hours per export)")
 		return
 	}
-	cam, err := s.st.GetCamera(req.CameraID)
+
+	mode := req.Mode
+	if len(cams) == 1 {
+		mode = "single"
+	} else if mode == "composite" {
+		mode = "composite"
+	} else {
+		mode = "zip"
+	}
+
+	firstCam, err := s.st.GetCamera(cams[0])
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -51,8 +74,10 @@ func (s *Server) handleCreateExport(w http.ResponseWriter, r *http.Request) {
 	c := auth.FromContext(r.Context())
 	job := &store.ExportJob{
 		UserID:     c.UserID,
-		CameraID:   cam.ID,
-		CameraName: cam.Name,
+		CameraID:   firstCam.ID,
+		CameraName: firstCam.Name,
+		CameraIDs:  cams,
+		Mode:       mode,
 		FromTS:     req.From,
 		ToTS:       req.To,
 		BurnIn:     req.BurnIn,
@@ -65,11 +90,7 @@ func (s *Server) handleCreateExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.exp.Enqueue(job.ID)
-	mode := "copy"
-	if job.BurnIn {
-		mode = "burn-in"
-	}
-	s.logAudit(r, "clip.export", cam.Name, mode)
+	s.logAudit(r, "clip.export", firstCam.Name, mode)
 	writeJSON(w, http.StatusCreated, job)
 }
 
@@ -121,7 +142,11 @@ func (s *Server) handleDownloadExport(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	fi, _ := f.Stat()
 	name := exportFilename(job)
-	w.Header().Set("Content-Type", "video/mp4")
+	ct := "video/mp4"
+	if strings.HasSuffix(job.OutputPath, ".zip") {
+		ct = "application/zip"
+	}
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	s.logAudit(r, "clip.download", job.CameraName, "")
 	http.ServeContent(w, r, name, fi.ModTime(), f)
@@ -141,6 +166,7 @@ func (s *Server) handleDeleteExport(w http.ResponseWriter, r *http.Request) {
 		_ = os.Remove(job.OutputPath)
 	}
 	_ = os.Remove(filepath.Join(s.exp.Dir(), job.ID+".mp4"))
+	_ = os.Remove(filepath.Join(s.exp.Dir(), job.ID+".zip"))
 	_ = s.st.DeleteExport(job.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
@@ -158,5 +184,12 @@ func exportFilename(j *store.ExportJob) string {
 	if safe == "" {
 		safe = "clip"
 	}
-	return safe + "_" + t + ".mp4"
+	ext := ".mp4"
+	if strings.HasSuffix(j.OutputPath, ".zip") {
+		ext = ".zip"
+		if len(j.CameraIDs) > 1 {
+			safe = "aperture-clips"
+		}
+	}
+	return safe + "_" + t + ext
 }

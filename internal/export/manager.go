@@ -6,6 +6,7 @@
 package export
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -85,17 +86,63 @@ func (m *Manager) process(ctx context.Context, id string) {
 		_ = m.st.FailExport(id, msg, time.Now().Unix())
 	}
 
-	segs, err := m.st.ListSegments(job.CameraID, job.FromTS, job.ToTS)
-	if err != nil {
-		fail("could not list footage")
+	cams := job.Cameras()
+	if len(cams) == 0 {
+		fail("no camera selected")
 		return
 	}
-	if len(segs) == 0 {
-		fail("no footage in the selected range")
-		return
+	names := map[string]string{}
+	for _, cid := range cams {
+		if c, err := m.st.GetCamera(cid); err == nil {
+			names[cid] = c.Name
+		} else {
+			names[cid] = cid
+		}
 	}
 
-	listPath := filepath.Join(m.dir, id+".txt")
+	var out string
+	switch {
+	case job.Mode == "composite" && len(cams) >= 2:
+		out = filepath.Join(m.dir, id+".mp4")
+		if err := m.composite(ctx, job, cams, names, out); err != nil {
+			fail(err.Error())
+			return
+		}
+	case len(cams) > 1:
+		out = filepath.Join(m.dir, id+".zip")
+		if err := m.zipClips(ctx, id, job, cams, names, out); err != nil {
+			fail(err.Error())
+			return
+		}
+	default:
+		out = filepath.Join(m.dir, id+".mp4")
+		if err := m.clipForCamera(ctx, id, job, cams[0], names[cams[0]], out, true); err != nil {
+			fail(err.Error())
+			return
+		}
+	}
+
+	fi, err := os.Stat(out)
+	if err != nil {
+		fail("export produced no file")
+		return
+	}
+	_ = m.st.FinishExport(id, out, fi.Size(), time.Now().Unix())
+	m.log.Info("export done", "id", id, "bytes", fi.Size(), "mode", job.Mode, "cameras", len(cams))
+}
+
+// clipForCamera renders one camera's window to a single MP4 (fast stream-copy,
+// or a burn-in transcode). trackProg wires ffmpeg progress for the single-job UI.
+func (m *Manager) clipForCamera(ctx context.Context, id string, job *store.ExportJob, cameraID, cameraName, out string, trackProg bool) error {
+	segs, err := m.st.ListSegments(cameraID, job.FromTS, job.ToTS)
+	if err != nil {
+		return fmt.Errorf("could not list footage")
+	}
+	if len(segs) == 0 {
+		return fmt.Errorf("no footage for %s in the selected range", cameraName)
+	}
+
+	listPath := filepath.Join(m.dir, id+"-"+cameraID+".txt")
 	var b strings.Builder
 	for _, sg := range segs {
 		b.WriteString("file '")
@@ -103,8 +150,7 @@ func (m *Manager) process(ctx context.Context, id string) {
 		b.WriteString("'\n")
 	}
 	if err := os.WriteFile(listPath, []byte(b.String()), 0o600); err != nil {
-		fail("internal error")
-		return
+		return fmt.Errorf("internal error")
 	}
 	defer os.Remove(listPath)
 
@@ -114,16 +160,14 @@ func (m *Manager) process(ctx context.Context, id string) {
 	}
 	durMs := job.ToTS - job.FromTS
 	dur := float64(durMs) / 1000.0
-	out := filepath.Join(m.dir, id+".mp4")
 
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
-	if job.BurnIn {
+	if job.BurnIn && trackProg {
 		args = append(args, "-progress", "pipe:1")
 	}
-	args = append(args, "-f", "concat", "-safe", "0", "-i", listPath,
-		"-ss", ftoa(offset), "-t", ftoa(dur))
+	args = append(args, "-f", "concat", "-safe", "0", "-i", listPath, "-ss", ftoa(offset), "-t", ftoa(dur))
 	if job.BurnIn {
-		args = append(args, "-vf", drawtextVF(job.CameraName, job.FromTS/1000),
+		args = append(args, "-vf", drawtextVF(cameraName, job.FromTS/1000),
 			"-c:v", "libx264", "-preset", "veryfast", "-crf", "22")
 		if job.Audio {
 			args = append(args, "-c:a", "aac")
@@ -139,7 +183,7 @@ func (m *Manager) process(ctx context.Context, id string) {
 	args = append(args, "-movflags", "+faststart", "-y", out)
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	if job.BurnIn && durMs > 0 {
+	if job.BurnIn && trackProg && durMs > 0 {
 		if stdout, err := cmd.StdoutPipe(); err == nil {
 			go m.trackProgress(id, stdout, durMs)
 		}
@@ -151,16 +195,160 @@ func (m *Manager) process(ctx context.Context, id string) {
 		if msg == "" {
 			msg = "ffmpeg failed"
 		}
-		fail(msg)
-		return
+		return fmt.Errorf("%s", msg)
 	}
-	fi, err := os.Stat(out)
+	return nil
+}
+
+// zipClips renders one clip per camera and archives them into a .zip. Cameras
+// with no footage in the window are skipped rather than failing the whole job.
+func (m *Manager) zipClips(ctx context.Context, id string, job *store.ExportJob, cams []string, names map[string]string, out string) error {
+	type clip struct{ path, name string }
+	var clips []clip
+	var tmp []string
+	defer func() {
+		for _, f := range tmp {
+			_ = os.Remove(f)
+		}
+	}()
+	for i, cid := range cams {
+		cp := filepath.Join(m.dir, fmt.Sprintf("%s-%d.mp4", id, i))
+		if err := m.clipForCamera(ctx, id, job, cid, names[cid], cp, false); err != nil {
+			m.log.Warn("export: clip skipped", "camera", names[cid], "err", err)
+			continue
+		}
+		tmp = append(tmp, cp)
+		clips = append(clips, clip{cp, names[cid]})
+		_ = m.st.SetExportProgress(id, float64(i+1)/float64(len(cams))*0.9)
+	}
+	if len(clips) == 0 {
+		return fmt.Errorf("no footage in the selected range")
+	}
+
+	zf, err := os.Create(out)
 	if err != nil {
-		fail("export produced no file")
-		return
+		return fmt.Errorf("internal error")
 	}
-	_ = m.st.FinishExport(id, out, fi.Size(), time.Now().Unix())
-	m.log.Info("export done", "id", id, "bytes", fi.Size())
+	defer zf.Close()
+	zw := zip.NewWriter(zf)
+	stamp := time.UnixMilli(job.FromTS).Format("2006-01-02_15-04-05")
+	used := map[string]bool{}
+	for _, c := range clips {
+		name := sanitizeFile(c.name) + "_" + stamp + ".mp4"
+		for used[name] {
+			name = "x" + name
+		}
+		used[name] = true
+		w, err := zw.Create(name)
+		if err != nil {
+			return err
+		}
+		src, err := os.Open(c.path)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(w, src)
+		_ = src.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return zw.Close()
+}
+
+// composite renders 2–4 cameras into one multi-view MP4 via xstack (always a
+// transcode; audio dropped). Inputs are time-aligned by seeking each to the
+// window start.
+func (m *Manager) composite(ctx context.Context, job *store.ExportJob, cams []string, names map[string]string, out string) error {
+	if len(cams) > 4 {
+		m.log.Warn("export: composite capped at 4 cameras", "requested", len(cams))
+		cams = cams[:4]
+	}
+	var lists []string
+	defer func() {
+		for _, f := range lists {
+			_ = os.Remove(f)
+		}
+	}()
+	durMs := job.ToTS - job.FromTS
+	dur := float64(durMs) / 1000.0
+
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-progress", "pipe:1"}
+	for i, cid := range cams {
+		segs, err := m.st.ListSegments(cid, job.FromTS, job.ToTS)
+		if err != nil || len(segs) == 0 {
+			return fmt.Errorf("no footage for %s in the selected range", names[cid])
+		}
+		lp := filepath.Join(m.dir, fmt.Sprintf("%s-comp-%d.txt", job.ID, i))
+		var b strings.Builder
+		for _, sg := range segs {
+			b.WriteString("file '")
+			b.WriteString(sg.Path)
+			b.WriteString("'\n")
+		}
+		if err := os.WriteFile(lp, []byte(b.String()), 0o600); err != nil {
+			return fmt.Errorf("internal error")
+		}
+		lists = append(lists, lp)
+		off := float64(job.FromTS-segs[0].StartTS) / 1000.0
+		if off < 0 {
+			off = 0
+		}
+		// Per-input -ss/-t bounds each concat input to exactly the window, so
+		// ffmpeg never reads (or the filtergraph never buffers) beyond it.
+		args = append(args, "-ss", ftoa(off), "-t", ftoa(dur), "-f", "concat", "-safe", "0", "-i", lp)
+	}
+
+	fc := compositeFilter(len(cams))
+	// -r caps the montage framerate; the filter resets each input's PTS so
+	// xstack aligns them at 0 instead of waiting on divergent timestamps.
+	args = append(args, "-filter_complex", fc, "-map", "[v]", "-r", "15", "-t", ftoa(dur),
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-an", "-movflags", "+faststart", "-y", out)
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	if durMs > 0 {
+		if stdout, err := cmd.StdoutPipe(); err == nil {
+			go m.trackProgress(job.ID, stdout, durMs)
+		}
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := firstLine(stderr.String())
+		if msg == "" {
+			msg = "ffmpeg failed"
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
+}
+
+// compositeFilter builds the filter_complex that scales each input and stacks
+// them: 2 = side-by-side, 3 = one top + two bottom, 4 = quad. Output label [v].
+func compositeFilter(n int) string {
+	const p = "setpts=PTS-STARTPTS,fps=15,setsar=1" // reset PTS + normalize fps so xstack aligns
+	switch n {
+	case 2:
+		return "[0:v]scale=960:540," + p + "[a];[1:v]scale=960:540," + p + "[b];[a][b]hstack=inputs=2[v]"
+	case 3:
+		return "[0:v]scale=1920:540," + p + "[t];[1:v]scale=960:540," + p + "[bl];[2:v]scale=960:540," + p + "[br];" +
+			"[t][bl][br]xstack=inputs=3:layout=0_0|0_h0|w1_h0[v]"
+	default: // 4
+		return "[0:v]scale=960:540," + p + "[a];[1:v]scale=960:540," + p + "[b];[2:v]scale=960:540," + p + "[c];[3:v]scale=960:540," + p + "[d];" +
+			"[a][b][c][d]xstack=inputs=4:layout=0_0|w0_0|0_h0|w0_h0[v]"
+	}
+}
+
+func sanitizeFile(s string) string {
+	r := strings.NewReplacer("/", "-", "\\", "-", " ", "_", ":", "-", "'", "", "\"", "")
+	out := r.Replace(strings.TrimSpace(s))
+	if out == "" {
+		out = "camera"
+	}
+	if len(out) > 40 {
+		out = out[:40]
+	}
+	return out
 }
 
 func (m *Manager) trackProgress(id string, r io.Reader, durMs int64) {
@@ -212,6 +400,7 @@ func (m *Manager) cleanup() {
 			_ = os.Remove(j.OutputPath)
 		}
 		_ = os.Remove(filepath.Join(m.dir, j.ID+".mp4"))
+		_ = os.Remove(filepath.Join(m.dir, j.ID+".zip"))
 		_ = m.st.DeleteExport(j.ID)
 	}
 }
