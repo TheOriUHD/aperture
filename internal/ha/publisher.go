@@ -52,6 +52,7 @@ type Publisher struct {
 	siteName  func() string
 	reconcile func() // re-sync recorder + detector after an inbound record-mode change
 
+	stateMu   sync.Mutex      // guards motion/recording — touched by the ticker AND the paho OnConnect goroutine
 	motion    map[string]bool // last published motion state per camera
 	recording map[string]bool
 }
@@ -334,13 +335,19 @@ func (p *Publisher) publishMotionRecording() {
 	now := time.Now().UnixMilli()
 	for _, c := range cams {
 		motion := p.cameraInMotion(c.ID, now)
-		if p.motion[c.ID] != motion {
-			p.motion[c.ID] = motion
+		rec := c.Enabled && c.RecordMode != store.ModeNever
+		// Compute what changed under the state lock (this runs on both the ticker
+		// goroutine and the paho OnConnect goroutine), then publish outside it.
+		p.stateMu.Lock()
+		motionChanged := p.motion[c.ID] != motion
+		recChanged := p.recording[c.ID] != rec
+		p.motion[c.ID] = motion
+		p.recording[c.ID] = rec
+		p.stateMu.Unlock()
+		if motionChanged {
 			p.pub(stateTopicBase+"/"+c.ID+"/motion", true, onOff(motion))
 		}
-		rec := c.Enabled && c.RecordMode != store.ModeNever
-		if p.recording[c.ID] != rec {
-			p.recording[c.ID] = rec
+		if recChanged {
 			p.pub(stateTopicBase+"/"+c.ID+"/recording", true, onOff(rec))
 		}
 	}

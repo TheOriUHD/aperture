@@ -228,9 +228,7 @@ func main() {
 		webhookDisp.OnEvent(ev)
 		automateEng.OnEvent(ev)
 		if hkBridge != nil {
-			hkBridge.SetMotion(ev.CameraID, true)
-			cam := ev.CameraID
-			time.AfterFunc(20*time.Second, func() { hkBridge.SetMotion(cam, false) })
+			hkBridge.MotionPulse(ev.CameraID)
 		}
 	})
 

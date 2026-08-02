@@ -60,8 +60,10 @@ func (d *discovery) run(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			default:
+				// A transient read error (e.g. an oversized datagram) must not
+				// permanently kill discovery — keep serving Probes.
 				d.log.Debug("onvif ws-discovery read", "err", err)
-				return
+				continue
 			}
 		}
 		msgID, ok := parseProbe(buf[:n])

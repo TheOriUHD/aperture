@@ -79,6 +79,11 @@ func (e *Engine) OnEvent(ev *store.Event) {
 	if err != nil || len(autos) == 0 {
 		return
 	}
+	// Disarmed (from Home Assistant, §14.2) silences all event-driven automation
+	// actions too, mirroring the notify engine.
+	if v, _ := e.st.GetSetting("armed"); v == "false" {
+		return
+	}
 	now := time.Now()
 	ec := e.eventContext(ev)
 	for _, a := range autos {

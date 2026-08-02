@@ -15,6 +15,7 @@ import (
 	"context"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"log/slog"
 
@@ -46,8 +47,9 @@ type Bridge struct {
 
 	sec *accessory.SecuritySystem
 
-	mu    sync.Mutex
-	armed bool
+	mu        sync.Mutex
+	armed     bool
+	motionGen map[string]int64 // latest motion generation per camera (sliding clear-timer)
 }
 
 // New builds the bridge and its accessories from the current camera list.
@@ -55,14 +57,16 @@ type Bridge struct {
 // handled gracefully (the bridge still exposes the SecuritySystem).
 func New(cfg *config.Config, st *store.Store, log *slog.Logger) (*Bridge, error) {
 	b := &Bridge{
-		cfg:    cfg,
-		st:     st,
-		log:    log,
-		motion: make(map[string]*accessory.MotionSensor),
+		cfg:       cfg,
+		st:        st,
+		log:       log,
+		motion:    make(map[string]*accessory.MotionSensor),
+		motionGen: make(map[string]int64),
 	}
 
-	// Restore persisted armed state.
-	if v, err := st.GetSetting("armed"); err == nil && v == "true" {
+	// Restore persisted armed state. Default to armed unless explicitly "false",
+	// matching the notify engine and the HA arm switch (unset == armed).
+	if v, _ := st.GetSetting("armed"); v != "false" {
 		b.armed = true
 	}
 
@@ -135,19 +139,65 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger) (*Bridge, error)
 // returns nil on context cancellation).
 func (b *Bridge) Run(ctx context.Context) {
 	b.log.Info("homekit bridge starting", "pin", SetupPin)
+	go b.syncArmedLoop(ctx) // reflect HA/notify-driven arm changes into the Home app
 	if err := b.server.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
 		b.log.Error("homekit server exited", "err", err)
 	}
 }
 
+// syncArmedLoop keeps the SecuritySystem characteristic in step with the "armed"
+// setting, which other surfaces (Home Assistant, notify) can change directly.
+func (b *Bridge) syncArmedLoop(ctx context.Context) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			v, _ := b.st.GetSetting("armed")
+			armed := v != "false"
+			b.mu.Lock()
+			changed := armed != b.armed
+			b.armed = armed
+			b.mu.Unlock()
+			if changed {
+				b.applyArmedToCharacteristics()
+			}
+		}
+	}
+}
+
 // SetMotion flips the MotionSensor characteristic for the given camera. Safe to
-// call for unknown/disabled camera IDs (no-op). Called by the event pipeline.
+// call for unknown/disabled camera IDs (no-op).
 func (b *Bridge) SetMotion(cameraID string, active bool) {
 	ms, ok := b.motion[cameraID]
 	if !ok {
 		return
 	}
 	ms.MotionSensor.MotionDetected.SetValue(active)
+}
+
+// MotionPulse marks a camera in motion and auto-clears 20s after the LATEST
+// event (a sliding window), so overlapping events can't cut the sensor short.
+// This is what the event pipeline calls.
+func (b *Bridge) MotionPulse(cameraID string) {
+	if _, ok := b.motion[cameraID]; !ok {
+		return
+	}
+	b.SetMotion(cameraID, true)
+	b.mu.Lock()
+	b.motionGen[cameraID]++
+	gen := b.motionGen[cameraID]
+	b.mu.Unlock()
+	time.AfterFunc(20*time.Second, func() {
+		b.mu.Lock()
+		latest := b.motionGen[cameraID] == gen
+		b.mu.Unlock()
+		if latest {
+			b.SetMotion(cameraID, false)
+		}
+	})
 }
 
 // Armed reports the current armed state.
