@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import {
   LayoutGrid,
-  Cctv,
   Clapperboard,
   Bell,
   Settings,
@@ -20,7 +19,6 @@ interface NavItem {
 
 const items: NavItem[] = [
   { to: "/dashboard", tkey: "nav.live", label: "Live", icon: LayoutGrid },
-  { to: "/cameras", tkey: "nav.cameras", label: "Cameras", icon: Cctv },
   { to: "/playback", tkey: "nav.playback", label: "Playback", icon: Clapperboard },
   { to: "/alarms", tkey: "nav.alarms", label: "Alarms", icon: Bell },
 ];

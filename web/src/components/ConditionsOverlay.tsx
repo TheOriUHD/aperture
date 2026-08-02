@@ -100,9 +100,11 @@ export function LiveConditions({
 export function PlaybackConditions({
   tsMs,
   className = "top-3 right-3",
+  variant = "full",
 }: {
   tsMs: number;
   className?: string;
+  variant?: Variant;
 }) {
   const { data: site } = useSite();
   const { data: sample } = useWeatherAt(tsMs, !!site?.configured);
@@ -115,7 +117,7 @@ export function PlaybackConditions({
       <ConditionsBadge
         sample={sample}
         units={site.units ?? defaultUnits}
-        variant="full"
+        variant={variant}
         night={isNightAt(Math.floor(tsMs / 1000), astro?.sun)}
       />
     </div>

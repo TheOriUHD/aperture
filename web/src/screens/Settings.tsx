@@ -13,6 +13,7 @@ import { PreferencesSettings } from "../components/PreferencesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { NotificationsSettings } from "../components/NotificationsSettings";
 import { DetectionSettings } from "../components/DetectionSettings";
+import { CamerasManager } from "./Cameras";
 import { ApiTokens } from "../components/ApiTokens";
 import { Webhooks } from "../components/Webhooks";
 import { Automations } from "../components/Automations";
@@ -36,6 +37,7 @@ export function Settings() {
     { id: "general", label: t("settings.tabGeneral", "General"), admin: false },
     { id: "security", label: t("settings.tabSecurity", "Security"), admin: false },
     { id: "notifications", label: t("settings.tabNotifications", "Notifications"), admin: false },
+    { id: "cameras", label: t("settings.tabCameras", "Cameras"), admin: true },
     { id: "system", label: t("settings.tabSystem", "System"), admin: true },
     { id: "environment", label: t("settings.tabEnvironment", "Environment"), admin: true },
     { id: "detection", label: t("settings.tabDetection", "Detection"), admin: true },
@@ -96,6 +98,8 @@ export function Settings() {
             )}
 
             {active === "notifications" && <NotificationsSettings />}
+
+            {active === "cameras" && isAdmin && <CamerasManager />}
 
             {active === "system" && isAdmin && (
               <>

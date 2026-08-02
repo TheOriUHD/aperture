@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { X, Maximize2, Camera as CameraIcon, Clapperboard } from "lucide-react";
 import { LiveVideo } from "./LiveVideo";
 import { LiveConditions } from "./ConditionsOverlay";
+import { useScrollLock } from "../hooks/useScrollLock";
 import type { Camera } from "../lib/types";
 
 export function CameraPopout({
@@ -14,6 +15,7 @@ export function CameraPopout({
   onOpenPlayback: (cameraId: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  useScrollLock(!!camera);
 
   useEffect(() => {
     if (!camera) return;

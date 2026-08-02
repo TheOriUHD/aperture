@@ -20,6 +20,8 @@ import {
   Link2,
   ChevronFirst,
   ChevronLast,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
 import { VerticalTimeline, type TR, type TLEvent } from "../components/VerticalTimeline";
@@ -27,6 +29,7 @@ import { EventStrip } from "../components/EventStrip";
 import { LiveVideo } from "../components/LiveVideo";
 import { ZoomControl } from "../components/ZoomControl";
 import { ExportCenter } from "../components/ExportCenter";
+import { DateTimePicker } from "../components/DateTimePicker";
 import { PlaybackConditions } from "../components/ConditionsOverlay";
 import { useCameras } from "../hooks/useCameras";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -77,16 +80,18 @@ export function Playback() {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [speedOpen, setSpeedOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [liveMuted, setLiveMuted] = useState(true); // live starts muted (autoplay), tap to hear
+  const [dateOpen, setDateOpen] = useState(false); // custom date/time picker popover
 
   const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 4];
 
   const playerVideoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const dateInputRef = useRef<HTMLInputElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const selectedRef = useRef<number>(selectedState);
   const segmentsRef = useRef<Segment[]>([]);
   const seekTimer = useRef<number | undefined>(undefined);
+  const swipeY = useRef(0); // vertical swipe start on the mobile video (camera strip)
 
   const windowMs = ZOOMS[zoomIdx];
   const isLive = following;
@@ -409,13 +414,32 @@ export function Playback() {
     );
   }
   function fullscreen() {
-    if (!document.fullscreenElement) void containerRef.current?.requestFullscreen?.();
-    else void document.exitFullscreen();
+    const el = containerRef.current;
+    const v = playerVideoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+    if (el?.requestFullscreen) {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen();
+      } else {
+        void el
+          .requestFullscreen()
+          .then(() => {
+            // Rotate to landscape on mobile where supported (Android/Chromium).
+            if (!isDesktop) {
+              const so = screen.orientation as (ScreenOrientation & { lock?: (o: string) => Promise<void> }) | undefined;
+              void so?.lock?.("landscape").catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
+    } else if (v?.webkitEnterFullscreen) {
+      // iOS Safari can't fullscreen a div — use the native video fullscreen
+      // (it goes sideways when the phone rotates).
+      v.webkitEnterFullscreen();
+    }
   }
 
   function openDatePicker() {
-    dateInputRef.current?.showPicker?.();
-    dateInputRef.current?.click();
+    setDateOpen((o) => !o);
   }
 
   // One video element, reused by both layouts (only one renders at a time).
@@ -424,7 +448,7 @@ export function Playback() {
       return <div className="absolute inset-0 grid place-items-center text-sm text-fg-faint">No cameras</div>;
     }
     return isLive ? (
-      <LiveVideo key={selected.id} camera={selected} fit="contain" videoRef={playerVideoRef} />
+      <LiveVideo key={selected.id} camera={selected} fit="contain" videoRef={playerVideoRef} muted={liveMuted} />
     ) : (
       <video
         ref={playerVideoRef}
@@ -448,16 +472,17 @@ export function Playback() {
   const atToday = dayStart >= startOfDay(nowMs);
   const fmtDay = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
-  const hiddenDateInput = (
-    <input
-      ref={dateInputRef}
-      type="date"
-      className="sr-only"
-      onChange={(e) => {
-        if (!e.target.value) return;
-        seekToTime(new Date(e.target.value + "T12:00").getTime());
-      }}
-    />
+  const datePickerPopover = dateOpen && (
+    <>
+      <div className="fixed inset-0 z-40" onClick={() => setDateOpen(false)} />
+      <div className="absolute bottom-16 left-3 z-50">
+        <DateTimePicker
+          value={selectedMs}
+          max={nowMs}
+          onChange={(ms) => seekToTime(ms)}
+        />
+      </div>
+    </>
   );
 
   // ---- Mobile layout (UniFi Protect-style) --------------------------------
@@ -510,15 +535,29 @@ export function Playback() {
           </div>
         </div>
 
-        {/* video */}
-        <div ref={containerRef} className="relative shrink-0 aspect-video bg-black">
+        {/* video — swipe down opens the camera strip, up hides it (UniFi-style) */}
+        <div
+          ref={containerRef}
+          className="relative shrink-0 aspect-video bg-black"
+          onTouchStart={(e) => {
+            swipeY.current = e.touches[0]?.clientY ?? 0;
+          }}
+          onTouchEnd={(e) => {
+            const dy = (e.changedTouches[0]?.clientY ?? 0) - swipeY.current;
+            if (dy > 45) setCamerasOpen(true);
+            else if (dy < -45) setCamerasOpen(false);
+          }}
+        >
           {renderPlayer()}
           {selected && (
-            <div className="absolute top-2 left-2 rounded-md bg-black/40 px-2 py-1 text-[11px] font-mono text-white/90 backdrop-blur-sm">
-              {fmtDate(overlayTime)} {fmtClock(overlayTime)} · {selected.name}
+            <div className="absolute top-2 left-2 flex max-w-[62%] items-center gap-1 rounded-md bg-black/40 px-2 py-1 text-[11px] font-mono text-white/90 backdrop-blur-sm">
+              <span className="shrink-0 tabular-nums">
+                {fmtDate(overlayTime)} {fmtClock(overlayTime)}
+              </span>
+              <span className="truncate text-white/60">· {selected.name}</span>
             </div>
           )}
-          {selected && <PlaybackConditions tsMs={selectedMs} className="top-2 right-2" />}
+          {selected && <PlaybackConditions tsMs={selectedMs} className="top-2 right-2" variant="compact" />}
         </div>
 
         {/* control header */}
@@ -538,6 +577,11 @@ export function Playback() {
                     <Rewind className="h-4 w-4" />
                   </BarBtn>
                 </>
+              )}
+              {isLive && (
+                <BarBtn onClick={() => setLiveMuted((m) => !m)} label={liveMuted ? "Unmute" : "Mute"}>
+                  {liveMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                </BarBtn>
               )}
               <BarBtn onClick={() => setCamerasOpen((o) => !o)} label="Cameras">
                 <LayoutGrid className="h-4 w-4" />
@@ -600,8 +644,8 @@ export function Playback() {
           >
             <CameraIcon className="h-4 w-4" />
           </button>
+          {datePickerPopover}
         </div>
-        {hiddenDateInput}
       </div>
     );
   }
@@ -684,7 +728,7 @@ export function Playback() {
               <span className="text-xs font-medium text-white">{selected.name}</span>
             </div>
           )}
-          {selected && <PlaybackConditions tsMs={selectedMs} className="top-3 right-3" />}
+          {selected && <PlaybackConditions tsMs={selectedMs} className="top-3 right-3" variant="compact" />}
         </div>
 
         {/* control bar (below the video) */}
@@ -698,6 +742,11 @@ export function Playback() {
             ) : (
               <BarBtn onClick={togglePlay} label={paused ? "Play" : "Pause"}>
                 {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+              </BarBtn>
+            )}
+            {isLive && (
+              <BarBtn onClick={() => setLiveMuted((m) => !m)} label={liveMuted ? "Unmute" : "Mute"}>
+                {liveMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
               </BarBtn>
             )}
             <BarBtn onClick={() => seekToTime((isLive ? nowMs : selectedMs) - 30_000)} label="Back 30 seconds">

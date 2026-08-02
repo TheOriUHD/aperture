@@ -46,6 +46,12 @@ input.vrange {
   * {
     border-color: theme("colors.line.DEFAULT");
   }
+  /* While a modal is open, freeze the per-screen scroll containers so the
+     background can't scroll under it (the modal's own card uses overflow-y-auto,
+     which is intentionally not frozen). Driven by hooks/useScrollLock. */
+  :root[data-modal-open] .overflow-auto {
+    overflow: hidden !important;
+  }
   /* Slim, dark scrollbars to match the surface. */
   ::-webkit-scrollbar {
     width: 10px;

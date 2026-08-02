@@ -39,7 +39,7 @@ export function Dashboard() {
       <TopBar title="Dashboard" />
       <div className="flex-1 overflow-auto p-4">
         <div className="max-w-[1600px] mx-auto space-y-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-4 gap-2 lg:gap-3">
             <Metric
               icon={HardDrive}
               label="Recordings"
@@ -92,14 +92,14 @@ function Metric({
   sub: string;
 }) {
   return (
-    <div className="panel">
-      <div className="flex items-center gap-2 text-fg-muted mb-3">
-        <Icon className="h-4 w-4" />
-        <span className="text-xs">{label}</span>
+    <div className="panel p-2.5 lg:p-4">
+      <div className="flex items-center gap-1.5 text-fg-muted mb-1 lg:mb-3">
+        <Icon className="h-3.5 w-3.5 lg:h-4 lg:w-4 shrink-0" />
+        <span className="text-[10px] lg:text-xs truncate">{label}</span>
       </div>
-      <div className="flex items-baseline gap-1.5">
-        <span className="text-2xl font-medium text-fg">{value}</span>
-        <span className="text-xs text-fg-faint">{sub}</span>
+      <div className="flex items-baseline gap-1 lg:gap-1.5">
+        <span className="text-base lg:text-2xl font-medium text-fg">{value}</span>
+        <span className="hidden sm:inline text-[10px] lg:text-xs text-fg-faint truncate">{sub}</span>
       </div>
     </div>
   );

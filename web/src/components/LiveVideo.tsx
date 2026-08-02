@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { VideoOff } from "lucide-react";
 import { api } from "../lib/api";
 import { LiveStream, type LiveState } from "../lib/livestream";
+import { cacheStream, getCachedStream } from "../lib/streamCache";
 import type { Camera, StreamToken } from "../lib/types";
 
 type FrameVideo = HTMLVideoElement & {
@@ -27,6 +28,9 @@ export function LiveVideo({
   const [state, setState] = useState<LiveState>("connecting");
   const [revealed, setRevealed] = useState(false);
   const [snapOk, setSnapOk] = useState(true);
+  // `instant` = we're showing an already-connected stream for this camera while
+  // a fresh connection warms up, so no connecting-dots flash on open.
+  const [instant, setInstant] = useState(false);
 
   // Live stream lifecycle.
   useEffect(() => {
@@ -37,6 +41,16 @@ export function LiveVideo({
     let stream: LiveStream | undefined;
     let cancelled = false;
     setState("connecting");
+    // Instant first frame: reuse a live stream already connected for this camera
+    // (e.g. the tile behind this pop-out). A MediaStream feeds many <video>s.
+    const cached = getCachedStream(camera.id);
+    if (cached && videoRef.current) {
+      videoRef.current.srcObject = cached;
+      void videoRef.current.play().catch(() => undefined);
+      setInstant(true);
+    } else {
+      setInstant(false);
+    }
     (async () => {
       try {
         const tok = await api.get<StreamToken>(`/api/cameras/${camera.id}/stream-token`);
@@ -78,7 +92,18 @@ export function LiveVideo({
     };
   }, [camera.id, videoRef]);
 
-  const loaded = revealed && state === "playing";
+  // Once our own connection is live, register its stream so future views open
+  // instantly; on error, drop the instant bridge so the error surfaces.
+  useEffect(() => {
+    if (state === "playing") {
+      const so = videoRef.current?.srcObject;
+      if (so instanceof MediaStream) cacheStream(camera.id, so);
+    } else if (state === "error") {
+      setInstant(false);
+    }
+  }, [state, camera.id, videoRef]);
+
+  const loaded = (revealed && state === "playing") || instant;
 
   return (
     <div className="absolute inset-0 overflow-hidden bg-black">
