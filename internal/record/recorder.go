@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/site"
 	"github.com/TheOriUHD/aperture/internal/storage"
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
@@ -104,14 +105,29 @@ func (r *Recorder) shouldRecord(c *store.Camera) bool {
 	}
 }
 
-// scheduledActive reports whether the current local time falls inside one of a
-// camera's recording windows. Reconcile re-checks every minute.
+// scheduledActive reports whether the current time — in the site-profile
+// timezone, not the host's — falls inside one of a camera's recording windows.
+// Recording windows are authored against the site's wall clock, so a host TZ
+// that differs from the site (or a DST transition) must not shift them.
+// Reconcile re-checks every minute.
 func (r *Recorder) scheduledActive(cameraID string) bool {
 	scheds, err := r.st.ListSchedules(cameraID)
 	if err != nil || len(scheds) == 0 {
 		return false
 	}
 	now := time.Now()
+	if p := site.Load(r.st); p.Timezone != "" {
+		if loc, err := time.LoadLocation(p.Timezone); err == nil {
+			now = now.In(loc)
+		}
+	}
+	return scheduleMatch(scheds, now)
+}
+
+// scheduleMatch reports whether now — evaluated in whatever location it carries —
+// falls inside one of the recording windows. Kept pure (no clock, no store) so
+// the timezone-sensitive matching is deterministically testable.
+func scheduleMatch(scheds []*store.Schedule, now time.Time) bool {
 	wd := int(now.Weekday())
 	mins := now.Hour()*60 + now.Minute()
 	for _, s := range scheds {

@@ -87,7 +87,15 @@ func (e *Engine) OnEvent(ev *store.Event) {
 	if err != nil {
 		return
 	}
+	// Quiet hours are authored in the site-profile wall clock, so evaluate
+	// `now` there rather than in the host timezone. UnixMilli() below is an
+	// absolute instant and is unaffected by the location.
 	now := time.Now()
+	if p := site.Load(e.st); p.Timezone != "" {
+		if loc, err := time.LoadLocation(p.Timezone); err == nil {
+			now = now.In(loc)
+		}
+	}
 	ec := e.eventContext(ev)
 	for _, r := range rules {
 		if !match(r.Cameras, ev.CameraID) || !match(r.EventTypes, ev.Type) {
