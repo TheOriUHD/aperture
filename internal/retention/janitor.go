@@ -32,6 +32,12 @@ type Janitor struct {
 	reg *storage.Registry
 	log *slog.Logger
 	mu  sync.Mutex // serializes enforce() so a manual trigger can't overlap the loop
+
+	// activeExports is snapshotted at the start of each enforce() pass; segments
+	// overlapping a queued/running export are skipped so a render is never pruned
+	// out from under itself. Interim guard until the segment-lease table (T2.8)
+	// replaces the inert `locked` flag with a real, expiring lease.
+	activeExports []*store.ExportJob
 }
 
 // New constructs a Janitor.
@@ -63,6 +69,9 @@ func (j *Janitor) Run(ctx context.Context) {
 func (j *Janitor) enforce() {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	// Snapshot in-flight exports once per pass so no prune path deletes footage a
+	// render is about to read. A job that starts mid-pass is caught next tick.
+	j.activeExports = j.freshExports()
 	cams, err := j.st.ListCameras()
 	if err != nil {
 		j.log.Error("retention: list cameras", "err", err)
@@ -209,13 +218,19 @@ func (j *Janitor) enforceLocationCap(locationID string, capBytes int64, includeA
 		if err != nil || len(oldest) == 0 {
 			break
 		}
+		progressed := false
 		for _, s := range oldest {
 			if total <= target {
 				break
 			}
-			j.delete(s)
-			total -= s.SizeBytes
-			deleted++
+			if j.delete(s) {
+				total -= s.SizeBytes
+				deleted++
+				progressed = true
+			}
+		}
+		if !progressed {
+			break // whole batch is export-protected; retry next pass
 		}
 	}
 	if deleted > 0 {
@@ -276,13 +291,19 @@ func (j *Janitor) enforceQuota(cameraID string, quota int64) {
 		if err != nil || len(oldest) == 0 {
 			break
 		}
+		progressed := false
 		for _, s := range oldest {
 			if bytes <= quota {
 				break
 			}
-			j.delete(s)
-			bytes -= s.SizeBytes
-			deleted++
+			if j.delete(s) {
+				bytes -= s.SizeBytes
+				deleted++
+				progressed = true
+			}
+		}
+		if !progressed {
+			break // whole batch is export-protected; retry next pass
 		}
 	}
 	if deleted > 0 {
@@ -310,9 +331,15 @@ func (j *Janitor) enforceFreeSpace() {
 		if err != nil || len(oldest) == 0 {
 			break
 		}
+		progressed := false
 		for _, s := range oldest {
-			j.delete(s)
-			deleted++
+			if j.delete(s) {
+				deleted++
+				progressed = true
+			}
+		}
+		if !progressed {
+			break // whole batch is export-protected; retry next pass
 		}
 		if _, free, ok = diskUsage(j.activeDir()); !ok {
 			break
@@ -348,9 +375,15 @@ func (j *Janitor) enforceLocationFreeSpace(loc *store.StorageLocation) {
 		if err != nil || len(oldest) == 0 {
 			break
 		}
+		progressed := false
 		for _, s := range oldest {
-			j.delete(s)
-			deleted++
+			if j.delete(s) {
+				deleted++
+				progressed = true
+			}
+		}
+		if !progressed {
+			break // whole batch is export-protected; retry next pass
 		}
 		if _, free, ok = diskUsage(path); !ok {
 			break
@@ -361,7 +394,14 @@ func (j *Janitor) enforceLocationFreeSpace(loc *store.StorageLocation) {
 	}
 }
 
-func (j *Janitor) delete(s *store.Segment) {
+// delete removes a segment's bytes and index row. It returns false without
+// deleting when the segment is protected by an in-flight export (see
+// exportLocked); callers that free space in a loop must treat a false result as
+// "no progress" so they don't spin re-selecting the same protected batch.
+func (j *Janitor) delete(s *store.Segment) bool {
+	if j.exportLocked(s) {
+		return false
+	}
 	// Local segments hold an absolute path; network segments hold a backend-
 	// relative path routed through the storage registry.
 	if s.Path != "" && filepath.IsAbs(s.Path) {
@@ -376,6 +416,55 @@ func (j *Janitor) delete(s *store.Segment) {
 	if err := j.st.DeleteSegment(s.ID); err != nil {
 		j.log.Error("retention: delete row", "id", s.ID, "err", err)
 	}
+	return true
+}
+
+// exportMaxProtectAge bounds how long an export may shield its segment range from
+// retention. Renders run under the app context with no per-job timeout, and a job
+// stuck in `running` is only cleared by the 24h export TTL sweep — so without this
+// bound a hung render could hold footage for ~a day, a disk-full risk on a
+// near-full volume. 2h sits well above any realistic single render (even a
+// full-window burn-in/timelapse transcode) yet is a small fraction of the 24h TTL.
+const exportMaxProtectAge = 2 * time.Hour
+
+// freshExports returns the queued/running exports still young enough to protect
+// footage. Any job older than exportMaxProtectAge is dropped (and logged once per
+// pass) so a stuck render can't hold footage on a near-full disk; its segments
+// become prunable regardless of the job's state.
+func (j *Janitor) freshExports() []*store.ExportJob {
+	all, err := j.st.PendingExports()
+	if err != nil || len(all) == 0 {
+		return nil
+	}
+	nowSec := time.Now().Unix()
+	maxAgeSec := int64(exportMaxProtectAge / time.Second)
+	out := make([]*store.ExportJob, 0, len(all))
+	for _, job := range all {
+		if job.CreatedAt > 0 && nowSec-job.CreatedAt > maxAgeSec {
+			j.log.Warn("retention: export exceeded max protection age; its footage is now prunable (render likely stuck)",
+				"export", job.ID, "status", job.Status, "ageSec", nowSec-job.CreatedAt)
+			continue
+		}
+		out = append(out, job)
+	}
+	return out
+}
+
+// exportLocked reports whether a segment overlaps the time window of any queued
+// or running export for the same camera. Interim protection against pruning
+// footage a render is about to read; superseded by the segment-lease table.
+func (j *Janitor) exportLocked(s *store.Segment) bool {
+	for _, job := range j.activeExports {
+		if s.StartTS >= job.ToTS || s.EndTS <= job.FromTS {
+			continue // no time overlap
+		}
+		for _, cid := range job.Cameras() {
+			if cid == s.CameraID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // diskUsage returns total and available bytes for the filesystem at path.
