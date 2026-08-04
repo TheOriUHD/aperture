@@ -47,6 +47,12 @@ type Camera struct {
 	StorageQuotaBytes int64   `json:"storageQuotaBytes"`
 	MotionThreshold   float64 `json:"motionThreshold"`
 	MotionZonesJSON   string  `json:"motionZonesJson"`
+	MotionDetection   bool    `json:"motionDetection"`         // per-camera motion trigger on/off
+	LocationID        string  `json:"locationId"`              // storage location for new footage ("" = default)
+	AudioDetection    bool    `json:"audioDetection"`          // per-camera audio-level trigger on/off
+	AudioThreshold    float64 `json:"audioThreshold"`          // 0..1 loudness to trip an audio event (0 = default)
+	DetectMethod      string  `json:"detectMethod"`            // "" = inherit global; off|bridge|onnx
+	TempSensor        string  `json:"tempSensor"`              // HA sensor entity id for the overlay ("" = weather)
 	FPS               int     `json:"fps"`
 	SortOrder         int     `json:"sortOrder"`
 	PrerollMs         int     `json:"prerollMs"`

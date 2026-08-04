@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, UserPlus, Shield, User as UserIcon } from "lucide-react";
@@ -22,7 +23,9 @@ import { AuditLog } from "../components/AuditLog";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUsers, type ManagedUser } from "../hooks/useUsers";
-import { useSiteName, useSetSiteName } from "../hooks/useSystem";
+import { useSiteName, useSetSiteName, useSetSettings, useHA, useHASensors } from "../hooks/useSystem";
+import { Switch } from "../components/ui/Switch";
+import { CameraGroupsManager } from "../components/CameraGroupsManager";
 
 export function Settings() {
   const { t } = useTranslation();
@@ -38,6 +41,7 @@ export function Settings() {
     { id: "security", label: t("settings.tabSecurity", "Security"), admin: false },
     { id: "notifications", label: t("settings.tabNotifications", "Notifications"), admin: false },
     { id: "cameras", label: t("settings.tabCameras", "Cameras"), admin: true },
+    { id: "groups", label: t("settings.tabGroups", "Camera Groups"), admin: true },
     { id: "system", label: t("settings.tabSystem", "System"), admin: true },
     { id: "environment", label: t("settings.tabEnvironment", "Environment"), admin: true },
     { id: "detection", label: t("settings.tabDetection", "Detection"), admin: true },
@@ -46,7 +50,8 @@ export function Settings() {
     { id: "activity", label: t("settings.tabActivity", "Activity"), admin: true },
   ].filter((tb) => !tb.admin || isAdmin);
 
-  const [tab, setTab] = useState("general");
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(params.get("tab") || "general");
   const active = tabs.some((tb) => tb.id === tab) ? tab : "general";
 
   return (
@@ -55,12 +60,12 @@ export function Settings() {
       <div className="flex-1 overflow-auto">
         {/* Tab bar */}
         <div className="sticky top-0 z-10 border-b border-line bg-ink-900/95 backdrop-blur">
-          <div className="max-w-2xl mx-auto flex gap-1 overflow-x-auto px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <div className="max-w-2xl mx-auto flex gap-1 overflow-x-auto px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden lg:max-w-none lg:justify-center lg:gap-2 lg:px-8">
             {tabs.map((tb) => (
               <button
                 key={tb.id}
                 onClick={() => setTab(tb.id)}
-                className={`shrink-0 px-3 py-2.5 text-sm border-b-2 transition-colors ${
+                className={`shrink-0 px-3 py-2.5 text-sm border-b-2 transition-colors lg:px-4 ${
                   active === tb.id
                     ? "border-brand text-fg"
                     : "border-transparent text-fg-muted hover:text-fg"
@@ -100,6 +105,8 @@ export function Settings() {
             {active === "notifications" && <NotificationsSettings />}
 
             {active === "cameras" && isAdmin && <CamerasManager />}
+
+            {active === "groups" && isAdmin && <CameraGroupsManager />}
 
             {active === "system" && isAdmin && (
               <>
@@ -201,10 +208,21 @@ function UsersSection({ currentUserId }: { currentUserId?: string }) {
 function SiteSection() {
   const { data: site } = useSiteName();
   const setSite = useSetSiteName();
+  const setSettings = useSetSettings();
+  const { data: ha } = useHA();
+  const { data: sensors } = useHASensors(!!ha?.enabled);
   const [name, setName] = useState("");
   const [saved, setSaved] = useState(false);
+  const [tempSensor, setTempSensor] = useState("");
+  const [spotlights, setSpotlights] = useState(true);
+  const [recordQuality, setRecordQuality] = useState<"high" | "low">("high");
   useEffect(() => {
-    if (site?.siteName) setName(site.siteName);
+    if (site) {
+      setName(site.siteName);
+      setTempSensor(site.overviewTempSensor || "");
+      setSpotlights(site.spotlightsEnabled ?? true);
+      setRecordQuality(site.recordQuality ?? "high");
+    }
   }, [site]);
 
   return (
@@ -233,6 +251,69 @@ function SiteSection() {
         </button>
       </div>
       {saved && <p className="text-xs text-online mt-2">Saved.</p>}
+
+      <div className="mt-4 border-t border-line pt-4">
+        <label className="label">Overview temperature</label>
+        <select
+          className="input"
+          value={tempSensor}
+          onChange={(e) => {
+            setTempSensor(e.target.value);
+            setSettings.mutate({ overviewTempSensor: e.target.value });
+          }}
+        >
+          <option value="">Outdoor weather (default)</option>
+          {tempSensor && !sensors?.some((s) => s.entityId === tempSensor) && (
+            <option value={tempSensor}>{tempSensor} (waiting for reading…)</option>
+          )}
+          {sensors?.map((s) => (
+            <option key={s.entityId} value={s.entityId}>
+              {(s.name || s.entityId) + (s.unit ? ` — ${s.value} ${s.unit}` : ` — ${s.value}`)}
+            </option>
+          ))}
+        </select>
+        <p className="text-[11px] text-fg-faint mt-1.5">
+          Shown on the dashboard. Defaults to your location&apos;s weather; pick a Home Assistant sensor to use its
+          reading instead.
+        </p>
+        {!ha?.enabled && <p className="text-[11px] text-fg-faint mt-1">Connect Home Assistant to use a sensor.</p>}
+      </div>
+
+      <div className="mt-4 border-t border-line pt-4">
+        <label className="label">Recording quality</label>
+        <select
+          className="input"
+          value={recordQuality}
+          onChange={(e) => {
+            const v = e.target.value as "high" | "low";
+            setRecordQuality(v);
+            setSettings.mutate({ recordQuality: v });
+          }}
+        >
+          <option value="high">Prefer high quality — main stream</option>
+          <option value="low">Prefer low quality — sub stream (saves space)</option>
+        </select>
+        <p className="text-[11px] text-fg-faint mt-1.5">
+          Which stream cameras record to disk. <span className="text-fg-muted">Prefer low</span> uses each camera&apos;s sub
+          stream where it has one; cameras without a sub keep recording their main stream. Live view is unaffected. Applies in
+          a few seconds — recorders restart.
+        </p>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
+        <div>
+          <p className="text-sm text-fg">Spotlights card</p>
+          <p className="text-[11px] text-fg-faint">Show the Spotlights panel on the dashboard sidebar.</p>
+        </div>
+        <Switch
+          checked={spotlights}
+          onChange={(v) => {
+            setSpotlights(v);
+            setSettings.mutate({ spotlightsEnabled: v });
+          }}
+          label="Spotlights card"
+        />
+      </div>
     </div>
   );
 }

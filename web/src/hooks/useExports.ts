@@ -38,6 +38,7 @@ export function useCreateExport() {
       to: number;
       burnIn: boolean;
       audio: boolean;
+      speed?: number; // 0/1 realtime, N = timelapse N×
     }) => api.post<ExportJob>("/api/export", b),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["exports"] }),
   });

@@ -53,10 +53,13 @@ export function BottomNav() {
   const all = [...items, settingsItem];
   return (
     <nav
-      className="flex lg:hidden items-stretch justify-around shrink-0 border-t border-line bg-ink-850"
+      className="flex lg:hidden items-stretch justify-around shrink-0 border-t border-line bg-ink-900"
       style={{
-        // Cover the full bottom safe area with the nav's own background so no OS
-        // strip peeks below it; icons sit above the home indicator.
+        // Match the OS's background_color (#0d0f13 = ink-900): the iOS PWA leaves
+        // a ~62px home-indicator strip below the visible viewport that the web view
+        // can't paint. Using the same colour as that strip makes the tab bar blend
+        // seamlessly into it instead of reading as a lighter bar with a dark strip
+        // beneath. The border-t still separates it from content above.
         height: "calc(3.25rem + env(safe-area-inset-bottom))",
         paddingBottom: "env(safe-area-inset-bottom)",
       }}

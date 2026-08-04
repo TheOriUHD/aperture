@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"os"
@@ -15,7 +16,73 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/TheOriUHD/aperture/internal/auth"
+	"github.com/TheOriUHD/aperture/internal/reserve"
+	"github.com/TheOriUHD/aperture/internal/store"
 )
+
+// removeSegmentFile deletes a segment's bytes from wherever they live: local
+// segments store an absolute path (os.Remove); network segments store a
+// backend-relative path (routed through the storage registry).
+func (s *Server) removeSegmentFile(seg *store.Segment) {
+	if seg.Path == "" {
+		return
+	}
+	if filepath.IsAbs(seg.Path) {
+		if err := os.Remove(seg.Path); err != nil && !os.IsNotExist(err) {
+			s.log.Warn("remove segment file", "path", seg.Path, "err", err)
+		}
+		return
+	}
+	if s.registry == nil {
+		return
+	}
+	if b, err := s.registry.For(seg.LocationID); err == nil {
+		_ = b.Remove(seg.Path)
+	}
+}
+
+// localizeSegment returns a local filesystem path to a segment's media plus a
+// release func to call when done. Local segments return their own path (release
+// is a no-op); network segments are downloaded into a temp file under the remote
+// cache dir, which release removes.
+func (s *Server) localizeSegment(seg *store.Segment) (path string, release func(), err error) {
+	noop := func() {}
+	if seg.Path == "" {
+		return "", noop, os.ErrNotExist
+	}
+	if filepath.IsAbs(seg.Path) {
+		if _, err := os.Stat(seg.Path); err != nil {
+			return "", noop, err
+		}
+		return seg.Path, noop, nil
+	}
+	if s.registry == nil {
+		return "", noop, os.ErrNotExist
+	}
+	backend, err := s.registry.For(seg.LocationID)
+	if err != nil {
+		return "", noop, err
+	}
+	rc, _, err := backend.Open(seg.Path)
+	if err != nil {
+		return "", noop, err
+	}
+	defer rc.Close()
+	tmp, err := os.CreateTemp(s.cfg.RemoteCacheDir(), "seg-*.ts")
+	if err != nil {
+		return "", noop, err
+	}
+	if _, err := io.Copy(tmp, rc); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", noop, err
+	}
+	_ = tmp.Close()
+	name := tmp.Name()
+	return name, func() { _ = os.Remove(name) }, nil
+}
 
 // frameSem bounds concurrent ffmpeg frame extractions so a hover-storm can't
 // saturate CPU and starve live recording.
@@ -58,17 +125,25 @@ func (s *Server) handleFrame(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	if _, err := os.Stat(seg.Path); err != nil {
+	// Resolve a local file for ffmpeg — remote segments are pulled into a temp
+	// file first (the extracted JPEG is then frame-cached, so this download happens
+	// at most once per timestamp).
+	localPath, release, err := s.localizeSegment(seg)
+	if err != nil {
 		writeError(w, http.StatusGone, "footage file missing")
 		return
 	}
+	defer release()
 	offset := float64(t-seg.StartTS) / 1000.0
 
 	frameSem <- struct{}{}
 	defer func() { <-frameSem }()
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	// The remote download (if any) already happened in localizeSegment, above and
+	// outside this deadline; this only bounds the local ffmpeg frame extract, so
+	// keep it tight to cap CPU on slow/corrupt footage.
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
-	jpeg, err := extractFrameAtOffset(ctx, seg.Path, offset)
+	jpeg, err := extractFrameAtOffset(ctx, localPath, offset)
 	if err != nil || len(jpeg) == 0 {
 		writeError(w, http.StatusInternalServerError, "could not extract frame")
 		return
@@ -149,6 +224,71 @@ func (s *Server) handleSegmentsList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleDeleteRecordings removes a camera's recorded footage (and overlapping
+// events) in a time range — the Playback "Remove" action. Admin only; locked
+// (saved) segments are skipped so an accidental sweep can't wipe kept clips.
+func (s *Server) handleDeleteRecordings(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !s.allowedCamera(r, id) {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+	c := auth.FromContext(r.Context())
+	if c == nil || c.Role != store.RoleAdmin {
+		writeError(w, http.StatusForbidden, "admin required")
+		return
+	}
+	from, to := parseRange(r)
+	if to <= from {
+		writeError(w, http.StatusBadRequest, "invalid time range")
+		return
+	}
+	segs, err := s.st.SegmentsInRange(id, from, to)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	var freed int64
+	delSeg, skipped := 0, 0
+	for _, seg := range segs {
+		if seg.Locked {
+			skipped++
+			continue
+		}
+		s.removeSegmentFile(seg)
+		if s.st.DeleteSegment(seg.ID) == nil {
+			freed += seg.SizeBytes
+			delSeg++
+		}
+	}
+	evs, _ := s.st.EventsInRange(id, from, to)
+	delEv := 0
+	for _, e := range evs {
+		if e.ThumbPath != "" {
+			_ = os.Remove(e.ThumbPath)
+		}
+		if e.SnapshotPath != "" {
+			_ = os.Remove(e.SnapshotPath)
+		}
+		if s.st.DeleteEvent(e.ID) == nil {
+			delEv++
+		}
+	}
+	name := id
+	if cam, err := s.st.GetCamera(id); err == nil {
+		name = cam.Name
+	}
+	s.log.Info("recordings removed", "camera", id, "segments", delSeg,
+		"events", delEv, "skippedLocked", skipped, "freedBytes", freed)
+	s.logAudit(r, "recordings.remove", name, fmt.Sprintf("%d clips over %s", delSeg, time.Duration((to-from)*int64(time.Millisecond)).Round(time.Minute)))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deletedSegments": delSeg,
+		"deletedEvents":   delEv,
+		"skippedLocked":   skipped,
+		"freedBytes":      freed,
+	})
+}
+
 // handleHLS generates a VOD HLS playlist from the stored segments in a range.
 // Time gaps (e.g. an ffmpeg restart) become EXT-X-DISCONTINUITY markers.
 func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +346,30 @@ func (s *Server) handleSegmentFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "video/mp2t")
-	http.ServeFile(w, r, seg.Path)
+	// Local segments store an absolute path → serve straight from disk. Network
+	// segments store a backend-relative path → stream through the backend with full
+	// HTTP range support (seeking, partial content) via ServeContent.
+	if filepath.IsAbs(seg.Path) {
+		http.ServeFile(w, r, seg.Path)
+		return
+	}
+	if s.registry == nil {
+		writeError(w, http.StatusServiceUnavailable, "storage backend unavailable")
+		return
+	}
+	backend, err := s.registry.For(seg.LocationID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "storage backend unavailable")
+		return
+	}
+	rc, _, err := backend.Open(seg.Path)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	defer rc.Close()
+	// rc is a ReadSeeker; ServeContent handles range requests over it.
+	http.ServeContent(w, r, segID+".ts", time.UnixMilli(seg.StartTS), rc)
 }
 
 // recordingsDir is the directory recordings currently live in: the operator
@@ -247,6 +410,32 @@ func (s *Server) appFilesBytes() int64 {
 // handleStorage reports usage scoped to the operator's allocation (the storage
 // cap): per-camera recordings + Aperture's own files + free-within-allocation.
 // Disk totals are still returned but secondary.
+// handleBitrate returns the recorded-throughput series over a recent window (one
+// point per complete minute), for the overview "Recording Bitrate" chart.
+func (s *Server) handleBitrate(w http.ResponseWriter, r *http.Request) {
+	mins := int64(30)
+	if v, err := strconv.ParseInt(r.URL.Query().Get("minutes"), 10, 64); err == nil && v > 0 && v <= 240 {
+		mins = v
+	}
+	const bucketMs int64 = 60_000
+	now := time.Now().UnixMilli()
+	end := (now / bucketMs) * bucketMs // exclude the in-progress minute
+	start := end - mins*bucketMs
+	buckets, err := s.st.BitrateBuckets(start, end, bucketMs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	series := make([]map[string]any, 0, mins)
+	var curBps int64
+	for t := start; t < end; t += bucketMs {
+		bps := buckets[t] * 8 / (bucketMs / 1000) // bits/sec averaged over the minute
+		series = append(series, map[string]any{"ts": t, "bps": bps})
+		curBps = bps // last complete minute = "current"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"buckets": series, "currentBps": curBps})
+}
+
 func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 	recorded, _ := s.st.TotalBytes()
 	cams, _ := s.st.ListCameras()
@@ -271,6 +460,13 @@ func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 	if allocated > 0 && allocated > used {
 		freeInAllocation = allocated - used
 	}
+	// Capacity estimate: at the actual encode bitrate of every recording camera
+	// (continuous), how long the whole allocation holds.
+	rateBps, recCams, _ := s.st.RecordingRateBps()
+	var estFullSeconds int64
+	if rateBps > 0 && allocated > 0 {
+		estFullSeconds = allocated / rateBps
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"recordedBytes":         recorded,
 		"appBytes":              appBytes,
@@ -279,10 +475,15 @@ func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 		"freeInAllocationBytes": freeInAllocation,
 		"diskTotalBytes":        total,
 		"diskFreeBytes":         free,
+		"recordingRateBps":      rateBps,
+		"recordingCameras":      recCams,
+		"estimatedFullSeconds":  estFullSeconds,
 		"cameras":               perCam,
 		"path":                  s.recordingsDir(),
 		"defaultPath":           s.cfg.RecordingsDir,
 		"capBytes":              allocated,
+		"dataDir":               s.cfg.DataDir, // fixed install location (read-only in UI)
+		"locations":             s.allLocationViews(),
 	})
 }
 
@@ -346,4 +547,83 @@ func diskUsage(path string) (total, free int64) {
 		return 0, 0
 	}
 	return int64(st.Blocks) * int64(st.Bsize), int64(st.Bavail) * int64(st.Bsize)
+}
+
+// diskBreakdown splits the whole recordings filesystem into Aperture's footprint
+// (footage + app data), the reservation balloon, everything else ("other"), and
+// what's free — plus the ceiling the operator may reserve (leaving the safety
+// margin). This whole-disk view is surfaced ONLY to the allocation wizard.
+func (s *Server) diskBreakdown() map[string]any {
+	dir := s.recordingsDir()
+	total, free := diskUsage(dir)
+	recorded, _ := s.st.TotalBytes()
+	appBytes := s.appFilesBytes()
+	balloon := reserve.Size(dir)
+	apertureUsed := recorded + appBytes
+	other := total - free - apertureUsed - balloon
+	if other < 0 {
+		other = 0
+	}
+	maxAlloc := total - other - reserve.SafetyMargin
+	if maxAlloc < 0 {
+		maxAlloc = 0
+	}
+	return map[string]any{
+		"totalBytes":          total,
+		"freeBytes":           free,
+		"otherBytes":          other,
+		"apertureUsedBytes":   apertureUsed,
+		"balloonBytes":        balloon,
+		"allocatedBytes":      s.st.GetSettingInt64("storage_cap_bytes"),
+		"maxAllocatableBytes": maxAlloc,
+		"marginBytes":         reserve.SafetyMargin,
+	}
+}
+
+// handleDiskStats reports the whole physical disk for the allocation wizard.
+func (s *Server) handleDiskStats(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.diskBreakdown())
+}
+
+// handleReserveStorage saves the operator's hard allocation (clamped to what the
+// disk can hold) and restarts the service so the reservation is applied on boot;
+// the retention janitor then maintains the balloon file.
+func (s *Server) handleReserveStorage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AllocatedBytes int64 `json:"allocatedBytes"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	bd := s.diskBreakdown()
+	maxAlloc, _ := bd["maxAllocatableBytes"].(int64)
+	if req.AllocatedBytes < 0 {
+		req.AllocatedBytes = 0
+	}
+	if req.AllocatedBytes > maxAlloc {
+		req.AllocatedBytes = maxAlloc
+	}
+	_ = s.st.SetSetting("storage_cap_bytes", strconv.FormatInt(req.AllocatedBytes, 10))
+	s.logAudit(r, "storage.reserve", "", "allocated="+strconv.FormatInt(req.AllocatedBytes, 10))
+	writeJSON(w, http.StatusOK, map[string]any{"allocatedBytes": req.AllocatedBytes, "restarting": true})
+	s.scheduleRestart("storage allocation applied")
+}
+
+// handleRestart lets an admin bounce the service (the container supervisor
+// restarts it — see restart: unless-stopped in compose).
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	s.logAudit(r, "system.restart", "", "operator restart")
+	writeJSON(w, http.StatusOK, map[string]any{"restarting": true})
+	s.scheduleRestart("operator requested")
+}
+
+// scheduleRestart exits the process shortly after the response flushes so the
+// container supervisor brings it back on a fresh boot.
+func (s *Server) scheduleRestart(reason string) {
+	go func() {
+		time.Sleep(900 * time.Millisecond)
+		s.log.Warn("restarting service", "reason", reason)
+		os.Exit(0)
+	}()
 }

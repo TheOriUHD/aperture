@@ -41,6 +41,12 @@ export interface Camera {
   retentionDays: number;
   storageQuotaBytes: number;
   motionThreshold: number;
+  motionDetection: boolean;
+  audioDetection: boolean;
+  audioThreshold: number; // 0..1 loudness; 0 = built-in default
+  locationId: string; // storage location for new footage ("" = default)
+  detectMethod: string; // "" = inherit global; off|bridge|onnx
+  tempSensor: string; // HA sensor entity id for the overlay ("" = weather)
   fps: number;
   sortOrder: number;
   prerollMs: number;
@@ -52,6 +58,7 @@ export interface Camera {
 export interface StreamToken {
   token: string;
   wsUrl: string;
+  hasSub?: boolean; // a low-quality sub stream is available for this camera
 }
 
 export interface EventConditions {
@@ -69,6 +76,7 @@ export interface DetectedObject {
   y: number;
   w: number;
   h: number;
+  ts?: number;
 }
 
 export interface MotionEvent {
@@ -86,4 +94,9 @@ export interface MotionEvent {
   topLabel?: string;
   objectSummary?: string;
   objects?: DetectedObject[];
+  motionCells?: number[]; // active cells in a 32×18 grid — for Grid Search
 }
+
+// The coarse motion-map grid stored per event (must match motion.SearchW/H).
+export const MOTION_GRID_W = 32;
+export const MOTION_GRID_H = 18;

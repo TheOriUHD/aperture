@@ -8,20 +8,29 @@ const MONTHS = [
 ];
 
 // A compact, self-contained calendar + time selector — deliberately NOT the
-// native picker. Controlled: `value` is unix ms, `onChange` gets the new instant.
+// native picker. Controlled: `value` is unix ms. Two modes:
+//   • onChange  → applies live on every edit (legacy).
+//   • onApply/onCancel → buffers edits and only commits on "Apply" (UniFi-style).
 // Clamps to [min, max] when provided (e.g. max = now to block the future).
 export function DateTimePicker({
   value,
   onChange,
+  onApply,
+  onCancel,
   min,
   max,
 }: {
   value: number;
-  onChange: (ms: number) => void;
+  onChange?: (ms: number) => void;
+  onApply?: (ms: number) => void;
+  onCancel?: () => void;
   min?: number;
   max?: number;
 }) {
-  const sel = new Date(value);
+  const buffered = !!onApply;
+  const [draft, setDraft] = useState(value);
+  const cur = buffered ? draft : value;
+  const sel = new Date(cur);
   const [view, setView] = useState(() => new Date(sel.getFullYear(), sel.getMonth(), 1));
 
   const clamp = (ms: number) => {
@@ -29,6 +38,7 @@ export function DateTimePicker({
     if (max != null && ms > max) return max;
     return ms;
   };
+  const emit = (ms: number) => (buffered ? setDraft(clamp(ms)) : onChange?.(clamp(ms)));
 
   // Monday-first grid: how many leading blanks before day 1.
   const firstDow = (new Date(view.getFullYear(), view.getMonth(), 1).getDay() + 6) % 7;
@@ -49,19 +59,19 @@ export function DateTimePicker({
   };
 
   function pickDay(d: number) {
-    const nd = new Date(value);
+    const nd = new Date(cur);
     nd.setFullYear(view.getFullYear(), view.getMonth(), d);
-    onChange(clamp(nd.getTime()));
+    emit(nd.getTime());
   }
   function bumpMonth(dir: number) {
     setView((v) => new Date(v.getFullYear(), v.getMonth() + dir, 1));
   }
   function bumpTime(unit: "h" | "m", dir: number) {
-    const nd = new Date(value);
+    const nd = new Date(cur);
     if (unit === "h") nd.setHours(nd.getHours() + dir);
     else nd.setMinutes(nd.getMinutes() + dir);
     nd.setSeconds(0, 0);
-    onChange(clamp(nd.getTime()));
+    emit(nd.getTime());
   }
 
   const cells: (number | null)[] = [
@@ -121,6 +131,17 @@ export function DateTimePicker({
         <span className="pb-0.5 text-lg font-medium text-fg-faint">:</span>
         <TimeField label="Minute" digits={String(sel.getMinutes()).padStart(2, "0")} onBump={(dir) => bumpTime("m", dir)} />
       </div>
+
+      {buffered && (
+        <div className="mt-3 flex items-center justify-end gap-2 border-t border-line pt-3">
+          <button className="btn-ghost h-8" onClick={() => onCancel?.()}>
+            Cancel
+          </button>
+          <button className="btn-primary h-8" onClick={() => onApply?.(clamp(draft))}>
+            Apply
+          </button>
+        </div>
+      )}
     </div>
   );
 }

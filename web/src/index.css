@@ -9,6 +9,38 @@ input.vrange {
   appearance: slider-vertical;
 }
 
+/* UniFi-style timeline zoom slider: thin filled track + round thumb. The filled
+   portion is set inline as a background gradient from the current value. */
+input.tl-zoom {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+input.tl-zoom::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 9999px;
+  background: #1b9df0;
+  border: 2px solid #0d0f13;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+input.tl-zoom::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border-radius: 9999px;
+  background: #1b9df0;
+  border: 2px solid #0d0f13;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+input.tl-zoom::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: transparent;
+}
+
 @keyframes dotpulse {
   0%,
   80%,
@@ -28,13 +60,19 @@ input.vrange {
   }
   html {
     height: 100%;
+    overscroll-behavior: none; /* no whole-page rubber-band that drags the fixed app */
     @apply bg-ink-900;
   }
   body {
     height: 100%;
+    overscroll-behavior: none;
   }
-  /* Pin the app to the viewport edges. In an installed iOS PWA this fills the
-     screen reliably, where 100vh/100dvh can leave a grey gap under the app. */
+  /* Pin the app to the *visible* viewport. Measured on an installed iOS PWA:
+     inset:0 / 100dvh = the 812px viewport actually shown at rest, while 100vh =
+     874 (the large viewport, only fully visible mid-scroll). Sizing to 100vh
+     pushed the nav's labels below the fold, so we use inset:0 — the nav stays
+     whole and flush with the visible bottom. The remaining home-indicator strip
+     is handled by the nav's own safe-area padding. */
   #root {
     position: fixed;
     inset: 0;

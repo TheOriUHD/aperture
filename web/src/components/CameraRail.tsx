@@ -6,13 +6,19 @@ export function CameraRail({
   cameras,
   selectedId,
   onSelect,
+  multiIds,
 }: {
   cameras: Camera[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  // When set, the rail is in multi-view mode: it shows ONLY these cameras, all
+  // highlighted, and selecting does nothing (the grid is driven by the modal).
+  multiIds?: string[];
 }) {
   const [q, setQ] = useState("");
-  const filtered = cameras.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()));
+  const multi = !!multiIds?.length;
+  const base = multi ? cameras.filter((c) => multiIds!.includes(c.id)) : cameras;
+  const filtered = base.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()));
 
   return (
     <div className="w-[200px] shrink-0 border-r border-line flex flex-col bg-ink-900">
@@ -28,27 +34,38 @@ export function CameraRail({
         </div>
       </div>
       <div className="flex-1 overflow-auto p-2 space-y-2">
-        {filtered.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => onSelect(c.id)}
-            className={`block w-full rounded-lg overflow-hidden border transition-colors ${
-              c.id === selectedId
-                ? "border-brand ring-1 ring-brand"
-                : "border-line hover:border-line-strong"
-            }`}
-          >
-            <SnapshotThumb cameraId={c.id} enabled={c.enabled} />
-            <div className="flex items-center gap-1.5 px-2 py-1.5">
-              <Lock className="h-3 w-3 text-fg-faint shrink-0" />
-              <span
-                className={`text-xs truncate ${c.id === selectedId ? "text-brand font-medium" : "text-fg-muted"}`}
-              >
-                {c.name}
-              </span>
-            </div>
-          </button>
-        ))}
+        {filtered.map((c) => {
+          const active = c.id === selectedId;
+          return (
+            <button
+              key={c.id}
+              onClick={() => {
+                if (!multi) onSelect(c.id);
+              }}
+              className={`block w-full overflow-hidden rounded-lg border transition-colors ${
+                multi
+                  ? "cursor-default border-brand/50"
+                  : active
+                    ? "border-brand ring-1 ring-brand"
+                    : "border-line hover:border-line-strong"
+              }`}
+            >
+              <SnapshotThumb cameraId={c.id} enabled={c.enabled} />
+              {multi ? (
+                <div className="flex justify-center px-2 py-1.5">
+                  <span className="rounded-md bg-brand px-2 py-0.5 text-xs font-medium text-white">{c.name}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-2 py-1.5">
+                  <Lock className="h-3 w-3 shrink-0 text-fg-faint" />
+                  <span className={`truncate text-xs ${active ? "font-medium text-brand" : "text-fg-muted"}`}>
+                    {c.name}
+                  </span>
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

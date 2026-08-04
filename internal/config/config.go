@@ -34,9 +34,10 @@ type Config struct {
 	WebDir string // serve UI from disk (dev) instead of the embedded bundle
 
 	// Secrets (auto-generated + persisted if unset).
-	JWTSecret    []byte
-	StreamSecret []byte
-	CLIToken     []byte // local admin token for nvrctl (also written to cli.token)
+	JWTSecret     []byte
+	StreamSecret  []byte
+	CLIToken      []byte // local admin token for nvrctl (also written to cli.token)
+	EncryptionKey []byte // 32-byte AES-256 key for at-rest storage-credential encryption
 }
 
 // CLITokenPath returns where the CLI token is written for nvrctl to read.
@@ -50,6 +51,16 @@ func (c *Config) Go2RTCConfigPath() string { return filepath.Join(c.DataDir, "go
 
 // FrameCacheDir holds extracted hover-scrub preview JPEGs.
 func (c *Config) FrameCacheDir() string { return filepath.Join(c.DataDir, "frame-cache") }
+
+// SpoolDir is the local staging area ffmpeg writes to for cameras that record to
+// a network location; a background uploader drains it to the backend. Keeping it
+// under DataDir decouples recording from the destination — a network blip never
+// interrupts ffmpeg.
+func (c *Config) SpoolDir() string { return filepath.Join(c.DataDir, "spool") }
+
+// RemoteCacheDir holds segments pulled back from a network location for tools
+// that need a local file (scrub thumbnails, exports).
+func (c *Config) RemoteCacheDir() string { return filepath.Join(c.DataDir, "rcache") }
 
 func env(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
@@ -75,7 +86,7 @@ func Load() (*Config, error) {
 		WebDir:         env("APERTURE_WEB_DIR", ""),
 	}
 
-	for _, dir := range []string{c.DataDir, c.RecordingsDir, c.FrameCacheDir()} {
+	for _, dir := range []string{c.DataDir, c.RecordingsDir, c.FrameCacheDir(), c.SpoolDir(), c.RemoteCacheDir()} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create dir %s: %w", dir, err)
 		}
@@ -91,6 +102,7 @@ type secretsFile struct {
 	JWTSecret    string `json:"jwt_secret"`
 	StreamSecret string `json:"stream_secret"`
 	CLIToken     string `json:"cli_token"`
+	EncKey       string `json:"enc_key"` // hex of a 32-byte AES-256 key
 }
 
 // loadSecrets resolves JWT and stream-signing secrets, preferring environment
@@ -106,6 +118,7 @@ func (c *Config) loadSecrets() error {
 	jwt := env("APERTURE_JWT_SECRET", sf.JWTSecret)
 	stream := env("APERTURE_STREAM_SECRET", sf.StreamSecret)
 	cli := sf.CLIToken
+	encKey := sf.EncKey
 
 	if jwt == "" {
 		jwt = randHex(32)
@@ -116,10 +129,16 @@ func (c *Config) loadSecrets() error {
 	if cli == "" {
 		cli = randHex(24)
 	}
+	// The at-rest encryption key must decode to exactly 32 bytes; (re)generate if
+	// missing or malformed. Losing it only invalidates stored share credentials
+	// (users re-enter them) — never footage or logins.
+	if kb, err := hex.DecodeString(encKey); err != nil || len(kb) != 32 {
+		encKey = randHex(32)
+	}
 
 	// Persist if anything was newly generated and not pinned via env.
-	if sf.JWTSecret != jwt || sf.StreamSecret != stream || sf.CLIToken != cli {
-		out, _ := json.MarshalIndent(secretsFile{JWTSecret: jwt, StreamSecret: stream, CLIToken: cli}, "", "  ")
+	if sf.JWTSecret != jwt || sf.StreamSecret != stream || sf.CLIToken != cli || sf.EncKey != encKey {
+		out, _ := json.MarshalIndent(secretsFile{JWTSecret: jwt, StreamSecret: stream, CLIToken: cli, EncKey: encKey}, "", "  ")
 		if err := os.WriteFile(path, out, 0o600); err != nil {
 			return fmt.Errorf("persist secrets: %w", err)
 		}
@@ -128,6 +147,7 @@ func (c *Config) loadSecrets() error {
 	c.JWTSecret = []byte(jwt)
 	c.StreamSecret = []byte(stream)
 	c.CLIToken = []byte(cli)
+	c.EncryptionKey, _ = hex.DecodeString(encKey) // validated above → exactly 32 bytes
 
 	// Mirror the CLI token to a plain file so nvrctl can read it locally.
 	_ = os.WriteFile(c.CLITokenPath(), []byte(cli), 0o600)

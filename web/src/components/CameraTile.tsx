@@ -33,9 +33,10 @@ export function CameraTile({
         )}
       </div>
 
-      {/* Hover expand hint */}
+      {/* Hover expand hint — desktop only (there is no real hover on touch, where
+          iOS also makes :hover stick after a tap). The whole tile is tappable. */}
       {onOpen && (
-        <div className="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute top-2.5 right-2.5 hidden lg:block opacity-0 group-hover:opacity-100 transition-opacity">
           <span className="h-7 w-7 grid place-items-center rounded-md bg-black/55 text-fg-muted">
             <Maximize2 className="h-3.5 w-3.5" />
           </span>
@@ -43,7 +44,7 @@ export function CameraTile({
       )}
 
       {/* Conditions readout (bottom-right, opposite the name) */}
-      <LiveConditions variant="compact" className="bottom-2.5 right-3" />
+      <LiveConditions variant="compact" className="bottom-2.5 right-3" cameraId={camera.id} />
 
       {/* Name (text shadow, no gradient band) */}
       <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between">

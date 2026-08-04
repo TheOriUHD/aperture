@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TheOriUHD/aperture/internal/storage"
 	"github.com/TheOriUHD/aperture/internal/store"
 )
 
@@ -31,14 +32,66 @@ const (
 // Manager owns the export output directory and the single-worker job queue.
 type Manager struct {
 	st    *store.Store
+	reg   *storage.Registry
 	dir   string
 	log   *slog.Logger
 	queue chan string
 }
 
-func New(st *store.Store, dir string, log *slog.Logger) *Manager {
+func New(st *store.Store, reg *storage.Registry, dir string, log *slog.Logger) *Manager {
 	_ = os.MkdirAll(dir, 0o755)
-	return &Manager{st: st, dir: dir, log: log, queue: make(chan string, 64)}
+	return &Manager{st: st, reg: reg, dir: dir, log: log, queue: make(chan string, 64)}
+}
+
+// localizeSegments returns a local filesystem path for each segment plus a
+// cleanup func. Local segments (absolute path) are used in place; network
+// segments (backend-relative path) are downloaded into temp files under the
+// export dir so ffmpeg can concat them, and cleanup removes those temps.
+func (m *Manager) localizeSegments(segs []*store.Segment) ([]string, func(), error) {
+	paths := make([]string, len(segs))
+	var temps []string
+	cleanup := func() {
+		for _, t := range temps {
+			_ = os.Remove(t)
+		}
+	}
+	for i, sg := range segs {
+		if sg.Path != "" && filepath.IsAbs(sg.Path) {
+			paths[i] = sg.Path
+			continue
+		}
+		if sg.Path == "" || m.reg == nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("footage is unavailable")
+		}
+		backend, err := m.reg.For(sg.LocationID)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("storage backend unavailable")
+		}
+		rc, _, err := backend.Open(sg.Path)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("could not read footage")
+		}
+		tmp, err := os.CreateTemp(m.dir, "seg-*.ts")
+		if err != nil {
+			_ = rc.Close()
+			cleanup()
+			return nil, func() {}, err
+		}
+		_, cErr := io.Copy(tmp, rc)
+		_ = rc.Close()
+		_ = tmp.Close()
+		if cErr != nil {
+			_ = os.Remove(tmp.Name())
+			cleanup()
+			return nil, func() {}, cErr
+		}
+		temps = append(temps, tmp.Name())
+		paths[i] = tmp.Name()
+	}
+	return paths, cleanup, nil
 }
 
 // Dir is the export output directory (download handlers read from here).
@@ -142,11 +195,17 @@ func (m *Manager) clipForCamera(ctx context.Context, id string, job *store.Expor
 		return fmt.Errorf("no footage for %s in the selected range", cameraName)
 	}
 
+	localPaths, release, err := m.localizeSegments(segs)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	listPath := filepath.Join(m.dir, id+"-"+cameraID+".txt")
 	var b strings.Builder
-	for _, sg := range segs {
+	for _, p := range localPaths {
 		b.WriteString("file '")
-		b.WriteString(sg.Path)
+		b.WriteString(p)
 		b.WriteString("'\n")
 	}
 	if err := os.WriteFile(listPath, []byte(b.String()), 0o600); err != nil {
@@ -161,18 +220,35 @@ func (m *Manager) clipForCamera(ctx context.Context, id string, job *store.Expor
 	durMs := job.ToTS - job.FromTS
 	dur := float64(durMs) / 1000.0
 
+	// A timelapse (speed > 1) can't be stream-copied — retiming needs a re-encode,
+	// exactly like a burn-in. Either forces the libx264 path; both can combine.
+	speed := job.Speed
+	if speed < 1 {
+		speed = 1
+	}
+	transcode := job.BurnIn || speed > 1
+
 	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
-	if job.BurnIn && trackProg {
+	if transcode && trackProg {
 		args = append(args, "-progress", "pipe:1")
 	}
 	args = append(args, "-f", "concat", "-safe", "0", "-i", listPath, "-ss", ftoa(offset), "-t", ftoa(dur))
-	if job.BurnIn {
-		args = append(args, "-vf", drawtextVF(cameraName, job.FromTS/1000),
-			"-c:v", "libx264", "-preset", "veryfast", "-crf", "22")
-		if job.Audio {
+	if transcode {
+		var vf []string
+		if speed > 1 {
+			vf = append(vf, fmt.Sprintf("setpts=PTS/%d", speed))
+		}
+		if job.BurnIn {
+			vf = append(vf, drawtextVF(cameraName, job.FromTS/1000))
+		}
+		if len(vf) > 0 {
+			args = append(args, "-vf", strings.Join(vf, ","))
+		}
+		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22")
+		if job.Audio && speed == 1 {
 			args = append(args, "-c:a", "aac")
 		} else {
-			args = append(args, "-an")
+			args = append(args, "-an") // timelapse audio is meaningless once retimed
 		}
 	} else {
 		args = append(args, "-c", "copy")
@@ -183,9 +259,10 @@ func (m *Manager) clipForCamera(ctx context.Context, id string, job *store.Expor
 	args = append(args, "-movflags", "+faststart", "-y", out)
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	if job.BurnIn && trackProg && durMs > 0 {
+	if transcode && trackProg && durMs > 0 {
+		outMs := durMs / int64(speed) // output is 1/speed as long as the input
 		if stdout, err := cmd.StdoutPipe(); err == nil {
-			go m.trackProgress(id, stdout, durMs)
+			go m.trackProgress(id, stdout, outMs)
 		}
 	}
 	var stderr bytes.Buffer
@@ -279,11 +356,17 @@ func (m *Manager) composite(ctx context.Context, job *store.ExportJob, cams []st
 		if err != nil || len(segs) == 0 {
 			return fmt.Errorf("no footage for %s in the selected range", names[cid])
 		}
+		localPaths, release, err := m.localizeSegments(segs)
+		if err != nil {
+			return err
+		}
+		defer release()
+
 		lp := filepath.Join(m.dir, fmt.Sprintf("%s-comp-%d.txt", job.ID, i))
 		var b strings.Builder
-		for _, sg := range segs {
+		for _, p := range localPaths {
 			b.WriteString("file '")
-			b.WriteString(sg.Path)
+			b.WriteString(p)
 			b.WriteString("'\n")
 		}
 		if err := os.WriteFile(lp, []byte(b.String()), 0o600); err != nil {

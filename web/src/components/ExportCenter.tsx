@@ -49,6 +49,7 @@ export function ExportCenter({
   const [to, setTo] = useState(defaultTo);
   const [burnIn, setBurnIn] = useState(false);
   const [audio, setAudio] = useState(true);
+  const [speed, setSpeed] = useState(1); // 1 = realtime; N = timelapse N×
   const [shareJob, setShareJob] = useState<ExportJob | null>(null);
 
   const { data: jobs } = useExports();
@@ -64,10 +65,19 @@ export function ExportCenter({
     if (!open) return;
     setSelectedCams(camera ? [camera.id] : cameras[0] ? [cameras[0].id] : []);
     setComposite(false);
+    setSpeed(1);
     setTo(defaultTo);
     setFrom(defaultTo - 60_000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const SPEEDS = [
+    { label: "Realtime", v: 1 },
+    { label: "8×", v: 8 },
+    { label: "30×", v: 30 },
+    { label: "60×", v: 60 },
+    { label: "120×", v: 120 },
+  ];
 
   const durMs = to - from;
   const multi = selectedCams.length > 1;
@@ -172,7 +182,30 @@ export function ExportCenter({
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-fg">Include audio</span>
-                  <Switch checked={audio} onChange={setAudio} label="Include audio" />
+                  <Switch checked={audio} onChange={setAudio} label="Include audio" disabled={speed > 1} />
+                </div>
+                <div>
+                  <div className="mb-1.5 flex items-baseline justify-between">
+                    <span className="text-sm text-fg">Timelapse</span>
+                    <span className="text-xs text-fg-faint">
+                      {speed > 1 ? `${fmtDuration(durMs)} → ~${fmtDuration(Math.round(durMs / speed))}` : "off"}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SPEEDS.map((s) => (
+                      <button
+                        key={s.v}
+                        onClick={() => setSpeed(s.v)}
+                        className={`btn h-7 px-2.5 text-xs ${
+                          speed === s.v
+                            ? "bg-brand/15 text-brand border border-brand/40"
+                            : "bg-ink-800 text-fg-muted border border-line-strong hover:bg-ink-700"
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </>
             )}
@@ -180,14 +213,17 @@ export function ExportCenter({
             <button
               className="btn-primary w-full"
               disabled={invalid || create.isPending}
-              onClick={() => create.mutate({ cameraIds: selectedCams, mode, from, to, burnIn, audio })}
+              onClick={() => create.mutate({ cameraIds: selectedCams, mode, from, to, burnIn, audio, speed })}
             >
               <Scissors className="h-4 w-4" />
               {durMs > 0 && !invalid
                 ? `Export ${fmtDuration(durMs)} ${multi && !composite ? "clips" : "clip"}`
                 : "Export"}
-              {!invalid && mode === "single" && !burnIn && (
+              {!invalid && mode === "single" && !burnIn && speed === 1 && (
                 <span className="text-[11px] text-ink-900/70"> · instant copy</span>
+              )}
+              {!invalid && speed > 1 && (
+                <span className="text-[11px] text-ink-900/70"> · {speed}× timelapse</span>
               )}
               {!invalid && mode === "zip" && (
                 <span className="text-[11px] text-ink-900/70"> · {selectedCams.length} clips · .zip</span>

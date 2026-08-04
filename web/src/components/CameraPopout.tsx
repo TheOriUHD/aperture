@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Maximize2, Camera as CameraIcon, Clapperboard } from "lucide-react";
 import { LiveVideo } from "./LiveVideo";
 import { LiveConditions } from "./ConditionsOverlay";
+import { fsVideoStyle, FullscreenChrome } from "./fullscreen";
 import { useScrollLock } from "../hooks/useScrollLock";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import type { Camera } from "../lib/types";
 
 export function CameraPopout({
@@ -15,14 +17,21 @@ export function CameraPopout({
   onOpenPlayback: (cameraId: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const [fs, setFs] = useState(false);
   useScrollLock(!!camera);
 
   useEffect(() => {
     if (!camera) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && (fs ? setFs(false) : onClose());
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [camera, onClose]);
+  }, [camera, onClose, fs]);
+
+  // Drop out of fullscreen whenever the pop-out target changes or closes.
+  useEffect(() => {
+    setFs(false);
+  }, [camera?.id]);
 
   if (!camera) return null;
 
@@ -42,12 +51,18 @@ export function CameraPopout({
   }
 
   function toggleFullscreen() {
+    // Mobile: rotate + fill (iPhone blocks element fullscreen). Desktop: native.
+    if (!isDesktop) {
+      setFs((f) => !f);
+      return;
+    }
     const el = containerRef.current;
     if (!document.fullscreenElement) void el?.requestFullscreen?.();
     else void document.exitFullscreen();
   }
 
   const recording = camera.enabled && camera.recordMode !== "never";
+  const mobileFs = fs && !isDesktop;
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4">
@@ -57,8 +72,8 @@ export function CameraPopout({
         className="relative w-[min(94vw,1100px)] card overflow-hidden shadow-pop animate-fade-in"
       >
         <div className="relative aspect-video bg-black">
-          <LiveVideo camera={camera} fit="contain" />
-          <LiveConditions variant="full" className="top-3 right-14" />
+          <LiveVideo camera={camera} fit="contain" fsStyle={mobileFs ? fsVideoStyle : undefined} />
+          <LiveConditions variant="full" className="top-3 right-14" cameraId={camera.id} />
         </div>
 
         {/* Top overlay: subtle name pill + close */}
@@ -98,7 +113,7 @@ export function CameraPopout({
             </button>
             <button
               onClick={toggleFullscreen}
-              className="h-9 w-9 grid place-items-center rounded-md bg-black/55 text-white/90 hover:bg-black/75"
+              className="grid h-9 w-9 place-items-center rounded-md bg-black/55 text-white/90 hover:bg-black/75"
               aria-label="Fullscreen"
             >
               <Maximize2 className="h-4 w-4" />
@@ -106,6 +121,7 @@ export function CameraPopout({
           </div>
         </div>
       </div>
+      {mobileFs && <FullscreenChrome onExit={() => setFs(false)} />}
     </div>
   );
 }

@@ -6,6 +6,9 @@ import { Switch } from "./ui/Switch";
 import { ScheduleModal } from "./ScheduleModal";
 import { ZoneEditor } from "./ZoneEditor";
 import { useCreateCamera, useUpdateCamera, useDeleteCamera, useTestCamera } from "../hooks/useCameras";
+import { useHA, useHASensors } from "../hooks/useSystem";
+import { useCameraGroups, useSetCameraGroups } from "../hooks/useGroups";
+import { useStorageLocations } from "../hooks/useStorageLocations";
 import type { Camera, RecordMode } from "../lib/types";
 
 const SENS: { v: number; label: string }[] = [
@@ -31,8 +34,14 @@ export function CameraModal({
   const isEdit = !!camera;
   const create = useCreateCamera();
   const update = useUpdateCamera();
+  const { data: groups } = useCameraGroups();
+  const setGroups = useSetCameraGroups();
+  const { data: locData } = useStorageLocations();
+  const locations = locData?.locations ?? [];
   const del = useDeleteCamera();
   const test = useTestCamera();
+  const { data: ha } = useHA();
+  const { data: haSensors } = useHASensors(!!ha?.enabled);
   const [testSnap, setTestSnap] = useState<string | null>(null);
   const [testErr, setTestErr] = useState("");
 
@@ -47,6 +56,13 @@ export function CameraModal({
   const [postroll, setPostroll] = useState(5);
   const [cooldown, setCooldown] = useState(5);
   const [minDur, setMinDur] = useState(0);
+  const [motionDet, setMotionDet] = useState(true);
+  const [audioDet, setAudioDet] = useState(false);
+  const [audioThreshold, setAudioThreshold] = useState(0);
+  const [detectMethod, setDetectMethod] = useState("");
+  const [tempSensor, setTempSensor] = useState("");
+  const [locationId, setLocationId] = useState("");
+  const [groupIds, setGroupIds] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -70,6 +86,12 @@ export function CameraModal({
       setPostroll(Math.round((camera.postrollMs || 5000) / 1000));
       setCooldown(Math.round((camera.cooldownMs || 5000) / 1000));
       setMinDur(Math.round((camera.minDurationMs || 0) / 1000));
+      setMotionDet(camera.motionDetection ?? true);
+      setAudioDet(camera.audioDetection ?? false);
+      setAudioThreshold(camera.audioThreshold ?? 0);
+      setDetectMethod(camera.detectMethod ?? "");
+      setTempSensor(camera.tempSensor ?? "");
+      setLocationId(camera.locationId ?? "");
     } else {
       setName("");
       setMain("");
@@ -82,8 +104,21 @@ export function CameraModal({
       setPostroll(5);
       setCooldown(5);
       setMinDur(0);
+      setMotionDet(true);
+      setAudioDet(false);
+      setAudioThreshold(0);
+      setDetectMethod("");
+      setTempSensor("");
+      setLocationId("");
     }
   }, [open, camera]);
+
+  // Seed the camera's group membership once groups + camera are known.
+  useEffect(() => {
+    if (!open) return;
+    if (camera && groups) setGroupIds(groups.filter((g) => g.cameraIds.includes(camera.id)).map((g) => g.id));
+    else if (!camera) setGroupIds([]);
+  }, [open, camera, groups]);
 
   const busy = create.isPending || update.isPending;
 
@@ -100,14 +135,25 @@ export function CameraModal({
       retentionDays: retention,
       enabled,
       motionThreshold: sensitivity,
+      motionDetection: motionDet,
+      audioDetection: audioDet,
+      audioThreshold,
+      detectMethod,
+      tempSensor,
+      locationId,
       prerollMs: preroll * 1000,
       postrollMs: postroll * 1000,
       cooldownMs: cooldown * 1000,
       minDurationMs: minDur * 1000,
     };
     try {
+      let camId = camera?.id;
       if (camera) await update.mutateAsync({ id: camera.id, ...input });
-      else await create.mutateAsync(input);
+      else {
+        const created = await create.mutateAsync(input);
+        camId = created?.id;
+      }
+      if (camId && groups) await setGroups.mutateAsync({ cameraId: camId, groupIds });
       onClose();
     } catch {
       setError("Could not save the camera.");
@@ -243,6 +289,22 @@ export function CameraModal({
               />
             </div>
           </div>
+          {locations.length > 1 && (
+            <div>
+              <label className="label">Storage location</label>
+              <select className="input" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+                {locations.map((loc) => (
+                  <option key={loc.id || "default"} value={loc.id}>
+                    {loc.name}
+                    {loc.isDefault ? " (default)" : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-fg-faint mt-1">
+                Where new footage for this camera is written. Existing recordings stay where they are.
+              </p>
+            </div>
+          )}
           {mode === "scheduled" &&
             (isEdit ? (
               <button type="button" className="btn-subtle w-full" onClick={() => setScheduleOpen(true)}>
@@ -256,76 +318,195 @@ export function CameraModal({
             ))}
 
           <div className="border-t border-line pt-4">
-            <p className="text-xs font-medium text-fg-muted mb-3">Motion detection</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">Sensitivity</label>
-                <select
-                  className="input"
-                  value={sensitivity}
-                  onChange={(e) => setSensitivity(Number(e.target.value))}
-                >
-                  {SENS.map((s) => (
-                    <option key={s.v} value={s.v}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">Ignore blips under (s)</label>
-                <input
-                  type="number"
-                  min={0}
-                  className="input"
-                  value={minDur}
-                  onChange={(e) => setMinDur(Math.max(0, Number(e.target.value) || 0))}
-                />
-              </div>
-              <div>
-                <label className="label">Pre-roll (s)</label>
-                <input
-                  type="number"
-                  min={0}
-                  className="input"
-                  value={preroll}
-                  onChange={(e) => setPreroll(Math.max(0, Number(e.target.value) || 0))}
-                />
-              </div>
-              <div>
-                <label className="label">Post-roll (s)</label>
-                <input
-                  type="number"
-                  min={0}
-                  className="input"
-                  value={postroll}
-                  onChange={(e) => setPostroll(Math.max(0, Number(e.target.value) || 0))}
-                />
-              </div>
-              <div>
-                <label className="label">Cooldown (s)</label>
-                <input
-                  type="number"
-                  min={1}
-                  className="input"
-                  value={cooldown}
-                  onChange={(e) => setCooldown(Math.max(1, Number(e.target.value) || 1))}
-                />
-              </div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs font-medium text-fg-muted">Motion detection</p>
+              <Switch
+                checked={mode === "motion" || motionDet}
+                onChange={mode === "motion" ? () => undefined : setMotionDet}
+                label="Motion detection"
+              />
             </div>
-            <p className="text-xs text-fg-faint mt-2 leading-relaxed">
-              Higher sensitivity catches more motion (and more false alarms). Pre/post-roll pad each
-              clip; cooldown coalesces a flurry into one event; “ignore blips” drops events shorter
-              than the set seconds (0 = off).
-            </p>
-            {isEdit ? (
-              <button type="button" className="btn-subtle w-full mt-3" onClick={() => setZonesOpen(true)}>
-                <Brush className="h-4 w-4" />
-                Edit motion zones
-              </button>
+            {mode === "motion" ? (
+              <p className="text-[11px] text-fg-faint mb-3">Always on — motion-only recording needs the trigger.</p>
             ) : (
-              <p className="text-xs text-fg-faint mt-3">Save the camera first to paint motion zones.</p>
+              <p className="text-[11px] text-fg-faint mb-3">
+                Off = record per the mode above but raise no motion events for this camera.
+              </p>
             )}
+
+            {mode === "motion" || motionDet ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Sensitivity</label>
+                    <select
+                      className="input"
+                      value={sensitivity}
+                      onChange={(e) => setSensitivity(Number(e.target.value))}
+                    >
+                      {SENS.map((s) => (
+                        <option key={s.v} value={s.v}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Ignore blips under (s)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="input"
+                      value={minDur}
+                      onChange={(e) => setMinDur(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Pre-roll (s)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="input"
+                      value={preroll}
+                      onChange={(e) => setPreroll(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Post-roll (s)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="input"
+                      value={postroll}
+                      onChange={(e) => setPostroll(Math.max(0, Number(e.target.value) || 0))}
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Cooldown (s)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      className="input"
+                      value={cooldown}
+                      onChange={(e) => setCooldown(Math.max(1, Number(e.target.value) || 1))}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-fg-faint mt-2 leading-relaxed">
+                  Higher sensitivity catches more motion (and more false alarms). Pre/post-roll pad each
+                  clip; cooldown coalesces a flurry into one event; “ignore blips” drops events shorter
+                  than the set seconds (0 = off).
+                </p>
+                {isEdit ? (
+                  <button type="button" className="btn-subtle w-full mt-3" onClick={() => setZonesOpen(true)}>
+                    <Brush className="h-4 w-4" />
+                    Edit motion zones
+                  </button>
+                ) : (
+                  <p className="text-xs text-fg-faint mt-3">Save the camera first to paint motion zones.</p>
+                )}
+
+                {/* Object detection only runs on motion frames, so it lives under motion. */}
+                <div className="mt-4 border-t border-line pt-3">
+                  <label className="label">Object detection method</label>
+                  <select className="input" value={detectMethod} onChange={(e) => setDetectMethod(e.target.value)}>
+                    <option value="">Use default (from Settings)</option>
+                    <option value="off">Off</option>
+                    <option value="bridge">External server</option>
+                    <option value="onnx">Local model</option>
+                  </select>
+                  <p className="text-[11px] text-fg-faint mt-1.5">
+                    Overrides the global detector for this camera — e.g. run AI on the driveway, none indoors.
+                    Uses the server URL / model path from Settings → Detection.
+                  </p>
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          {/* Audio detection — independent of motion; needs a mic-equipped camera. */}
+          <div className="border-t border-line pt-4">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs font-medium text-fg-muted">Audio detection</p>
+              <Switch checked={audioDet} onChange={setAudioDet} label="Audio detection" />
+            </div>
+            <p className="text-[11px] text-fg-faint mb-3">
+              Raises an “audio” event when this camera’s sound gets loud (needs a camera with a microphone).
+            </p>
+            {audioDet && (
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <label className="label mb-0">Threshold</label>
+                  <span className="text-[11px] text-fg-faint">
+                    {audioThreshold > 0 ? `${Math.round(audioThreshold * 100)}%` : "default"}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={0.3}
+                  step={0.01}
+                  className="mt-1.5 w-full accent-brand"
+                  value={audioThreshold}
+                  onChange={(e) => setAudioThreshold(Number(e.target.value))}
+                />
+                <div className="flex justify-between text-[10px] text-fg-faint">
+                  <span>More sensitive</span>
+                  <span>Only loud sounds</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* On-screen conditions: swap outdoor weather for a Home Assistant sensor */}
+          {(ha?.enabled || tempSensor) && (
+            <div className="border-t border-line pt-4">
+              <label className="label">Overlay temperature</label>
+              <select className="input" value={tempSensor} onChange={(e) => setTempSensor(e.target.value)}>
+                <option value="">Outdoor weather (default)</option>
+                {tempSensor && !haSensors?.some((s) => s.entityId === tempSensor) && (
+                  <option value={tempSensor}>{tempSensor} (waiting for reading…)</option>
+                )}
+                {haSensors?.map((s) => (
+                  <option key={s.entityId} value={s.entityId}>
+                    {(s.name || s.entityId) + (s.unit ? ` — ${s.value} ${s.unit}` : ` — ${s.value}`)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-fg-faint mt-1.5">
+                Show a Home Assistant sensor on this camera instead of outdoor weather. Add sensors via
+                Settings → Home Assistant (MQTT Statestream).
+              </p>
+            </div>
+          )}
+
+          {/* Camera groups — which mobile-dashboard groups this camera is in. */}
+          <div className="border-t border-line pt-4">
+            <label className="label">Groups</label>
+            {(groups?.length ?? 0) === 0 ? (
+              <p className="text-[11px] text-fg-faint">No groups yet — create them in Settings → Camera Groups.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {groups!.map((g) => {
+                  const on = groupIds.includes(g.id);
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setGroupIds((s) => (on ? s.filter((x) => x !== g.id) : [...s, g.id]))}
+                      className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                        on ? "border-brand bg-brand/15 text-fg" : "border-line text-fg-muted hover:text-fg"
+                      }`}
+                    >
+                      {g.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className="mt-1.5 text-[11px] text-fg-faint">
+              Which groups this camera appears in on the mobile dashboard&apos;s group selector.
+            </p>
           </div>
 
           {isEdit && (

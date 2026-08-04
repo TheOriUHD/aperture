@@ -92,8 +92,13 @@ func (s *Server) buildStatus(ctx context.Context) map[string]any {
 		camStatus = append(camStatus, cam)
 	}
 
-	total, free := diskUsage(s.recordingsDir())
 	recorded, _ := s.st.TotalBytes()
+	allocation := s.st.GetSettingInt64("storage_cap_bytes")
+	used := recorded + s.appFilesBytes()
+	allocFree := int64(0)
+	if allocation > 0 && allocation > used {
+		allocFree = allocation - used
+	}
 	ha := s.ha.LoadSettings()
 
 	return map[string]any{
@@ -102,7 +107,7 @@ func (s *Server) buildStatus(ctx context.Context) map[string]any {
 		"go2rtc":        map[string]any{"reachable": health.Reachable, "streams": len(health.Registered)},
 		"liveDownCount": liveDown,
 		"recDownCount":  recDown,
-		"storage":       map[string]any{"totalBytes": total, "freeBytes": free, "recordedBytes": recorded},
+		"storage":       map[string]any{"allocatedBytes": allocation, "usedBytes": used, "freeBytes": allocFree},
 		"homeAssistant": map[string]any{"enabled": ha.Enabled, "connected": s.ha.Connected()},
 		"weather":       s.weather.Status(),
 		"cameras":       camStatus,

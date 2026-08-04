@@ -81,6 +81,8 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 const (
 	siteNameKey     = "site_name"
 	defaultSiteName = "Home NVR"
+	overviewTempKey = "overview_temp_sensor" // HA entity id for the overview temp ("" = geo weather)
+	spotlightsKey   = "spotlights_enabled"   // show the dashboard Spotlights card ("0" = hidden)
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -101,28 +103,84 @@ func (s *Server) siteName() string {
 	return defaultSiteName
 }
 
+func (s *Server) overviewTemp() string {
+	v, _ := s.st.GetSetting(overviewTempKey)
+	return v
+}
+
+// spotlightsEnabled defaults to true (shown) unless explicitly disabled.
+func (s *Server) spotlightsEnabled() bool {
+	v, _ := s.st.GetSetting(spotlightsKey)
+	return v != "0" && v != "false"
+}
+
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"siteName": s.siteName()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"siteName":           s.siteName(),
+		"overviewTempSensor": s.overviewTemp(),
+		"spotlightsEnabled":  s.spotlightsEnabled(),
+		"recordQuality":      s.recordQuality(),
+	})
+}
+
+// recordQuality is the global recording-stream preference: "high" (main stream,
+// default) or "low" (sub stream where a camera has one).
+func (s *Server) recordQuality() string {
+	if v, _ := s.st.GetSetting("record_quality"); v == "low" {
+		return "low"
+	}
+	return "high"
 }
 
 func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SiteName string `json:"siteName"`
+		SiteName           *string `json:"siteName"`           // optional; "" = default
+		OverviewTempSensor *string `json:"overviewTempSensor"` // optional; "" = geo weather
+		SpotlightsEnabled  *bool   `json:"spotlightsEnabled"`  // optional; show the Spotlights card
+		RecordQuality      *string `json:"recordQuality"`      // optional; high | low
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	name := strings.TrimSpace(req.SiteName)
-	if name == "" {
-		name = defaultSiteName
+	if req.RecordQuality != nil {
+		q := "high"
+		if strings.TrimSpace(*req.RecordQuality) == "low" {
+			q = "low"
+		}
+		if q != s.recordQuality() {
+			_ = s.st.SetSetting("record_quality", q)
+			s.rec.RestartAll() // re-pull each camera on the newly-preferred stream
+			s.logAudit(r, "settings.update", "record quality", q)
+		}
 	}
-	if err := s.st.SetSetting(siteNameKey, name); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
+	if req.SiteName != nil {
+		name := strings.TrimSpace(*req.SiteName)
+		if name == "" {
+			name = defaultSiteName
+		}
+		if err := s.st.SetSetting(siteNameKey, name); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		s.logAudit(r, "settings.update", "site name", name)
 	}
-	s.logAudit(r, "settings.update", "site name", name)
-	writeJSON(w, http.StatusOK, map[string]any{"siteName": name})
+	if req.OverviewTempSensor != nil {
+		_ = s.st.SetSetting(overviewTempKey, strings.TrimSpace(*req.OverviewTempSensor))
+	}
+	if req.SpotlightsEnabled != nil {
+		v := "1"
+		if !*req.SpotlightsEnabled {
+			v = "0"
+		}
+		_ = s.st.SetSetting(spotlightsKey, v)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"siteName":           s.siteName(),
+		"overviewTempSensor": s.overviewTemp(),
+		"spotlightsEnabled":  s.spotlightsEnabled(),
+		"recordQuality":      s.recordQuality(),
+	})
 }
 
 // handlePurge deletes recorded footage (and events) in a time range, optionally
@@ -150,9 +208,7 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 	var freed int64
 	delSeg := 0
 	for _, seg := range segs {
-		if err := os.Remove(seg.Path); err != nil && !os.IsNotExist(err) {
-			continue
-		}
+		s.removeSegmentFile(seg)
 		if s.st.DeleteSegment(seg.ID) == nil {
 			freed += seg.SizeBytes
 			delSeg++

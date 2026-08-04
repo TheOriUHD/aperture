@@ -21,6 +21,8 @@ import (
 	"github.com/TheOriUHD/aperture/internal/notify"
 	"github.com/TheOriUHD/aperture/internal/oidc"
 	"github.com/TheOriUHD/aperture/internal/record"
+	"github.com/TheOriUHD/aperture/internal/secret"
+	"github.com/TheOriUHD/aperture/internal/storage"
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
 	"github.com/TheOriUHD/aperture/internal/watchdog"
@@ -50,9 +52,30 @@ type Server struct {
 	watchdog  *watchdog.Watchdog
 	logs      *logbuf.Ring
 	waSess    *waSessions
+	registry  *storage.Registry
+	cipher    *secret.Cipher
+	reconcile func() // triggers an immediate retention/reservation pass (set at startup)
 	startedAt time.Time
 	log       *slog.Logger
 	router    http.Handler
+}
+
+// SetStorage wires the storage-backend registry and credential cipher used for
+// network storage locations. Called once at startup after construction.
+func (s *Server) SetStorage(reg *storage.Registry, c *secret.Cipher) {
+	s.registry = reg
+	s.cipher = c
+}
+
+// SetReconcile wires a callback that runs an immediate retention/reservation pass,
+// so allocation changes take effect without waiting for the janitor's next tick.
+func (s *Server) SetReconcile(fn func()) { s.reconcile = fn }
+
+// triggerReconcile runs the reconcile callback in the background if wired.
+func (s *Server) triggerReconcile() {
+	if s.reconcile != nil {
+		go s.reconcile()
+	}
 }
 
 // NewServer builds a Server and its routes.
@@ -125,6 +148,7 @@ func (s *Server) routes() http.Handler {
 			r.Get("/users/me/preferences", s.handleGetPrefs)
 			r.Put("/users/me/preferences", s.handleSetPrefs)
 			r.Get("/cameras", s.handleListCameras)
+			r.Get("/camera-groups", s.handleListGroups)
 			r.Get("/cameras/{id}", s.handleGetCamera)
 			r.Get("/cameras/{id}/stream-token", s.handleStreamToken)
 			r.Get("/cameras/{id}/snapshot.jpg", s.handleSnapshot)
@@ -133,6 +157,7 @@ func (s *Server) routes() http.Handler {
 			r.Get("/cameras/{id}/events", s.handleCameraEvents)
 			r.Get("/cameras/{id}/hls", s.handleHLS)
 			r.Get("/cameras/{id}/seg/{seg}", s.handleSegmentFile)
+			r.Delete("/cameras/{id}/recordings", s.handleDeleteRecordings) // Playback "Remove" (admin, checked in handler)
 			r.Get("/events", s.handleEventsAll)
 			r.Get("/events/{id}/thumb.jpg", s.handleEventThumb)
 			r.Post("/export", s.handleCreateExport)
@@ -160,6 +185,7 @@ func (s *Server) routes() http.Handler {
 			r.Get("/cameras/{id}/schedule", s.handleGetSchedule)
 			r.Get("/cameras/{id}/zones", s.handleGetZones)
 			r.Get("/system/storage", s.handleStorage)
+			r.Get("/system/bitrate", s.handleBitrate)
 			r.Get("/system/settings", s.handleGetSettings)
 			r.Get("/system/site", s.handleGetSite)
 			r.Get("/system/weather/now", s.handleWeatherNow)
@@ -181,6 +207,10 @@ func (s *Server) routes() http.Handler {
 			r.Put("/cameras/{id}", s.handleUpdateCamera)
 			r.Delete("/cameras/{id}", s.handleDeleteCamera)
 			r.Post("/cameras/reorder", s.handleReorderCameras)
+			r.Post("/camera-groups", s.handleCreateGroup)
+			r.Put("/camera-groups/{id}", s.handleUpdateGroup)
+			r.Delete("/camera-groups/{id}", s.handleDeleteGroup)
+			r.Put("/cameras/{id}/groups", s.handleSetCameraGroups)
 			r.Get("/users", s.handleListUsers)
 			r.Post("/users", s.handleCreateUser)
 			r.Put("/users/{id}", s.handleUpdateUser)
@@ -202,8 +232,20 @@ func (s *Server) routes() http.Handler {
 			r.Post("/system/restore", s.handleRestore)
 			r.Post("/system/reindex", s.handleReindex)
 			r.Put("/system/storage", s.handleSetStorageConfig)
+			r.Get("/system/storage/disk", s.handleDiskStats)
+			r.Post("/system/storage/reserve", s.handleReserveStorage)
+			r.Get("/system/storage/locations", s.handleListLocations)
+			r.Post("/system/storage/locations", s.handleCreateLocation)
+			r.Post("/system/storage/locations/test", s.handleTestLocation)
+			r.Post("/system/storage/locations/allocate", s.handleAllocateLocation)
+			r.Post("/system/storage/locations/reorder", s.handleReorderLocations)
+			r.Post("/system/storage/locations/assign", s.handleAssignCameras)
+			r.Put("/system/storage/locations/{id}", s.handleUpdateLocation)
+			r.Delete("/system/storage/locations/{id}", s.handleDeleteLocation)
+			r.Post("/system/restart", s.handleRestart)
 			r.Get("/system/ha", s.handleGetHA)
 			r.Put("/system/ha", s.handleSetHA)
+			r.Get("/system/ha/sensors", s.handleHASensors)
 			r.Get("/system/oidc", s.handleGetOIDC)
 			r.Put("/system/oidc", s.handleSetOIDC)
 			r.Get("/system/detection", s.handleGetDetection)

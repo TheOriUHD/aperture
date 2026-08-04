@@ -41,6 +41,7 @@ type activeEvent struct {
 	postroll int64
 	cooldown int64
 	minDur   int64
+	cells    []bool // union of coarse motion cells across the event (SearchW*SearchH)
 }
 
 // Detector supervises per-camera motion detection.
@@ -138,7 +139,10 @@ func (d *Detector) Run(ctx context.Context) {
 }
 
 func (d *Detector) shouldDetect(c *store.Camera) bool {
-	return c.Enabled && c.RTSPMainURL != "" && c.RecordMode != store.ModeNever
+	// Motion-only recording inherently needs the motion trigger; otherwise honor
+	// the per-camera toggle (continuous cameras can record without motion events).
+	motionOn := c.MotionDetection || c.RecordMode == store.ModeMotion
+	return c.Enabled && c.RTSPMainURL != "" && c.RecordMode != store.ModeNever && motionOn
 }
 
 // Reconcile starts/stops detectors to match the desired camera set.
@@ -229,14 +233,18 @@ func (d *Detector) detectCamera(ctx context.Context, cam store.Camera) {
 			start := time.Now()
 			prev := make([]byte, frameSize)
 			cur := make([]byte, frameSize)
+			frameCells := make([]bool, SearchW*SearchH)
 			havePrev := false
 			for {
 				if _, err := io.ReadFull(stdout, cur); err != nil {
 					break
 				}
 				if havePrev {
-					if frac := diffFrac(prev, cur, mask, active); frac > threshold {
-						d.onTick(cam.ID, frac)
+					for i := range frameCells {
+						frameCells[i] = false
+					}
+					if frac := diffFrac(prev, cur, mask, active, frameCells); frac > threshold {
+						d.onTick(cam.ID, frac, frameCells)
 					}
 				}
 				prev, cur = cur, prev
@@ -259,8 +267,9 @@ func (d *Detector) detectCamera(ctx context.Context, cam store.Camera) {
 	}
 }
 
-// onTick records a motion frame, starting an event if none is active.
-func (d *Detector) onTick(cameraID string, score float64) {
+// onTick records a motion frame, starting an event if none is active. cells is
+// the current frame's coarse motion map, unioned into the event for Grid Search.
+func (d *Detector) onTick(cameraID string, score float64, cells []bool) {
 	now := time.Now().UnixMilli()
 	d.evMu.Lock()
 	ev := d.events[cameraID]
@@ -269,7 +278,9 @@ func (d *Detector) onTick(cameraID string, score float64) {
 		ev = &activeEvent{
 			id: store.NewID(), start: now - t.preroll, lastTick: now, maxScore: score,
 			postroll: t.postroll, cooldown: t.cooldown, minDur: t.minDur,
+			cells: make([]bool, SearchW*SearchH),
 		}
+		orCells(ev.cells, cells)
 		d.events[cameraID] = ev
 		d.evMu.Unlock()
 		e := &store.Event{ID: ev.id, CameraID: cameraID, Type: "motion", StartTS: ev.start, Score: score}
@@ -287,7 +298,28 @@ func (d *Detector) onTick(cameraID string, score float64) {
 	if score > ev.maxScore {
 		ev.maxScore = score
 	}
+	orCells(ev.cells, cells)
 	d.evMu.Unlock()
+}
+
+// orCells unions src into dst (both SearchW*SearchH bool grids).
+func orCells(dst, src []bool) {
+	for i := range dst {
+		if i < len(src) && src[i] {
+			dst[i] = true
+		}
+	}
+}
+
+// cellIndices returns the sorted set of active cell indices in a search grid.
+func cellIndices(cells []bool) []int {
+	var out []int
+	for i, c := range cells {
+		if c {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 // finalizeStale closes events whose motion has stopped (+postroll).
@@ -317,7 +349,7 @@ func (d *Detector) finalizeStale() {
 			_ = d.st.DeleteEvent(ev.id)
 			continue
 		}
-		if err := d.st.FinalizeEvent(ev.id, end, ev.maxScore); err != nil {
+		if err := d.st.FinalizeEvent(ev.id, end, ev.maxScore, cellIndices(ev.cells)); err != nil {
 			d.log.Error("motion: finalize event", "err", err)
 		}
 	}

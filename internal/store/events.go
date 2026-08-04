@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 )
 
@@ -25,6 +26,11 @@ type Event struct {
 	ObjectSummary string        `json:"objectSummary,omitempty"`
 	Labels        []string      `json:"-"`
 	Objects       []EventObject `json:"objects,omitempty"`
+
+	// MotionCells is the union of coarse motion-map cells (indices into a
+	// motion.SearchW×SearchH grid) active during the event — the basis for Grid
+	// Search. Empty for events recorded before this existed, or audio events.
+	MotionCells []int `json:"motionCells,omitempty"`
 }
 
 // InsertEvent creates a new event (end_ts NULL while ongoing).
@@ -43,9 +49,17 @@ func (s *Store) InsertEvent(e *Event) error {
 	return err
 }
 
-// FinalizeEvent sets an event's end time and final score.
-func (s *Store) FinalizeEvent(id string, endTS int64, score float64) error {
-	return affected(s.db.Exec(`UPDATE events SET end_ts = ?, score = ? WHERE id = ?`, endTS, score, id))
+// FinalizeEvent sets an event's end time, final score, and motion-cell map (the
+// active cell indices, JSON-encoded; nil/empty leaves the column empty).
+func (s *Store) FinalizeEvent(id string, endTS int64, score float64, cells []int) error {
+	cellsJSON := ""
+	if len(cells) > 0 {
+		if b, err := json.Marshal(cells); err == nil {
+			cellsJSON = string(b)
+		}
+	}
+	return affected(s.db.Exec(`UPDATE events SET end_ts = ?, score = ?, motion_cells = ? WHERE id = ?`,
+		endTS, score, cellsJSON, id))
 }
 
 // SetEventThumb records the thumbnail path for an event.
@@ -115,14 +129,15 @@ func (s *Store) CountEventsSince(ts int64) (int, error) {
 	return n, err
 }
 
-const eventSelect = `SELECT id, camera_id, type, start_ts, end_ts, thumb_path, snapshot_path, score, reviewed, saved, top_label, object_summary FROM events`
+const eventSelect = `SELECT id, camera_id, type, start_ts, end_ts, thumb_path, snapshot_path, score, reviewed, saved, top_label, object_summary, motion_cells FROM events`
 
 func scanEvent(row rowScanner) (*Event, error) {
 	var e Event
 	var end sql.NullInt64
 	var reviewed, saved int
+	var cells string
 	err := row.Scan(&e.ID, &e.CameraID, &e.Type, &e.StartTS, &end, &e.ThumbPath, &e.SnapshotPath,
-		&e.Score, &reviewed, &saved, &e.TopLabel, &e.ObjectSummary)
+		&e.Score, &reviewed, &saved, &e.TopLabel, &e.ObjectSummary, &cells)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -132,6 +147,9 @@ func scanEvent(row rowScanner) (*Event, error) {
 	e.EndTS = end.Int64
 	e.Reviewed = reviewed != 0
 	e.Saved = saved != 0
+	if cells != "" {
+		_ = json.Unmarshal([]byte(cells), &e.MotionCells)
+	}
 	return &e, nil
 }
 

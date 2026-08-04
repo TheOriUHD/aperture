@@ -38,6 +38,9 @@ func eventView(e *store.Event, now int64) map[string]any {
 	if len(e.Objects) > 0 {
 		v["objects"] = e.Objects
 	}
+	if len(e.MotionCells) > 0 {
+		v["motionCells"] = e.MotionCells
+	}
 	return v
 }
 

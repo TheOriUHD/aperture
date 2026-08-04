@@ -31,20 +31,28 @@ func (s *Server) handleGetHA(w http.ResponseWriter, r *http.Request) {
 		"broker":      set.Broker,
 		"username":    set.Username,
 		"prefix":      set.Prefix,
+		"sensorTopic": set.SensorTopic,
 		"hasPassword": set.Password != "",
 		"connected":   s.ha.Connected(),
 		"streams":     streams,
 	})
 }
 
+// handleHASensors returns the Home Assistant sensor readings Aperture has cached
+// from MQTT — the pool a camera can pick a temperature sensor from.
+func (s *Server) handleHASensors(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.ha.Sensors())
+}
+
 // handleSetHA updates the HA/MQTT configuration (admin) and reconnects.
 func (s *Server) handleSetHA(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Enabled  bool   `json:"enabled"`
-		Broker   string `json:"broker"`
-		Username string `json:"username"`
-		Password string `json:"password"` // empty = keep existing
-		Prefix   string `json:"prefix"`
+		Enabled     bool   `json:"enabled"`
+		Broker      string `json:"broker"`
+		Username    string `json:"username"`
+		Password    string `json:"password"` // empty = keep existing
+		Prefix      string `json:"prefix"`
+		SensorTopic string `json:"sensorTopic"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -54,10 +62,15 @@ func (s *Server) handleSetHA(w http.ResponseWriter, r *http.Request) {
 	if prefix == "" {
 		prefix = "homeassistant"
 	}
+	sensorTopic := strings.Trim(strings.TrimSpace(req.SensorTopic), "/")
+	if sensorTopic == "" {
+		sensorTopic = "homeassistant/sensor"
+	}
 	_ = s.st.SetSetting("ha_enabled", boolStr(req.Enabled))
 	_ = s.st.SetSetting("ha_broker", strings.TrimSpace(req.Broker))
 	_ = s.st.SetSetting("ha_user", req.Username)
 	_ = s.st.SetSetting("ha_prefix", prefix)
+	_ = s.st.SetSetting("ha_sensor_topic", sensorTopic)
 	if req.Password != "" {
 		_ = s.st.SetSetting("ha_pass", req.Password)
 	}

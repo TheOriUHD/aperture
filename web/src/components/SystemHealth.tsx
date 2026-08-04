@@ -16,8 +16,7 @@ function issueCount(s: SystemStatus): number {
   if (!s.go2rtc.reachable) n++;
   if (s.homeAssistant.enabled && !s.homeAssistant.connected) n++;
   if (s.weather.configured && s.weather.enabled && !s.weather.connected) n++;
-  const freePct = s.storage.totalBytes ? s.storage.freeBytes / s.storage.totalBytes : 1;
-  if (freePct < 0.05) n++;
+  // A full allocation is the normal rolling state of a hard reserve, not an issue.
   return n;
 }
 
@@ -64,7 +63,8 @@ export function SystemHealth() {
   }
 
   const issues = issueCount(s);
-  const freePct = s.storage.totalBytes ? s.storage.freeBytes / s.storage.totalBytes : 1;
+  const hasAlloc = s.storage.allocatedBytes > 0;
+  const usedPct = hasAlloc ? Math.min(100, Math.round((s.storage.usedBytes / s.storage.allocatedBytes) * 100)) : 0;
   const go2rtcLevel: Level = !s.go2rtc.reachable ? "down" : s.go2rtc.streams === 0 ? "warn" : "ok";
 
   return (
@@ -130,20 +130,28 @@ export function SystemHealth() {
         {s.cameras.length === 0 && <p className="text-xs text-fg-faint">No cameras configured.</p>}
       </div>
 
-      {/* Storage */}
+      {/* Storage — scoped to Aperture's allocation, never the whole disk */}
       <div className="mt-3 border-t border-line pt-3">
         <Row icon={HardDrive} label="Storage">
-          <Dot level={freePct < 0.05 ? "down" : freePct < 0.12 ? "warn" : "ok"} />
-          <span className="text-xs text-fg-muted">
-            {formatBytes(s.storage.freeBytes)} free of {formatBytes(s.storage.totalBytes)}
-          </span>
+          {hasAlloc ? (
+            <>
+              <Dot level="ok" />
+              <span className="text-xs text-fg-muted">
+                {formatBytes(s.storage.usedBytes)} of {formatBytes(s.storage.allocatedBytes)}
+              </span>
+            </>
+          ) : (
+            <>
+              <Dot level="warn" />
+              <span className="text-xs text-fg-muted">No allocation set</span>
+            </>
+          )}
         </Row>
-        <div className="mt-2 h-1.5 w-full rounded-full bg-ink-700 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-brand"
-            style={{ width: `${Math.min(100, Math.round((1 - freePct) * 100))}%` }}
-          />
-        </div>
+        {hasAlloc && (
+          <div className="mt-2 h-1.5 w-full rounded-full bg-ink-700 overflow-hidden">
+            <div className="h-full rounded-full bg-brand" style={{ width: `${usedPct}%` }} />
+          </div>
+        )}
       </div>
 
       {/* Integrations */}

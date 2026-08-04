@@ -83,10 +83,10 @@ type Engine struct {
 	dataDir string
 	log     *slog.Logger
 
-	mu      sync.Mutex
-	sig     string  // signature of the config the backend was built for
-	cfg     Config  // last-loaded config
-	backend Backend // nil when mode=off or backend unavailable
+	mu       sync.Mutex
+	sig      string             // signature of the config the backends were built for
+	cfg      Config             // last-loaded config
+	backends map[string]Backend // built lazily per method ("bridge"/"onnx"); nil entry = unavailable
 }
 
 // New builds the engine. It does not touch any model until detection is enabled.
@@ -118,36 +118,59 @@ func (e *Engine) SaveConfig(c Config) error {
 	return e.st.SetSetting(settingKey, string(raw))
 }
 
-// ensureBackend (re)builds the backend when the config changed. Caller holds mu.
-func (e *Engine) ensureBackend(c Config) Backend {
+// backendFor returns (building lazily) the backend for a given method, using the
+// global config c for connection details (bridge URL, model path). Returns nil
+// for "off"/unavailable. All backends are torn down and rebuilt when the global
+// config changes. Caller holds mu.
+func (e *Engine) backendFor(mode string, c Config) Backend {
 	sig := c.Mode + "|" + c.BridgeURL + "|" + c.BridgeAPI + "|" + c.ModelPath
-	if sig == e.sig && (e.backend != nil || c.Mode == ModeOff) {
-		return e.backend
-	}
-	if e.backend != nil {
-		e.backend.Close()
-		e.backend = nil
-	}
-	e.sig = sig
-	e.cfg = c
-	switch c.Mode {
-	case ModeBridge:
-		e.backend = newBridge(c)
-	case ModeONNX:
-		b, err := newONNX(c, e.dataDir, e.log)
-		if err != nil {
-			e.log.Warn("detect: onnx backend unavailable, detection disabled", "err", err)
-			e.backend = nil
-		} else {
-			e.backend = b
+	if sig != e.sig {
+		for _, b := range e.backends {
+			if b != nil {
+				b.Close()
+			}
 		}
-	default:
-		e.backend = nil
+		e.backends = map[string]Backend{}
+		e.sig = sig
+		e.cfg = c
 	}
-	if e.backend != nil {
-		e.log.Info("detect: backend ready", "backend", e.backend.Name())
+	if mode == ModeOff || mode == "" {
+		return nil
 	}
-	return e.backend
+	if b, ok := e.backends[mode]; ok {
+		return b // cached (possibly nil for a known-broken backend)
+	}
+	var b Backend
+	switch mode {
+	case ModeBridge:
+		b = newBridge(c)
+	case ModeONNX:
+		if bb, err := newONNX(c, e.dataDir, e.log); err != nil {
+			e.log.Warn("detect: onnx backend unavailable, detection disabled", "err", err)
+		} else {
+			b = bb
+		}
+	}
+	if e.backends == nil {
+		e.backends = map[string]Backend{}
+	}
+	e.backends[mode] = b // cache nil too, so we don't retry a broken backend each event
+	if b != nil {
+		e.log.Info("detect: backend ready", "backend", b.Name())
+	}
+	return b
+}
+
+// effectiveMode is the object-detection method for a camera: its per-camera
+// override when set, otherwise the global mode.
+func (e *Engine) effectiveMode(cameraID, globalMode string) string {
+	if cam, err := e.st.GetCamera(cameraID); err == nil && cam != nil && cam.DetectMethod != "" {
+		return cam.DetectMethod
+	}
+	if globalMode == "" {
+		return ModeOff
+	}
+	return globalMode
 }
 
 // Enrich runs detection on a freshly-opened event and persists any objects
@@ -155,11 +178,14 @@ func (e *Engine) ensureBackend(c Config) Backend {
 // it mutates ev in place so the notify stage can filter on the labels.
 func (e *Engine) Enrich(ev *store.Event) {
 	c := e.LoadConfig()
-	if c.Mode == ModeOff {
+	// A camera may override the global method (including forcing it on when the
+	// global default is off), so resolve the effective method per camera.
+	mode := e.effectiveMode(ev.CameraID, c.Mode)
+	if mode == ModeOff {
 		return
 	}
 	e.mu.Lock()
-	backend := e.ensureBackend(c)
+	backend := e.backendFor(mode, c)
 	e.mu.Unlock()
 	if backend == nil {
 		return
@@ -240,11 +266,13 @@ func (e *Engine) detectBurst(cameraID string, c Config, backend Backend) []Detec
 // reports while tuning.
 func (e *Engine) Test(cameraID string) (string, []Detection, error) {
 	c := e.LoadConfig()
+	// Test the method this camera would actually use (its override or the global).
+	mode := e.effectiveMode(cameraID, c.Mode)
 	e.mu.Lock()
-	backend := e.ensureBackend(c)
+	backend := e.backendFor(mode, c)
 	e.mu.Unlock()
 	if backend == nil {
-		return c.Mode, nil, errUnavailable
+		return mode, nil, errUnavailable
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()

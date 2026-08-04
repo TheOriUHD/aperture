@@ -17,6 +17,7 @@ export interface CameraInput {
   retentionDays?: number;
   enabled?: boolean;
   motionThreshold?: number;
+  locationId?: string;
   prerollMs?: number;
   postrollMs?: number;
   cooldownMs?: number;

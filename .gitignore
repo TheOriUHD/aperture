@@ -33,3 +33,4 @@
 # Embedded web bundle is a build artifact; keep only the placeholder so go:embed compiles.
 /internal/webassets/dist/*
 !/internal/webassets/dist/.gitkeep
+.backups/

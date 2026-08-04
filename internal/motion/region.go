@@ -6,6 +6,11 @@ const (
 	gridW    = 64 // detection grid width
 	gridH    = 36 // detection grid height
 	pixNoise = 24 // per-pixel luma delta counted as "changed"
+
+	// The coarse grid stored per event (and drawn on by Grid Search). 32×18 keeps
+	// it compact and matches the zone editor's aspect for a shared mental model.
+	SearchW = 32
+	SearchH = 18
 )
 
 // motionMask is the persisted ignore-region for a camera: a coarse editor grid
@@ -44,8 +49,10 @@ func parseIgnoreMask(zonesJSON string) []bool {
 }
 
 // diffFrac returns the fraction of unmasked cells whose luma changed beyond the
-// noise threshold between two grayscale frames.
-func diffFrac(prev, cur []byte, mask []bool, active int) float64 {
+// noise threshold between two grayscale frames. If acc (len SearchW*SearchH) is
+// non-nil, each changed cell also marks its coarse search cell true — the raw
+// material for the per-event motion map used by Grid Search.
+func diffFrac(prev, cur []byte, mask []bool, active int, acc []bool) float64 {
 	if active <= 0 {
 		return 0
 	}
@@ -64,6 +71,11 @@ func diffFrac(prev, cur []byte, mask []bool, active int) float64 {
 		}
 		if d > pixNoise {
 			changed++
+			if acc != nil {
+				cx := (i % gridW) * SearchW / gridW
+				cy := (i / gridW) * SearchH / gridH
+				acc[cy*SearchW+cx] = true
+			}
 		}
 	}
 	return float64(changed) / float64(active)

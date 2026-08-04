@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fmtTime, fmtTimeSec } from "../lib/format";
 import { shadeColor, type ShadeBand } from "../lib/shading";
 
@@ -43,6 +43,7 @@ export function VerticalTimeline({
   segments,
   events,
   live,
+  following = false,
   shadeBands,
   ribbon,
   gaps,
@@ -58,6 +59,10 @@ export function VerticalTimeline({
   segments: TR[];
   events: TLEvent[];
   live: boolean;
+  // True only while the player is genuinely live-following (auto-advancing at
+  // real time). Gates the smooth-glide transform so it never drifts when paused
+  // or scrubbed near the edge — distinct from `live` (playhead-at-edge display).
+  following?: boolean;
   shadeBands?: ShadeBand[];
   ribbon?: { ts: number; tempC?: number; precipMm?: number }[];
   gaps?: TR[];
@@ -76,6 +81,12 @@ export function VerticalTimeline({
   liveRef.current = live;
   const drag = useRef<{ anchorY: number; anchorSel: number; moved: boolean } | null>(null);
   const [height, setHeight] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Smooth-scroll baseline: the rendered position (`selectedMs`) and the moment
+  // it was committed. Between the 1 Hz live ticks we translate the strip by the
+  // real time elapsed since this baseline, so the live edge glides instead of
+  // stepping once a second — without re-rendering React every frame.
+  const liveBaseRef = useRef({ ms: selectedMs, at: 0 });
 
   useEffect(() => {
     const el = ref.current;
@@ -86,9 +97,15 @@ export function VerticalTimeline({
     return () => ro.disconnect();
   }, []);
 
+  // The playhead stays LOCKED at playheadFrac; the strip scrolls behind it.
   const topTime = selectedMs + playheadFrac * windowMs;
   const bottomTime = topTime - windowMs;
   const pct = (t: number) => ((topTime - t) / windowMs) * 100;
+  // But never draw tick labels / rail past "now" — no future zone above LIVE.
+  const topTick = Math.min(topTime, nowMs);
+  // Treat an over-scroll into the future zone as "live" for the pill, so pulling
+  // toward the edge reads LIVE rather than flashing a future timestamp.
+  const atLive = live || selectedMs >= nowMs;
   const visible = (r: TR) => r.end > bottomTime && r.start < topTime;
   const railX = 58;
 
@@ -100,25 +117,60 @@ export function VerticalTimeline({
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const raw = selRef.current - (e.deltaY / el.clientHeight) * windowMs * 0.6;
-      // Wheel never overscrolls past the live edge (that rubber-band is for
-      // touch-drag only); once live, ignore further forward scroll so it can't
-      // flip-flop between live and not-live on repeated ticks.
-      const next = Math.min(raw, nowRef.current);
-      if (liveRef.current && next >= nowRef.current) return;
-      selRef.current = next;
-      onScrubTo(next);
+      // Already live and still pushing forward? ignore (no flip-flop).
+      if (liveRef.current && raw >= nowRef.current) return;
+      // No wall above live: allow a generous over-scroll and let the parent's
+      // progressive rubber-band (applyScrub) compress it — the settle then
+      // springs it into live. The cap only stops the accumulator running away.
+      const capped = Math.min(raw, nowRef.current + windowMs * 0.6);
+      selRef.current = capped;
+      onScrubTo(capped);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, [windowMs, onScrubTo]);
 
+  // Reset the smooth-scroll baseline the instant the rendered position changes
+  // (before paint), so the transform below never double-counts a tick — the 1s
+  // content jump and the transform reset cancel exactly, leaving no seam.
+  useLayoutEffect(() => {
+    liveBaseRef.current = { ms: selectedMs, at: performance.now() };
+    // Zero the transform in the SAME commit as the content jump, so a stale
+    // per-frame offset can never paint on top of the new positions (no seam).
+    if (following && scrollRef.current) scrollRef.current.style.transform = "translateY(0px)";
+  }, [selectedMs, following]);
+
+  // While live, glide the strip between ticks with a GPU transform (no React
+  // re-render, so no jank). The offset is tiny — one tick's worth (~a few px) —
+  // it just fills the gap between the 1 Hz clock updates. Cleared when not live
+  // so scrubbed/recorded positions render exactly where computed.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (!following) {
+      el.style.transform = "";
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      const elapsed = Math.min(performance.now() - liveBaseRef.current.at, 2000);
+      el.style.transform = `translateY(${(elapsed / windowMs) * (el.clientHeight || height)}px)`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (scrollRef.current) scrollRef.current.style.transform = "";
+    };
+  }, [following, windowMs, height]);
+
   const interval = pickInterval(windowMs, height, 46);
   const majors: number[] = [];
-  for (let t = Math.ceil(bottomTime / interval) * interval; t <= topTime; t += interval) majors.push(t);
+  for (let t = Math.ceil(bottomTime / interval) * interval; t <= topTick; t += interval) majors.push(t);
   const minorStep = interval / 4;
   const minors: number[] = [];
   if ((minorStep / windowMs) * height >= 7) {
-    for (let t = Math.ceil(bottomTime / minorStep) * minorStep; t <= topTime; t += minorStep) {
+    for (let t = Math.ceil(bottomTime / minorStep) * minorStep; t <= topTick; t += minorStep) {
       if (Math.abs(t % interval) > 1) minors.push(t);
     }
   }
@@ -217,6 +269,9 @@ export function VerticalTimeline({
       onPointerCancel={onPointerCancel}
       className="relative h-full w-full select-none overflow-hidden cursor-grab active:cursor-grabbing touch-none"
     >
+      {/* Scrolling strip layer — GPU-translated for smooth live glide. Everything
+          time-positioned lives in here; the fixed playhead stays outside it. */}
+      <div ref={scrollRef} className="absolute inset-0">
       {/* Day/night shading from the astro layer, behind everything. */}
       {shadeBands?.map((b, i) => {
         const top = pct(b.end);
@@ -303,21 +358,34 @@ export function VerticalTimeline({
 
       {ribbonEl}
 
+      {/* Live-edge separator: divides the recording zone (below) from the empty
+          future / live zone (above). Only when scrubbed away — at rest on live
+          the playhead's own LIVE bar IS this divider, so we don't double it up. */}
       {!live && nowMs <= topTime && nowMs >= bottomTime && (
-        <div className="absolute left-12 right-0 border-t border-dashed border-online/50" style={{ top: `${pct(nowMs)}%` }} />
+        <div
+          className="absolute z-[5] h-px bg-online/70"
+          style={{ left: railX - 5, right: 0, top: `${pct(nowMs)}%` }}
+        />
       )}
+      </div>
+      {/* end scrolling strip layer */}
 
-      {/* fixed playhead + pill */}
-      <div className="absolute left-0 right-0 z-10 flex items-center" style={{ top: `${playheadFrac * 100}%` }}>
+      {/* fixed playhead + pill (locked at playheadFrac; strip scrolls behind).
+          Centered on its time line so the bar sits exactly on now/selected —
+          recordings butt right up to it instead of spilling above. */}
+      <div
+        className="absolute left-0 right-0 z-10 flex items-center -translate-y-1/2"
+        style={{ top: `${playheadFrac * 100}%` }}
+      >
         <div
           className={`rounded-md px-2 py-1 text-[12px] font-medium tabular-nums shadow ${
-            live ? "bg-online text-[#06251a]" : "bg-brand text-white"
+            atLive ? "bg-online text-[#06251a]" : "bg-brand text-white"
           }`}
           style={{ minWidth: 66, textAlign: "center" }}
         >
-          {live ? "LIVE" : fmtHMS(selectedMs)}
+          {atLive ? "LIVE" : fmtHMS(selectedMs)}
         </div>
-        <div className={`flex-1 h-0.5 ${live ? "bg-online" : "bg-brand"}`} />
+        <div className={`flex-1 h-0.5 ${atLive ? "bg-online" : "bg-brand"}`} />
       </div>
     </div>
   );

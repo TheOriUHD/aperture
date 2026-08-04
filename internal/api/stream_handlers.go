@@ -25,14 +25,22 @@ func (s *Server) handleStreamToken(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	cam, err := s.st.GetCamera(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	token, err := s.am.StreamToken(id, streamTokenTTL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	// hasSub tells the client whether a low-quality stream exists, so it can offer
+	// the Low quality option. The client appends &q=sub to wsUrl to request it.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"token": token,
-		"wsUrl": "/api/cameras/" + id + "/ws?token=" + token,
+		"token":  token,
+		"wsUrl":  "/api/cameras/" + id + "/ws?token=" + token,
+		"hasSub": cam.RTSPSubURL != "",
 	})
 }
 
@@ -67,5 +75,13 @@ func (s *Server) handleStreamWS(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid stream token")
 		return
 	}
-	s.sm.ProxyWS(w, r, stream.StreamName(id))
+	// Quality selection: q=sub proxies the low-quality stream when the camera has
+	// one; otherwise fall back to the main stream.
+	name := stream.StreamName(id)
+	if r.URL.Query().Get("q") == "sub" {
+		if cam, err := s.st.GetCamera(id); err == nil && cam.RTSPSubURL != "" {
+			name = stream.SubStreamName(id)
+		}
+	}
+	s.sm.ProxyWS(w, r, name)
 }

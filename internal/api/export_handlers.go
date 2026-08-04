@@ -29,6 +29,7 @@ func (s *Server) handleCreateExport(w http.ResponseWriter, r *http.Request) {
 		To        int64    `json:"to"`
 		BurnIn    bool     `json:"burnIn"`
 		Audio     bool     `json:"audio"`
+		Speed     int      `json:"speed"` // 0/1 realtime, N = timelapse N×
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -66,6 +67,19 @@ func (s *Server) handleCreateExport(w http.ResponseWriter, r *http.Request) {
 		mode = "zip"
 	}
 
+	// Timelapse applies to the per-camera clip path (single/zip). Clamp to a sane
+	// range; composite has its own transcode and ignores it.
+	speed := req.Speed
+	if speed < 1 {
+		speed = 1
+	}
+	if speed > 240 {
+		speed = 240
+	}
+	if mode == "composite" {
+		speed = 1
+	}
+
 	firstCam, err := s.st.GetCamera(cams[0])
 	if err != nil {
 		writeStoreError(w, err)
@@ -82,6 +96,7 @@ func (s *Server) handleCreateExport(w http.ResponseWriter, r *http.Request) {
 		ToTS:       req.To,
 		BurnIn:     req.BurnIn,
 		Audio:      req.Audio,
+		Speed:      speed,
 		Status:     "queued",
 		CreatedAt:  time.Now().Unix(),
 	}

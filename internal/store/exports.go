@@ -18,6 +18,7 @@ type ExportJob struct {
 	ToTS       int64    `json:"toTs"`
 	BurnIn     bool     `json:"burnIn"`
 	Audio      bool     `json:"audio"`
+	Speed      int      `json:"speed"` // 0/1 = realtime; N = timelapse N× (forces transcode)
 	Status     string   `json:"status"` // queued | running | done | error
 	Progress   float64  `json:"progress"`
 	OutputPath string   `json:"-"`
@@ -38,7 +39,7 @@ func (j *ExportJob) Cameras() []string {
 	return nil
 }
 
-const exportSelect = `SELECT id, user_id, camera_id, camera_name, cameras, mode, from_ts, to_ts, burn_in, audio,
+const exportSelect = `SELECT id, user_id, camera_id, camera_name, cameras, mode, from_ts, to_ts, burn_in, audio, speed,
     status, progress, output_path, size_bytes, error, created_at, finished_at FROM export_jobs`
 
 func scanExport(row rowScanner) (*ExportJob, error) {
@@ -46,7 +47,7 @@ func scanExport(row rowScanner) (*ExportJob, error) {
 	var burn, audio int
 	var cameras string
 	if err := row.Scan(&j.ID, &j.UserID, &j.CameraID, &j.CameraName, &cameras, &j.Mode, &j.FromTS, &j.ToTS,
-		&burn, &audio, &j.Status, &j.Progress, &j.OutputPath, &j.SizeBytes, &j.Error,
+		&burn, &audio, &j.Speed, &j.Status, &j.Progress, &j.OutputPath, &j.SizeBytes, &j.Error,
 		&j.CreatedAt, &j.FinishedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
@@ -68,10 +69,10 @@ func (s *Store) CreateExport(j *ExportJob) error {
 		j.Mode = "single"
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO export_jobs (id, user_id, camera_id, camera_name, cameras, mode, from_ts, to_ts, burn_in, audio, status, progress, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO export_jobs (id, user_id, camera_id, camera_name, cameras, mode, from_ts, to_ts, burn_in, audio, speed, status, progress, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		j.ID, j.UserID, j.CameraID, j.CameraName, strings.Join(j.CameraIDs, ","), j.Mode, j.FromTS, j.ToTS,
-		boolInt(j.BurnIn), boolInt(j.Audio), j.Status, j.Progress, j.CreatedAt)
+		boolInt(j.BurnIn), boolInt(j.Audio), j.Speed, j.Status, j.Progress, j.CreatedAt)
 	return err
 }
 

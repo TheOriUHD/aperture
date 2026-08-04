@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { VideoOff } from "lucide-react";
 import { api } from "../lib/api";
 import { LiveStream, type LiveState } from "../lib/livestream";
-import { cacheStream, getCachedStream } from "../lib/streamCache";
+import { cacheStream, getCachedStream, clearCachedStream } from "../lib/streamCache";
+import { onLiveResume } from "../lib/liveResume";
 import type { Camera, StreamToken } from "../lib/types";
 
 type FrameVideo = HTMLVideoElement & {
@@ -17,20 +18,41 @@ export function LiveVideo({
   muted = true,
   fit = "cover",
   videoRef: externalRef,
+  fsStyle,
+  quality = "auto",
+  onQuality,
+  qualityControl = false,
 }: {
   camera: Camera;
   muted?: boolean;
   fit?: "cover" | "contain";
   videoRef?: React.RefObject<HTMLVideoElement>;
+  // When set, applied directly to the <video> element for mobile pseudo-
+  // fullscreen (rotate + fill). On the element itself so iOS honours it.
+  fsStyle?: React.CSSProperties;
+  // Quality: "low" uses the camera's sub stream (if any); "auto"/"high" use main.
+  quality?: "auto" | "low" | "high";
+  onQuality?: (q: "auto" | "low" | "high") => void;
+  qualityControl?: boolean; // render the Low/Auto/High selector overlay
 }) {
   const innerRef = useRef<HTMLVideoElement>(null);
   const videoRef = externalRef ?? innerRef;
   const [state, setState] = useState<LiveState>("connecting");
   const [revealed, setRevealed] = useState(false);
   const [snapOk, setSnapOk] = useState(true);
+  const [hasSub, setHasSub] = useState(false);
   // `instant` = we're showing an already-connected stream for this camera while
   // a fresh connection warms up, so no connecting-dots flash on open.
   const [instant, setInstant] = useState(false);
+  // Bumped to force a fresh connection (e.g. a borrowed cached stream froze after
+  // the app resumed from the background). A non-zero value bypasses the cache.
+  const [reconnectNonce, setReconnectNonce] = useState(0);
+  const instantRef = useRef(false);
+  useEffect(() => {
+    instantRef.current = instant;
+  }, [instant]);
+
+  const q = quality === "low" ? "sub" : "main";
 
   // Live stream lifecycle.
   useEffect(() => {
@@ -38,11 +60,12 @@ export function LiveVideo({
       setState("error");
       return;
     }
-    // Reuse an already-connected WebRTC stream for this camera (e.g. the tile
-    // behind this pop-out). A MediaStream feeds many <video>s, so we attach it
-    // directly for an instant image and DON'T open a second connection or tear
-    // the shared stream down on unmount.
-    const cached = getCachedStream(camera.id);
+    // Reuse an already-connected WebRTC stream for this camera+quality (e.g. the
+    // tile behind this pop-out, or the warm keeper). A MediaStream feeds many
+    // <video>s, so we attach it directly for an instant image and DON'T open a
+    // second connection or tear the shared stream down on unmount. Skipped on a
+    // forced reconnect (nonce > 0) so we always connect fresh after a resume.
+    const cached = reconnectNonce === 0 ? getCachedStream(camera.id, q) : null;
     if (cached && videoRef.current) {
       videoRef.current.srcObject = cached;
       void videoRef.current.play().catch(() => undefined);
@@ -58,8 +81,9 @@ export function LiveVideo({
       try {
         const tok = await api.get<StreamToken>(`/api/cameras/${camera.id}/stream-token`);
         if (cancelled || !videoRef.current) return;
+        setHasSub(!!tok.hasSub);
         const proto = location.protocol === "https:" ? "wss" : "ws";
-        const url = `${proto}://${location.host}${tok.wsUrl}`;
+        const url = `${proto}://${location.host}${tok.wsUrl}${q === "sub" ? "&q=sub" : ""}`;
         stream = new LiveStream(videoRef.current, url, (s) => !cancelled && setState(s));
         stream.start();
       } catch {
@@ -70,6 +94,30 @@ export function LiveVideo({
       cancelled = true;
       stream?.destroy();
     };
+  }, [camera.id, camera.enabled, videoRef, q, reconnectNonce]);
+
+  // On resume from background, a self-owned LiveStream heals itself. But the
+  // "instant" path borrows a shared cached MediaStream with no owner to heal it —
+  // and a suspended track can read "live" yet deliver no frames (black). So when
+  // we're on that borrowed stream and it isn't advancing, drop the cache and
+  // connect fresh.
+  useEffect(() => {
+    return onLiveResume(() => {
+      if (!instantRef.current || !camera.enabled) return;
+      const v = videoRef.current;
+      if (!v) return;
+      const t = v.currentTime;
+      void v.play().catch(() => undefined);
+      window.setTimeout(() => {
+        if (!videoRef.current || !instantRef.current) return;
+        if (v.currentTime === t) {
+          clearCachedStream(camera.id);
+          setRevealed(false);
+          setInstant(false);
+          setReconnectNonce((n) => n + 1);
+        }
+      }, 700);
+    });
   }, [camera.id, camera.enabled, videoRef]);
 
   // Reveal only once a real frame is presented (no black flash).
@@ -100,11 +148,11 @@ export function LiveVideo({
   useEffect(() => {
     if (state === "playing") {
       const so = videoRef.current?.srcObject;
-      if (so instanceof MediaStream) cacheStream(camera.id, so);
+      if (so instanceof MediaStream) cacheStream(camera.id, so, q);
     } else if (state === "error") {
       setInstant(false);
     }
-  }, [state, camera.id, videoRef]);
+  }, [state, camera.id, videoRef, q]);
 
   const loaded = (revealed && state === "playing") || instant;
 
@@ -115,8 +163,29 @@ export function LiveVideo({
         muted={muted}
         autoPlay
         playsInline
-        className={`h-full w-full bg-black ${fit === "cover" ? "object-cover" : "object-contain"}`}
+        className={
+          fsStyle ? "bg-black" : `h-full w-full bg-black ${fit === "cover" ? "object-cover" : "object-contain"}`
+        }
+        style={fsStyle}
       />
+
+      {qualityControl && (
+        <div className="absolute left-2 top-2 z-10 flex overflow-hidden rounded-md bg-black/55 text-[11px] font-medium backdrop-blur-sm">
+          {(["low", "auto", "high"] as const).map((opt) => (
+            <button
+              key={opt}
+              disabled={opt === "low" && !hasSub}
+              onClick={() => onQuality?.(opt)}
+              className={`px-2 py-1 transition-colors ${
+                quality === opt ? "bg-brand text-white" : "text-white/80 hover:bg-white/10"
+              } ${opt === "low" && !hasSub ? "cursor-not-allowed opacity-40" : ""}`}
+              title={opt === "low" && !hasSub ? "No sub stream configured on this camera" : `${opt} quality`}
+            >
+              {opt === "low" ? "SD" : opt === "high" ? "HD" : "Auto"}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div
         className={`absolute inset-0 transition-opacity duration-300 ${

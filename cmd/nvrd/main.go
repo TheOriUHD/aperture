@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/TheOriUHD/aperture/internal/api"
+	"github.com/TheOriUHD/aperture/internal/audio"
 	"github.com/TheOriUHD/aperture/internal/audit"
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/automate"
@@ -31,6 +32,8 @@ import (
 	"github.com/TheOriUHD/aperture/internal/onvif"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/retention"
+	"github.com/TheOriUHD/aperture/internal/secret"
+	"github.com/TheOriUHD/aperture/internal/storage"
 	"github.com/TheOriUHD/aperture/internal/store"
 	"github.com/TheOriUHD/aperture/internal/stream"
 	"github.com/TheOriUHD/aperture/internal/version"
@@ -56,6 +59,37 @@ func main() {
 		os.Exit(1)
 	}
 	defer st.Close()
+
+	// Storage-credential cipher + backend registry for network storage locations.
+	// The cipher may be nil only if no key could be derived (never, in practice) —
+	// handlers degrade gracefully (network credentials disabled) when it is.
+	storageCipher, cerr := secret.New(cfg.EncryptionKey)
+	if cerr != nil {
+		log.Warn("storage: encryption key unavailable; network storage credentials disabled", "err", cerr)
+	}
+	storageRegistry := storage.NewRegistry(func(locationID string) (*storage.Spec, error) {
+		if locationID == store.DefaultLocationID {
+			root := cfg.RecordingsDir
+			if o := st.RecordingsPathOverride(); o != "" {
+				root = o
+			}
+			return &storage.Spec{Type: storage.TypeLocal, Config: map[string]any{"path": root}}, nil
+		}
+		loc, err := st.GetStorageLocation(locationID)
+		if err != nil {
+			return nil, err
+		}
+		sec := ""
+		if storageCipher != nil && loc.HasCredential {
+			if enc, e := st.LocationSecret(locationID); e == nil {
+				if dec, e2 := storageCipher.Decrypt(enc); e2 == nil {
+					sec = dec
+				}
+			}
+		}
+		return &storage.Spec{Type: loc.Type, Config: loc.Config, Secret: sec}, nil
+	})
+	defer storageRegistry.Close()
 
 	secureCookies := strings.HasPrefix(cfg.PublicURL, "https://")
 	am := auth.NewManager(cfg.JWTSecret, cfg.StreamSecret, cfg.CLIToken, secureCookies)
@@ -106,14 +140,18 @@ func main() {
 	}()
 
 	// Recorder (supervised ffmpeg + segment indexing) and retention janitor.
-	rec := record.New(cfg, st, sm, log)
+	rec := record.New(cfg, st, sm, storageRegistry, log)
 	go rec.Run(bgCtx)
-	janitor := retention.New(cfg, st, log)
+	janitor := retention.New(cfg, st, storageRegistry, log)
 	go janitor.Run(bgCtx)
 
 	// Motion detection (scene-change ticks -> events with thumbnails).
 	det := motion.New(cfg, st, sm, log)
 	go det.Run(bgCtx)
+
+	// Audio detection (loudness ticks -> "audio" events). Opt-in per camera.
+	audioDet := audio.New(cfg, st, sm, log)
+	go audioDet.Run(bgCtx)
 
 	// Home Assistant MQTT publisher (outbound auto-discovery + state).
 	siteName := func() string {
@@ -175,7 +213,7 @@ func main() {
 
 	oidcAuth := oidc.New(cfg, st)
 	auditLog := audit.New(st)
-	exporter := export.New(st, filepath.Join(cfg.DataDir, "exports"), log)
+	exporter := export.New(st, storageRegistry, filepath.Join(cfg.DataDir, "exports"), log)
 	exporter.Start(bgCtx)
 	notifyEng := notify.New(cfg, st, log)
 	// Outbound event webhooks (open-platform integration firehose).
@@ -231,6 +269,13 @@ func main() {
 			hkBridge.MotionPulse(ev.CameraID)
 		}
 	})
+	// Audio events flow through the same notify/automation fan-out (minus object
+	// detection, which is video-only).
+	audioDet.SetOnEvent(func(ev *store.Event) {
+		notifyEng.OnEvent(ev)
+		webhookDisp.OnEvent(ev)
+		automateEng.OnEvent(ev)
+	})
 
 	// Environmental context: poll weather into a time-series for "past weather
 	// at the playhead". No-ops until a site location is configured.
@@ -247,6 +292,8 @@ func main() {
 	go onvifSrv.Run(bgCtx)
 
 	srv := api.NewServer(cfg, st, am, sm, rec, det, detectEng, webhookDisp, automateEng, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
+	srv.SetStorage(storageRegistry, storageCipher)
+	srv.SetReconcile(janitor.EnforceNow)
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,

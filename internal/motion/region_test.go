@@ -19,7 +19,7 @@ func TestRegionDiffAndMask(t *testing.T) {
 	}
 
 	noMask := make([]bool, n)
-	if frac := diffFrac(prev, cur, noMask, n); frac <= 0 {
+	if frac := diffFrac(prev, cur, noMask, n, nil); frac <= 0 {
 		t.Fatalf("expected motion with no mask, got %f", frac)
 	}
 
@@ -33,7 +33,7 @@ func TestRegionDiffAndMask(t *testing.T) {
 	b, _ := json.Marshal(map[string]any{"cols": 32, "rows": 18, "ignore": ign})
 	mask := parseIgnoreMask(string(b))
 	active := n - countTrue(mask)
-	if frac := diffFrac(prev, cur, mask, active); frac != 0 {
+	if frac := diffFrac(prev, cur, mask, active, nil); frac != 0 {
 		t.Fatalf("masked region should yield no motion, got %f", frac)
 	}
 
@@ -41,7 +41,7 @@ func TestRegionDiffAndMask(t *testing.T) {
 	for y := 0; y < gridH; y++ {
 		cur[y*gridW+gridW-1] = 220
 	}
-	if frac := diffFrac(prev, cur, mask, active); frac <= 0 {
+	if frac := diffFrac(prev, cur, mask, active, nil); frac <= 0 {
 		t.Fatalf("unmasked change should still register, got %f", frac)
 	}
 }

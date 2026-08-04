@@ -4,7 +4,13 @@
 //   client -> {type:"webrtc/offer"|"webrtc/candidate"|"mse", value}
 //   server -> {type:"webrtc/answer"|"webrtc/candidate"|"mse", value}
 
+import { onLiveResume } from "./liveResume";
+
 export type LiveState = "connecting" | "playing" | "error";
+
+// How long the picture may be frozen (currentTime not advancing) before we treat
+// the connection as dead and reconnect. Covers both WebRTC and MSE.
+const STALL_MS = 6000;
 
 const MSE_CODECS = [
   "avc1.640029", // H.264 High
@@ -29,6 +35,15 @@ export class LiveStream {
   private destroyed = false;
   private timer?: number;
 
+  // Self-heal state.
+  private playing = false; // has presented at least one frame this session
+  private retries = 0;
+  private watchdog?: number;
+  private reconnectTimer?: number;
+  private lastTime = -1;
+  private lastAdvanceAt = 0;
+  private unresume?: () => void;
+
   constructor(
     private video: HTMLVideoElement,
     private url: string,
@@ -36,34 +51,108 @@ export class LiveStream {
   ) {}
 
   start() {
+    // Reconnect on foreground/resume (mobile freezes connections in the
+    // background) and watch for a frozen picture the whole time we're alive.
+    this.unresume = onLiveResume(() => this.resumeCheck());
+    this.startWatchdog();
     this.onState("connecting");
     this.connectWebRTC();
   }
 
   destroy() {
     this.destroyed = true;
+    this.unresume?.();
+    if (this.watchdog) window.clearInterval(this.watchdog);
+    if (this.reconnectTimer) window.clearTimeout(this.reconnectTimer);
     this.teardown();
   }
 
+  // teardown closes the transport but leaves the watchdog/resume hook in place so
+  // a reconnect can reuse them; it also keeps the last srcObject so the frozen
+  // frame stays covered by the placeholder rather than flashing black.
   private teardown() {
     this.clearTimer();
-    try {
-      this.ws?.close();
-    } catch {
-      /* ignore */
-    }
-    try {
-      this.pc?.close();
-    } catch {
-      /* ignore */
-    }
+    // Detach first so our own close() (which fires "closed"/onclose) is ignored by
+    // the stale-guard in the handlers below and can't trigger a spurious reconnect.
+    const ws = this.ws;
+    const pc = this.pc;
     this.ws = undefined;
     this.pc = undefined;
+    try {
+      ws?.close();
+    } catch {
+      /* ignore */
+    }
+    try {
+      pc?.close();
+    } catch {
+      /* ignore */
+    }
   }
 
   private clearTimer() {
     if (this.timer) window.clearTimeout(this.timer);
     this.timer = undefined;
+  }
+
+  private markPlaying() {
+    this.playing = true;
+    this.retries = 0;
+    this.lastAdvanceAt = Date.now();
+    this.clearTimer();
+    this.onState("playing");
+  }
+
+  // Full restart (WebRTC first again) with capped backoff — used when a live
+  // connection drops or freezes, distinct from fail() which is the first-connect
+  // WebRTC→MSE fallback.
+  private reconnect() {
+    if (this.destroyed || this.reconnectTimer) return;
+    this.teardown();
+    this.playing = false;
+    this.mode = "webrtc";
+    this.lastAdvanceAt = Date.now();
+    this.onState("connecting");
+    const delay = Math.min(400 * 2 ** this.retries, 4000);
+    this.retries = Math.min(this.retries + 1, 6);
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (!this.destroyed) this.connectWebRTC();
+    }, delay);
+  }
+
+  // Polls whether the picture is actually advancing; a frozen feed (dead peer,
+  // resumed-from-background socket) reconnects itself.
+  private startWatchdog() {
+    if (this.watchdog) return;
+    this.lastTime = -1;
+    this.lastAdvanceAt = Date.now();
+    this.watchdog = window.setInterval(() => {
+      if (this.destroyed || !this.playing) return;
+      const t = this.video.currentTime;
+      if (t !== this.lastTime) {
+        this.lastTime = t;
+        this.lastAdvanceAt = Date.now();
+      } else if (!this.video.paused && Date.now() - this.lastAdvanceAt > STALL_MS) {
+        // Frozen while trying to play → dead connection. (A deliberately paused
+        // video is left alone — reconnecting wouldn't un-pause it.)
+        this.reconnect();
+      }
+    }, 2500);
+  }
+
+  // Called the instant the app returns to the foreground: nudge autoplay, and if
+  // the picture doesn't advance shortly after, reconnect immediately rather than
+  // waiting for the watchdog.
+  private resumeCheck() {
+    if (this.destroyed) return;
+    void this.video.play().catch(() => undefined);
+    if (!this.playing) return;
+    const t = this.video.currentTime;
+    window.setTimeout(() => {
+      if (this.destroyed || !this.playing) return;
+      if (this.video.currentTime === t && !this.video.paused) this.reconnect();
+    }, 700);
   }
 
   private fail() {
@@ -86,16 +175,23 @@ export class LiveStream {
     pc.addTransceiver("audio", { direction: "recvonly" });
 
     pc.ontrack = (ev) => {
+      if (pc !== this.pc) return;
       stream.addTrack(ev.track);
       this.video.srcObject = stream;
       void this.video.play().catch(() => undefined);
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "connected") {
-        this.clearTimer();
-        this.onState("playing");
-      } else if (pc.connectionState === "failed") {
-        this.fail();
+      if (pc !== this.pc) return; // event from a superseded attempt
+      const st = pc.connectionState;
+      if (st === "connected") {
+        this.markPlaying();
+      } else if (st === "failed") {
+        // Before first frame: fall back to MSE. After: the connection died — full
+        // reconnect. ("disconnected" is left to the watchdog, as ICE often recovers.)
+        if (this.playing) this.reconnect();
+        else this.fail();
+      } else if (st === "closed" && this.playing) {
+        this.reconnect();
       }
     };
 
@@ -109,6 +205,7 @@ export class LiveStream {
       }
     };
     ws.onopen = async () => {
+      if (ws !== this.ws) return;
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -118,6 +215,7 @@ export class LiveStream {
       }
     };
     ws.onmessage = (ev) => {
+      if (ws !== this.ws) return;
       if (typeof ev.data !== "string") return;
       let msg: { type: string; value: string };
       try {
@@ -133,10 +231,13 @@ export class LiveStream {
         this.fail();
       }
     };
-    ws.onerror = () => this.fail();
+    ws.onerror = () => {
+      if (ws !== this.ws) return;
+      this.fail();
+    };
 
     this.timer = window.setTimeout(() => {
-      if (pc.connectionState !== "connected") this.fail();
+      if (pc === this.pc && pc.connectionState !== "connected") this.fail();
     }, 5000);
   }
 
@@ -169,6 +270,7 @@ export class LiveStream {
     // Set up the MediaSource only once the socket is open, so the request we
     // send from `sourceopen` can never race an unopened socket.
     ws.onopen = () => {
+      if (ws !== this.ws) return;
       const ms = new MS();
       ms.addEventListener(
         "sourceopen",
@@ -232,17 +334,18 @@ export class LiveStream {
         flush();
         if (!started) {
           started = true;
-          this.clearTimer();
-          this.onState("playing");
+          this.markPlaying();
           void this.video.play().catch(() => undefined);
         }
       };
     };
 
     ws.onerror = () => {
+      if (ws !== this.ws) return;
       if (!started) this.onState("error");
     };
     ws.onclose = () => {
+      if (ws !== this.ws) return;
       if (!this.destroyed && !started) this.onState("error");
     };
     this.timer = window.setTimeout(() => {

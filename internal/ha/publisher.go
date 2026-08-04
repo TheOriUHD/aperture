@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	statusTopic    = "aperture/status"
-	defaultPrefix  = "homeassistant"
-	clientID       = "aperture-nvr"
-	manufacturer   = "Aperture"
-	stateTopicBase = "aperture"
+	statusTopic        = "aperture/status"
+	defaultPrefix      = "homeassistant"
+	defaultSensorTopic = "homeassistant/sensor"
+	clientID           = "aperture-nvr"
+	manufacturer       = "Aperture"
+	stateTopicBase     = "aperture"
 )
 
 type snapshotter interface {
@@ -32,11 +33,12 @@ type snapshotter interface {
 
 // Settings is the resolved HA/MQTT configuration.
 type Settings struct {
-	Enabled  bool
-	Broker   string
-	Username string
-	Password string
-	Prefix   string
+	Enabled     bool
+	Broker      string
+	Username    string
+	Password    string
+	Prefix      string
+	SensorTopic string // HA sensor state base (MQTT Statestream), for inbound readings
 }
 
 // Publisher pushes Aperture state to an MQTT broker for Home Assistant.
@@ -55,6 +57,9 @@ type Publisher struct {
 	stateMu   sync.Mutex      // guards motion/recording — touched by the ticker AND the paho OnConnect goroutine
 	motion    map[string]bool // last published motion state per camera
 	recording map[string]bool
+
+	sensorMu sync.Mutex         // guards the inbound HA sensor cache
+	sensors  map[string]*Sensor // entity id -> latest reading
 }
 
 // SetReconcile wires the callback that applies a record-mode change immediately
@@ -66,6 +71,7 @@ func New(cfg *config.Config, st *store.Store, sm snapshotter, siteName func() st
 	return &Publisher{
 		cfg: cfg, st: st, sm: sm, siteName: siteName, log: log,
 		motion: map[string]bool{}, recording: map[string]bool{},
+		sensors: map[string]*Sensor{},
 	}
 }
 
@@ -78,11 +84,12 @@ func (p *Publisher) LoadSettings() Settings {
 		return def
 	}
 	return Settings{
-		Enabled:  get("ha_enabled", "false") == "true",
-		Broker:   get("ha_broker", p.cfg.MQTTURL),
-		Username: get("ha_user", ""),
-		Password: get("ha_pass", ""),
-		Prefix:   get("ha_prefix", defaultPrefix),
+		Enabled:     get("ha_enabled", "false") == "true",
+		Broker:      get("ha_broker", p.cfg.MQTTURL),
+		Username:    get("ha_user", ""),
+		Password:    get("ha_pass", ""),
+		Prefix:      get("ha_prefix", defaultPrefix),
+		SensorTopic: get("ha_sensor_topic", defaultSensorTopic),
 	}
 }
 
@@ -179,6 +186,7 @@ func (p *Publisher) connect(s Settings) {
 			p.publishSnapshots()
 			p.publishControlState()
 			p.subscribeCommands(c)
+			p.subscribeSensors(c)
 		}).
 		SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 			p.log.Warn("home assistant: connection lost", "err", err)

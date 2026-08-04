@@ -9,7 +9,8 @@ import (
 type Segment struct {
 	ID         string `json:"id"`
 	CameraID   string `json:"cameraId"`
-	Path       string `json:"-"`
+	LocationID string `json:"-"` // storage location this file lives on ("" = default root)
+	Path       string `json:"-"` // backend-relative for added locations; absolute for the default
 	StartTS    int64  `json:"startTs"` // unix ms
 	EndTS      int64  `json:"endTs"`   // unix ms
 	DurationMS int64  `json:"durationMs"`
@@ -24,9 +25,9 @@ func (s *Store) InsertSegment(seg *Segment) error {
 		seg.ID = NewID()
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO segments (id, camera_id, path, start_ts, end_ts, duration_ms, size_bytes, has_motion, locked)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		seg.ID, seg.CameraID, seg.Path, seg.StartTS, seg.EndTS, seg.DurationMS, seg.SizeBytes,
+		`INSERT INTO segments (id, camera_id, location_id, path, start_ts, end_ts, duration_ms, size_bytes, has_motion, locked)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		seg.ID, seg.CameraID, seg.LocationID, seg.Path, seg.StartTS, seg.EndTS, seg.DurationMS, seg.SizeBytes,
 		boolInt(seg.HasMotion), boolInt(seg.Locked))
 	return err
 }
@@ -133,8 +134,8 @@ func (s *Store) InsertSegmentsBatch(segs []*Segment) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 	stmt, err := tx.Prepare(`INSERT INTO segments
-		(id, camera_id, path, start_ts, end_ts, duration_ms, size_bytes, has_motion, locked)
-		VALUES (?,?,?,?,?,?,?,?,?)`)
+		(id, camera_id, location_id, path, start_ts, end_ts, duration_ms, size_bytes, has_motion, locked)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -143,7 +144,7 @@ func (s *Store) InsertSegmentsBatch(segs []*Segment) error {
 		if seg.ID == "" {
 			seg.ID = NewID()
 		}
-		if _, err := stmt.Exec(seg.ID, seg.CameraID, seg.Path, seg.StartTS, seg.EndTS,
+		if _, err := stmt.Exec(seg.ID, seg.CameraID, seg.LocationID, seg.Path, seg.StartTS, seg.EndTS,
 			seg.DurationMS, seg.SizeBytes, boolInt(seg.HasMotion), boolInt(seg.Locked)); err != nil {
 			return err
 		}
@@ -200,15 +201,29 @@ func (s *Store) SegmentsInRange(cameraID string, fromMs, toMs int64) ([]*Segment
 	return collectSegments(rows)
 }
 
-// OldestSegmentsGlobal returns up to limit unlocked segments across all cameras,
-// oldest first. Used by the global free-space safety net.
-func (s *Store) OldestSegmentsGlobal(limit int) ([]*Segment, error) {
+// OldestSegmentsInLocation returns up to limit unlocked segments physically on a
+// storage location, oldest first — used by per-location soft-cap trimming.
+func (s *Store) OldestSegmentsInLocation(locationID string, limit int) ([]*Segment, error) {
 	rows, err := s.db.Query(segmentSelect+
-		` WHERE locked = 0 ORDER BY start_ts ASC LIMIT ?`, limit)
+		` WHERE location_id = ? AND locked = 0 ORDER BY start_ts ASC LIMIT ?`, locationID, limit)
 	if err != nil {
 		return nil, err
 	}
 	return collectSegments(rows)
+}
+
+// TotalBytesInLocation sums footage bytes stored on a location.
+func (s *Store) TotalBytesInLocation(locationID string) (int64, error) {
+	var v sql.NullInt64
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(size_bytes),0) FROM segments WHERE location_id = ?`, locationID).Scan(&v)
+	return v.Int64, err
+}
+
+// CountSegmentsInLocation counts segments stored on a location (delete guard).
+func (s *Store) CountSegmentsInLocation(locationID string) (int64, error) {
+	var n int64
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM segments WHERE location_id = ?`, locationID).Scan(&n)
+	return n, err
 }
 
 // NonEventSegments returns a camera's unlocked segments that ended before
@@ -228,6 +243,33 @@ func (s *Store) NonEventSegments(cameraID string, beforeMs int64) ([]*Segment, e
 		return nil, err
 	}
 	return collectSegments(rows)
+}
+
+// BitrateBuckets sums recorded bytes into time buckets (keyed by bucket-start
+// unix ms, by segment end time) across all cameras — the recording-throughput
+// series for the overview chart.
+func (s *Store) BitrateBuckets(fromMs, toMs, bucketMs int64) (map[int64]int64, error) {
+	if bucketMs <= 0 {
+		bucketMs = 60000
+	}
+	rows, err := s.db.Query(`
+		SELECT (end_ts / ?) * ? AS bucket, COALESCE(SUM(size_bytes), 0)
+		FROM segments
+		WHERE end_ts >= ? AND end_ts < ?
+		GROUP BY bucket`, bucketMs, bucketMs, fromMs, toMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var bucket, bytes int64
+		if err := rows.Scan(&bucket, &bytes); err != nil {
+			return nil, err
+		}
+		out[bucket] = bytes
+	}
+	return out, rows.Err()
 }
 
 // DeleteSegment removes a segment row by id.
@@ -266,12 +308,40 @@ func (s *Store) TotalBytes() (int64, error) {
 	return b.Int64, err
 }
 
-const segmentSelect = `SELECT id, camera_id, path, start_ts, end_ts, duration_ms, size_bytes, has_motion, locked FROM segments`
+// RecordingRateBps estimates the combined write rate in bytes/sec if every
+// camera that has footage recorded continuously at its measured encode bitrate
+// (SUM(size)/SUM(duration) per camera). That reflects the real resolution/fps/
+// codec each stream actually delivers, ignoring any per-camera motion or
+// retention limits — i.e. the worst-case fill rate. Also returns the number of
+// cameras contributing.
+func (s *Store) RecordingRateBps() (bps int64, cameras int, err error) {
+	rows, err := s.db.Query(`
+		SELECT COALESCE(SUM(size_bytes),0), COALESCE(SUM(duration_ms),0)
+		FROM segments GROUP BY camera_id HAVING SUM(duration_ms) > 0`)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer rows.Close()
+	var total float64
+	for rows.Next() {
+		var bytes, durMs int64
+		if err := rows.Scan(&bytes, &durMs); err != nil {
+			return 0, 0, err
+		}
+		if durMs > 0 {
+			total += float64(bytes) / float64(durMs) * 1000 // bytes per second of footage
+			cameras++
+		}
+	}
+	return int64(total), cameras, rows.Err()
+}
+
+const segmentSelect = `SELECT id, camera_id, location_id, path, start_ts, end_ts, duration_ms, size_bytes, has_motion, locked FROM segments`
 
 func scanSegment(row rowScanner) (*Segment, error) {
 	var seg Segment
 	var motion, locked int
-	err := row.Scan(&seg.ID, &seg.CameraID, &seg.Path, &seg.StartTS, &seg.EndTS,
+	err := row.Scan(&seg.ID, &seg.CameraID, &seg.LocationID, &seg.Path, &seg.StartTS, &seg.EndTS,
 		&seg.DurationMS, &seg.SizeBytes, &motion, &locked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

@@ -99,12 +99,29 @@ type cameraReq struct {
 	RetentionDays     *int     `json:"retentionDays"`
 	StorageQuotaBytes *int64   `json:"storageQuotaBytes"`
 	MotionThreshold   *float64 `json:"motionThreshold"`
+	MotionDetection   *bool    `json:"motionDetection"`
+	AudioDetection    *bool    `json:"audioDetection"`
+	AudioThreshold    *float64 `json:"audioThreshold"`
+	LocationID        *string  `json:"locationId"`   // storage location for new footage ("" = default)
+	DetectMethod      *string  `json:"detectMethod"` // "" = inherit; off|bridge|onnx
+	TempSensor        *string  `json:"tempSensor"`   // HA sensor entity id ("" = weather)
 	FPS               *int     `json:"fps"`
 	SortOrder         *int     `json:"sortOrder"`
 	PrerollMs         *int     `json:"prerollMs"`
 	PostrollMs        *int     `json:"postrollMs"`
 	CooldownMs        *int     `json:"cooldownMs"`
 	MinDurationMs     *int     `json:"minDurationMs"`
+}
+
+// validDetectMethod clamps a per-camera object-detection override to a known
+// value; "" means inherit the global Settings backend.
+func validDetectMethod(m string) string {
+	switch m {
+	case "off", "bridge", "onnx":
+		return m
+	default:
+		return ""
+	}
 }
 
 func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +143,12 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 		RetentionDays:     derefInt(req.RetentionDays, 7),
 		StorageQuotaBytes: derefInt64(req.StorageQuotaBytes, 0),
 		MotionThreshold:   derefFloat(req.MotionThreshold, 0.02),
+		MotionDetection:   req.MotionDetection == nil || *req.MotionDetection,
+		AudioDetection:    req.AudioDetection != nil && *req.AudioDetection,
+		AudioThreshold:    derefFloat(req.AudioThreshold, 0),
+		LocationID:        s.resolveLocationID(derefStr(req.LocationID, "")),
+		DetectMethod:      validDetectMethod(derefStr(req.DetectMethod, "")),
+		TempSensor:        derefStr(req.TempSensor, ""),
 		FPS:               derefInt(req.FPS, 0),
 		SortOrder:         derefInt(req.SortOrder, 0),
 		PrerollMs:         derefInt(req.PrerollMs, 5000),
@@ -177,6 +200,27 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	if req.MotionThreshold != nil {
 		c.MotionThreshold = *req.MotionThreshold
 	}
+	if req.MotionDetection != nil {
+		c.MotionDetection = *req.MotionDetection
+	}
+	if req.AudioDetection != nil {
+		c.AudioDetection = *req.AudioDetection
+	}
+	if req.AudioThreshold != nil {
+		c.AudioThreshold = *req.AudioThreshold
+	}
+	locationChanged := false
+	if req.LocationID != nil {
+		next := s.resolveLocationID(*req.LocationID)
+		locationChanged = next != c.LocationID
+		c.LocationID = next
+	}
+	if req.DetectMethod != nil {
+		c.DetectMethod = validDetectMethod(*req.DetectMethod)
+	}
+	if req.TempSensor != nil {
+		c.TempSensor = *req.TempSensor
+	}
 	if req.FPS != nil {
 		c.FPS = *req.FPS
 	}
@@ -200,6 +244,11 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.syncStreams()
+	if locationChanged {
+		// New footage must land on the new location: cleanly restart this camera's
+		// recorder so ffmpeg writes to (and the indexer scans) the new directory.
+		s.rec.RestartCamera(c.ID)
+	}
 	s.logAudit(r, "camera.update", c.Name, "mode="+c.RecordMode)
 	writeJSON(w, http.StatusOK, cameraView(c))
 }
@@ -249,6 +298,12 @@ func cameraView(c *store.Camera) map[string]any {
 		"retentionDays":     c.RetentionDays,
 		"storageQuotaBytes": c.StorageQuotaBytes,
 		"motionThreshold":   c.MotionThreshold,
+		"motionDetection":   c.MotionDetection,
+		"audioDetection":    c.AudioDetection,
+		"audioThreshold":    c.AudioThreshold,
+		"locationId":        c.LocationID,
+		"detectMethod":      c.DetectMethod,
+		"tempSensor":        c.TempSensor,
 		"fps":               c.FPS,
 		"sortOrder":         c.SortOrder,
 		"prerollMs":         c.PrerollMs,

@@ -55,12 +55,22 @@ func NewManager(apiBase, rtspBase string) (*Manager, error) {
 	}, nil
 }
 
-// StreamName is the go2rtc stream identifier for a camera.
+// StreamName is the go2rtc stream identifier for a camera's main (high) stream.
 func StreamName(cameraID string) string { return "cam_" + cameraID }
+
+// SubStreamName is the go2rtc identifier for a camera's low-quality sub stream,
+// registered separately (when a sub URL is set) so the live view can request it.
+func SubStreamName(cameraID string) string { return "cam_" + cameraID + "_sub" }
 
 // RTSPURL is the internal restream URL recorders + Home Assistant consume.
 func (m *Manager) RTSPURL(cameraID string) string {
 	return fmt.Sprintf("%s/%s", m.rtspBase, StreamName(cameraID))
+}
+
+// RTSPURLSub is the internal restream URL for a camera's low-quality sub stream
+// (registered only when the camera has a sub URL).
+func (m *Manager) RTSPURLSub(cameraID string) string {
+	return fmt.Sprintf("%s/%s", m.rtspBase, SubStreamName(cameraID))
 }
 
 // Sync reconciles go2rtc's streams with the given cameras: enabled cameras get
@@ -80,22 +90,31 @@ func (m *Manager) Sync(ctx context.Context, cameras []*store.Camera) (int, error
 		if !c.Enabled || c.RTSPMainURL == "" {
 			continue
 		}
+		// Main (high) stream — used for recording, motion, and the default live
+		// view. Only (re)register when the source actually changed: re-PUTting an
+		// unchanged stream drops and recreates the producer, blipping every active
+		// live viewer, so edits to name/mode/retention must not churn it.
 		name := StreamName(c.ID)
 		want[name] = true
-		srcs := []string{c.RTSPMainURL}
+		if cur, ok := existing[name]; !ok || !sameSources(cur, []string{c.RTSPMainURL}) {
+			if err := m.putStream(ctx, name, []string{c.RTSPMainURL}); err != nil {
+				return registered, fmt.Errorf("register stream %s: %w", name, err)
+			}
+			registered++
+		}
+		// Sub (low) stream — a separately addressable low-quality stream for the
+		// live-view quality selector, registered only when a sub URL is set. It's
+		// lazy in go2rtc (no producer until a client actually requests it).
 		if c.RTSPSubURL != "" {
-			srcs = append(srcs, c.RTSPSubURL)
+			sub := SubStreamName(c.ID)
+			want[sub] = true
+			if cur, ok := existing[sub]; !ok || !sameSources(cur, []string{c.RTSPSubURL}) {
+				if err := m.putStream(ctx, sub, []string{c.RTSPSubURL}); err != nil {
+					return registered, fmt.Errorf("register stream %s: %w", sub, err)
+				}
+				registered++
+			}
 		}
-		// Only (re)register when the sources actually changed. Re-PUTting an
-		// unchanged stream would drop and recreate the producer, blipping every
-		// active live viewer — so edits to name/mode/retention must not churn it.
-		if cur, ok := existing[name]; ok && sameSources(cur, srcs) {
-			continue
-		}
-		if err := m.putStream(ctx, name, srcs); err != nil {
-			return registered, fmt.Errorf("register stream %s: %w", name, err)
-		}
-		registered++
 	}
 	// Remove go2rtc streams we manage (cam_*) that are no longer wanted.
 	for name := range existing {
@@ -113,11 +132,9 @@ func (m *Manager) Restart(ctx context.Context, cam *store.Camera) error {
 	if !cam.Enabled || cam.RTSPMainURL == "" {
 		return nil
 	}
-	srcs := []string{cam.RTSPMainURL}
-	if cam.RTSPSubURL != "" {
-		srcs = append(srcs, cam.RTSPSubURL)
-	}
-	return m.putStream(ctx, StreamName(cam.ID), srcs)
+	// Recover the main (recording) stream; the sub is live-view-only and the next
+	// periodic Sync re-registers it if needed.
+	return m.putStream(ctx, StreamName(cam.ID), []string{cam.RTSPMainURL})
 }
 
 // TestStream probes an arbitrary RTSP URL by registering it under a temporary

@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
-import { Copy, Check, Home } from "lucide-react";
+import { Copy, Check, Home, Thermometer } from "lucide-react";
 import { Switch } from "./ui/Switch";
-import { useHA, useSetHA } from "../hooks/useSystem";
+import { useHA, useSetHA, useHASensors } from "../hooks/useSystem";
+import { fmtRelative } from "../lib/format";
 
 export function HomeAssistant() {
   const { data: ha } = useHA();
   const setHA = useSetHA();
+  const { data: sensors } = useHASensors(!!ha?.enabled);
 
   const [enabled, setEnabled] = useState(false);
   const [broker, setBroker] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [prefix, setPrefix] = useState("homeassistant");
+  const [sensorTopic, setSensorTopic] = useState("homeassistant/sensor");
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState("");
 
@@ -21,6 +24,7 @@ export function HomeAssistant() {
     setBroker(ha.broker);
     setUsername(ha.username);
     setPrefix(ha.prefix || "homeassistant");
+    setSensorTopic(ha.sensorTopic || "homeassistant/sensor");
   }, [ha]);
 
   async function copy(text: string, key: string) {
@@ -88,13 +92,27 @@ export function HomeAssistant() {
             />
           </div>
         </div>
-        <div>
-          <label className="label">Discovery prefix</label>
-          <input className="input" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
-          <p className="text-xs text-fg-faint mt-1.5">
-            Must match Home Assistant&apos;s MQTT discovery prefix — almost always{" "}
-            <code className="text-fg-muted">homeassistant</code>.
-          </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Discovery prefix</label>
+            <input className="input" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+            <p className="text-xs text-fg-faint mt-1.5">
+              Matches HA&apos;s MQTT discovery prefix — almost always{" "}
+              <code className="text-fg-muted">homeassistant</code>.
+            </p>
+          </div>
+          <div>
+            <label className="label">Sensor state topic</label>
+            <input
+              className="input font-mono text-xs"
+              value={sensorTopic}
+              onChange={(e) => setSensorTopic(e.target.value)}
+            />
+            <p className="text-xs text-fg-faint mt-1.5">
+              Where HA publishes sensor states — enable <em>MQTT Statestream</em> in HA. Cameras can
+              then show one of these readings on their overlay.
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -102,7 +120,14 @@ export function HomeAssistant() {
             className="btn-primary"
             disabled={setHA.isPending}
             onClick={async () => {
-              await setHA.mutateAsync({ enabled, broker, username, password: password || undefined, prefix });
+              await setHA.mutateAsync({
+                enabled,
+                broker,
+                username,
+                password: password || undefined,
+                prefix,
+                sensorTopic,
+              });
               setPassword("");
               setSaved(true);
               setTimeout(() => setSaved(false), 1500);
@@ -113,6 +138,39 @@ export function HomeAssistant() {
           {saved && <span className="text-xs text-online">Saved.</span>}
         </div>
       </div>
+
+      {ha?.enabled && (
+        <div className="border-t border-line mt-5 pt-4">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-fg-muted mb-1">
+            <Thermometer className="h-3.5 w-3.5" />
+            Temperature sensors
+          </p>
+          <p className="text-xs text-fg-faint mb-2.5">
+            Thermometer readings on the broker. Assign one to a camera in its settings to show it on the
+            overlay.
+          </p>
+          {sensors && sensors.length > 0 ? (
+            <div className="space-y-1.5 max-h-48 overflow-auto">
+              {sensors.map((s) => (
+                <div key={s.entityId} className="flex items-center gap-2 text-xs">
+                  <span className="flex-1 truncate text-fg">{s.name || s.entityId}</span>
+                  <span className="tabular-nums text-fg-muted">
+                    {s.value}
+                    {s.unit ? ` ${s.unit}` : ""}
+                  </span>
+                  <span className="w-16 text-right text-fg-faint">
+                    {s.updatedAt ? fmtRelative(s.updatedAt * 1000) : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-fg-faint">
+              None received yet. Enable MQTT Statestream in Home Assistant and confirm the topic above.
+            </p>
+          )}
+        </div>
+      )}
 
       {ha && ha.streams.length > 0 && (
         <div className="border-t border-line mt-5 pt-4">

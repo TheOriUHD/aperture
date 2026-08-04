@@ -1,13 +1,17 @@
-import { useEffect, useState } from "react";
-import { Trash2, RefreshCw, FolderCog } from "lucide-react";
+import { useState } from "react";
+import { Trash2, RefreshCw, Plus, HardDrive, Server, Cloud, Lock, Pencil, Timer, PauseCircle } from "lucide-react";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
-import { useStorage, useSetStorageConfig } from "../hooks/useStorage";
+import { StorageSetupWizard } from "./storage/StorageSetupWizard";
+import { EditLocationModal } from "./storage/EditLocationModal";
+import { useStorage, type StorageLocation } from "../hooks/useStorage";
+import { useStorageLocations, useDeleteLocation } from "../hooks/useStorageLocations";
 import { useCameras } from "../hooks/useCameras";
 import { usePurge, useReindex, type PurgeResult } from "../hooks/useSystem";
+import { ApiError } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { donutSegments } from "../lib/donut";
 
 type Preset = "24h" | "7d" | "month" | "all" | "custom";
-
 const presetLabel: Record<Preset, string> = {
   "24h": "Last 24 hours",
   "7d": "Last 7 days",
@@ -16,12 +20,15 @@ const presetLabel: Record<Preset, string> = {
   custom: "Custom range",
 };
 
-const CAM_COLORS = ["#1b9df0", "#37b0f7", "#1583cf", "#5bc0fa", "#0e6fb0", "#79cdfb", "#2a6f9e"];
-const OTHER_COLOR = "#3a4150";
-const FREE_COLOR = "#161922";
-const GiB = 1024 ** 3;
-const TiB = 1024 ** 4;
+const CAM_COLORS = ["#3b9ef0", "#2dd4bf", "#f5b23d", "#a78bfa", "#f472b6", "#4ade80", "#fb923c"];
+const APP_COLOR = "#6b7280";
 
+function fmtCapacity(sec: number): string {
+  if (sec >= 86400 * 2) return `${(sec / 86400).toFixed(1)} days`;
+  if (sec >= 86400) return `${(sec / 86400).toFixed(1)} day`;
+  if (sec >= 3600) return `${Math.round(sec / 3600)} hours`;
+  return `${Math.max(1, Math.round(sec / 60))} min`;
+}
 function startOfMonth() {
   const d = new Date();
   return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
@@ -35,41 +42,23 @@ function Donut({
   segments,
   centerLabel,
   centerSub,
-  size = 168,
+  size = 180,
   thickness = 22,
 }: {
-  segments: { label: string; value: number; color: string }[];
+  segments: { value: number; color: string }[];
   centerLabel: string;
   centerSub: string;
   size?: number;
   thickness?: number;
 }) {
   const r = (size - thickness) / 2;
-  const c = 2 * Math.PI * r;
-  const total = segments.reduce((a, s) => a + s.value, 0) || 1;
-  let offset = 0;
+  const paths = donutSegments(segments.map((s) => s.value), size / 2, size / 2, r);
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
-      <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-        {segments.map((s, i) => {
-          const dash = (s.value / total) * c;
-          const el = (
-            <circle
-              key={i}
-              cx={size / 2}
-              cy={size / 2}
-              r={r}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={thickness}
-              strokeDasharray={`${dash} ${c - dash}`}
-              strokeDashoffset={-offset}
-            />
-          );
-          offset += dash;
-          return el;
-        })}
-      </g>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#1a1e27" strokeWidth={thickness} />
+      {segments.map((s, i) =>
+        paths[i] ? <path key={i} d={paths[i]} fill="none" stroke={s.color} strokeWidth={thickness} strokeLinecap="butt" /> : null,
+      )}
       <text x="50%" y="47%" textAnchor="middle" className="fill-fg" style={{ fontSize: 22, fontWeight: 600 }}>
         {centerLabel}
       </text>
@@ -80,12 +69,104 @@ function Donut({
   );
 }
 
+function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-ink-900/40 px-3 py-2">
+      <p className="text-[11px] text-fg-faint">{label}</p>
+      <p className={`text-sm font-semibold tabular-nums ${accent ? "" : "text-fg"}`} style={accent ? { color: accent } : undefined}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function locIcon(type: string) {
+  if (type === "smb") return Server;
+  if (type === "sftp") return Cloud;
+  return HardDrive;
+}
+
+function DestinationCard({
+  loc,
+  camNames,
+  onEdit,
+  onRemove,
+}: {
+  loc: StorageLocation;
+  camNames: string[];
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const Icon = locIcon(loc.type);
+  const path = (loc.config?.path as string) || "";
+  const host = (loc.config?.host as string) || "";
+  const where =
+    loc.type === "local" ? path : loc.type === "smb" ? `\\\\${host}\\${loc.config?.share ?? ""}` : `${loc.config?.user ?? ""}@${host}`;
+  const cap = loc.allocationBytes;
+  const denom = cap > 0 ? cap : loc.diskTotalBytes || Math.max(1, loc.usedBytes);
+  const pct = Math.min(100, Math.round((loc.usedBytes / denom) * 100));
+  const capLabel = loc.isDefault ? "hard-reserved" : loc.type === "local" ? "hard-reserved" : "soft cap";
+
+  return (
+    <div className={`rounded-xl border p-3.5 ${loc.enabled ? "border-line bg-ink-850" : "border-line/60 bg-ink-850/50"}`}>
+      <div className="flex items-start gap-3">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand/12">
+          <Icon className="h-5 w-5 text-brand" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-semibold text-fg">{loc.name}</span>
+            {loc.isDefault && (
+              <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand">Default</span>
+            )}
+            <span className="rounded bg-ink-900 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-faint">{loc.type}</span>
+            {loc.hasCredential && <Lock className="h-3 w-3 text-fg-faint" />}
+            {!loc.enabled && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-amber">
+                <PauseCircle className="h-3 w-3" /> paused
+              </span>
+            )}
+          </div>
+          <p className="truncate font-mono text-[11px] text-fg-faint">{where || "—"}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button className="btn-icon text-fg-faint hover:text-fg" title="Edit" onClick={onEdit}>
+            <Pencil className="h-4 w-4" />
+          </button>
+          {!loc.isDefault && (
+            <button className="btn-icon text-fg-faint hover:text-rec" title="Remove" onClick={onRemove}>
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-ink-900">
+        <div className="h-full rounded-full bg-brand" style={{ width: `${Math.max(pct, loc.usedBytes > 0 ? 2 : 0)}%` }} />
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 text-[11px] text-fg-faint tabular-nums">
+        <span>
+          <span className="text-fg-muted">{formatBytes(loc.usedBytes)}</span>
+          {cap > 0 ? ` of ${formatBytes(cap)} ${capLabel}` : " used · no limit"}
+        </span>
+        {loc.diskFreeBytes != null && loc.diskFreeBytes > 0 && <span>{formatBytes(loc.diskFreeBytes)} free on {loc.type === "local" ? "disk" : "share"}</span>}
+      </div>
+      {camNames.length > 0 && (
+        <p className="mt-1.5 truncate text-[11px] text-fg-muted">
+          {camNames.length} {camNames.length === 1 ? "camera" : "cameras"}: {camNames.join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function StorageManager() {
   const { data: storage } = useStorage();
+  const { data: locData } = useStorageLocations();
   const { data: cameras } = useCameras();
   const purge = usePurge();
   const reindex = useReindex();
-  const setCfg = useSetStorageConfig();
+  const del = useDeleteLocation();
 
   const [cameraId, setCameraId] = useState("");
   const [preset, setPreset] = useState<Preset>("24h");
@@ -95,78 +176,50 @@ export function StorageManager() {
   const [result, setResult] = useState<PurgeResult | null>(null);
   const [reindexMsg, setReindexMsg] = useState("");
 
-  // Config form state
-  const [capValue, setCapValue] = useState("");
-  const [capUnit, setCapUnit] = useState<"GB" | "TB">("TB");
-  const [path, setPath] = useState("");
-  const [cfgMsg, setCfgMsg] = useState("");
-  const [cfgErr, setCfgErr] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [editLoc, setEditLoc] = useState<StorageLocation | null>(null);
+  const [delLoc, setDelLoc] = useState<StorageLocation | null>(null);
+  const [forceLoc, setForceLoc] = useState<StorageLocation | null>(null);
 
-  useEffect(() => {
-    if (!storage) return;
-    if (storage.capBytes > 0) {
-      const tb = storage.capBytes / TiB;
-      if (tb >= 1) {
-        setCapUnit("TB");
-        setCapValue(String(+tb.toFixed(2)));
-      } else {
-        setCapUnit("GB");
-        setCapValue(String(+(storage.capBytes / GiB).toFixed(1)));
-      }
-    } else {
-      setCapValue("");
-    }
-    setPath(storage.path === storage.defaultPath ? "" : storage.path);
-  }, [storage]);
+  const locations = locData?.locations ?? storage?.locations ?? [];
+
+  // Globals across all destinations.
+  const recorded = storage?.recordedBytes ?? 0;
+  const app = storage?.appBytes ?? 0;
+  const totalAlloc = locations.reduce((s, l) => s + Math.max(0, l.allocationBytes), 0);
+  const totalUsed = locations.reduce((s, l) => s + l.usedBytes, 0);
+  const freeInAlloc = Math.max(0, totalAlloc - totalUsed);
+
+  // Which cameras record to each location (by id).
+  const camsByLoc = (id: string) => (cameras ?? []).filter((c) => (c.locationId || "") === id).map((c) => c.name);
+
+  // Per-camera footage donut (footage by camera + app data = total footprint).
+  const camSegs = (storage?.cameras ?? []).map((c, i) => ({ value: c.bytes, color: CAM_COLORS[i % CAM_COLORS.length] }));
+  const donutSegs = [...camSegs, { value: app, color: APP_COLOR }];
 
   function range(): { from: number; to: number } {
     const now = Date.now();
     switch (preset) {
-      case "24h":
-        return { from: now - 24 * 3600_000, to: now };
-      case "7d":
-        return { from: now - 7 * 24 * 3600_000, to: now };
-      case "month":
-        return { from: startOfMonth(), to: now };
-      case "all":
-        return { from: 0, to: now };
-      case "custom":
-        return { from: new Date(customFrom).getTime(), to: new Date(customTo).getTime() };
+      case "24h": return { from: now - 24 * 3600_000, to: now };
+      case "7d": return { from: now - 7 * 24 * 3600_000, to: now };
+      case "month": return { from: startOfMonth(), to: now };
+      case "all": return { from: 0, to: now };
+      case "custom": return { from: new Date(customFrom).getTime(), to: new Date(customTo).getTime() };
     }
   }
+  const r = range();
+  const validRange = r.to > r.from;
+  const camLabel = cameraId ? cameras?.find((c) => c.id === cameraId)?.name : "all cameras";
 
   async function doReindex() {
     setReindexMsg("");
     try {
       const res = await reindex.mutateAsync();
-      setReindexMsg(
-        res.recovered > 0
-          ? `Recovered ${res.recovered.toLocaleString()} orphaned segments.`
-          : "Everything on disk is already indexed.",
-      );
+      setReindexMsg(res.recovered > 0 ? `Recovered ${res.recovered.toLocaleString()} orphaned segments.` : "Everything on disk is already indexed.");
     } catch {
       setReindexMsg("Re-scan failed.");
     }
   }
-
-  async function saveCfg() {
-    setCfgMsg("");
-    setCfgErr(false);
-    const v = parseFloat(capValue);
-    const capBytes = capValue.trim() && v > 0 ? Math.round(v * (capUnit === "TB" ? TiB : GiB)) : 0;
-    try {
-      await setCfg.mutateAsync({ capBytes, path: path.trim() });
-      setCfgMsg("Saved.");
-    } catch (e) {
-      setCfgErr(true);
-      setCfgMsg((e as Error).message || "Could not save.");
-    }
-  }
-
-  const camLabel = cameraId ? cameras?.find((c) => c.id === cameraId)?.name : "all cameras";
-  const r = range();
-  const validRange = r.to > r.from;
-
   async function doPurge() {
     try {
       const res = await purge.mutateAsync({ cameraId: cameraId || undefined, from: r.from, to: r.to });
@@ -177,123 +230,99 @@ export function StorageManager() {
       setConfirmOpen(false);
     }
   }
-
-  const allocated = storage?.allocatedBytes ?? 0;
-  const hasAllocation = allocated > 0;
-  const appBytes = storage?.appBytes ?? 0;
-  const used = storage?.usedBytes ?? 0;
-  const freeInAlloc = storage?.freeInAllocationBytes ?? 0;
-  const legendTotal = hasAllocation ? allocated : Math.max(1, used);
-  const usedPct = hasAllocation ? Math.round((used / allocated) * 100) : 0;
-  const segments = storage
-    ? [
-        ...storage.cameras.map((c, i) => ({ label: c.name, value: c.bytes, color: CAM_COLORS[i % CAM_COLORS.length] })),
-        { label: "Aperture app files", value: appBytes, color: OTHER_COLOR },
-        ...(hasAllocation ? [{ label: "Free", value: freeInAlloc, color: FREE_COLOR }] : []),
-      ]
-    : [];
+  async function removeLoc(force: boolean) {
+    const loc = force ? forceLoc : delLoc;
+    if (!loc) return;
+    try {
+      await del.mutateAsync({ id: loc.id, force });
+      setDelLoc(null);
+      setForceLoc(null);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setDelLoc(null);
+        setForceLoc(loc);
+      } else {
+        setDelLoc(null);
+        setForceLoc(null);
+      }
+    }
+  }
 
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between mb-3">
+    <div className="panel space-y-5">
+      <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-fg">Storage</h2>
-        <button
-          className="btn-subtle h-8"
-          disabled={reindex.isPending}
-          onClick={doReindex}
-          title="Index any footage on disk the database lost track of"
-        >
+        <button className="btn-subtle h-8" disabled={reindex.isPending} onClick={doReindex} title="Index any footage on disk the database lost track of">
           <RefreshCw className={`h-3.5 w-3.5 ${reindex.isPending ? "animate-spin" : ""}`} />
-          {reindex.isPending ? "Scanning…" : "Re-scan recordings"}
+          {reindex.isPending ? "Scanning…" : "Re-scan"}
         </button>
       </div>
-      {reindexMsg && <p className="text-xs text-online mb-3">{reindexMsg}</p>}
+      {reindexMsg && <p className="-mt-2 text-xs text-online">{reindexMsg}</p>}
 
-      {/* Donut + legend */}
+      {/* Global overview */}
       {storage && (
-        <div className="flex flex-col sm:flex-row items-center gap-5 mb-4">
+        <div className="flex flex-col items-center gap-5 rounded-xl border border-line bg-ink-850 p-4 sm:flex-row">
           <Donut
-            segments={segments}
-            centerLabel={hasAllocation ? `${usedPct}%` : formatBytes(used)}
-            centerSub={hasAllocation ? `of ${formatBytes(allocated)}` : "used"}
+            segments={donutSegs}
+            centerLabel={formatBytes(recorded + app)}
+            centerSub="stored"
           />
-          <div className="flex-1 w-full space-y-1.5">
-            {storage.cameras.map((c, i) => (
-              <LegendRow
-                key={c.cameraId}
-                color={CAM_COLORS[i % CAM_COLORS.length]}
-                label={c.name}
-                value={c.bytes}
-                total={legendTotal}
-              />
-            ))}
-            <LegendRow color={OTHER_COLOR} label="Aperture app files" value={appBytes} total={legendTotal} />
-            {hasAllocation && (
-              <LegendRow color={FREE_COLOR} label="Free in allocation" value={freeInAlloc} total={legendTotal} ring />
-            )}
-            <div className="border-t border-line mt-1 pt-1.5 flex justify-between text-xs text-fg-muted">
-              <span>{hasAllocation ? "Allocated to Aperture" : "Used by Aperture"}</span>
-              <span className="tabular-nums">{formatBytes(hasAllocation ? allocated : used)}</span>
+          <div className="w-full flex-1">
+            <div className="grid grid-cols-2 gap-2">
+              <Stat label="Recorded footage" value={formatBytes(recorded)} />
+              <Stat label="App & database" value={formatBytes(app)} />
+              <Stat label="Allocated to Aperture" value={totalAlloc > 0 ? formatBytes(totalAlloc) : "—"} accent="#3b9ef0" />
+              <Stat label="Free in allocation" value={totalAlloc > 0 ? formatBytes(freeInAlloc) : "—"} />
             </div>
-            {!hasAllocation && (
-              <p className="text-[11px] text-amber pt-1">Set an allocation below so usage is capped and shown clearly.</p>
+            <p className="mt-2.5 text-[11px] text-fg-faint">
+              Across {locations.length} {locations.length === 1 ? "destination" : "destinations"} · {cameras?.length ?? 0}{" "}
+              {(cameras?.length ?? 0) === 1 ? "camera" : "cameras"}
+            </p>
+            {storage.recordingRateBps > 0 && totalAlloc > 0 && (
+              <div className="mt-2 flex items-center gap-2 text-[11px] text-fg-muted">
+                <Timer className="h-3.5 w-3.5 shrink-0 text-brand" />
+                Holds ≈ <span className="font-medium text-fg">{fmtCapacity((freeInAlloc / storage.recordingRateBps) || 0)}</span> more at the current rate
+              </div>
             )}
           </div>
         </div>
       )}
 
-      {/* Storage limit + location */}
-      <div className="border-t border-line pt-4">
-        <p className="flex items-center gap-1.5 text-xs font-medium text-fg-muted mb-2.5">
-          <FolderCog className="h-3.5 w-3.5" />
-          Allocation &amp; location
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {/* Destinations */}
+      <div>
+        <div className="mb-2.5 flex items-center justify-between">
           <div>
-            <label className="label">Allocated to Aperture</label>
-            <div className="flex gap-2">
-              <input
-                className="input"
-                type="number"
-                min={0}
-                placeholder="Unlimited"
-                value={capValue}
-                onChange={(e) => setCapValue(e.target.value)}
-              />
-              <select className="input w-20" value={capUnit} onChange={(e) => setCapUnit(e.target.value as "GB" | "TB")}>
-                <option value="GB">GB</option>
-                <option value="TB">TB</option>
-              </select>
-            </div>
-            <p className="text-[11px] text-fg-faint mt-1">
-              Aperture uses up to this. Oldest footage is auto-deleted when you exceed it — no restart needed.
-            </p>
+            <p className="text-xs font-medium text-fg-muted">Recording destinations</p>
+            <p className="text-[11px] text-fg-faint">Local disks and network shares. Point cameras at them from each camera’s settings.</p>
           </div>
-          <div>
-            <label className="label">Recordings path</label>
-            <input
-              className="input font-mono text-xs"
-              placeholder={storage?.defaultPath || "/recordings"}
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-            />
-            <p className="text-[11px] text-fg-faint mt-1">
-              Must be writable in the container (mount a disk or network share there). New footage moves here.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 mt-3">
-          <button className="btn-primary h-8" disabled={setCfg.isPending} onClick={saveCfg}>
-            {setCfg.isPending ? "Saving…" : "Save"}
+          <button className="btn-subtle h-8 shrink-0" onClick={() => setWizardOpen(true)}>
+            <Plus className="h-3.5 w-3.5" />
+            Add
           </button>
-          {cfgMsg && <span className={`text-xs ${cfgErr ? "text-rec" : "text-online"}`}>{cfgMsg}</span>}
         </div>
+        <div className="space-y-2.5">
+          {locations.map((loc) => (
+            <DestinationCard
+              key={loc.id || "default"}
+              loc={loc}
+              camNames={camsByLoc(loc.id)}
+              onEdit={() => setEditLoc(loc)}
+              onRemove={() => setDelLoc(loc)}
+            />
+          ))}
+        </div>
+        {locData?.dataDir && (
+          <p className="mt-2.5 flex items-center gap-1.5 text-[11px] text-fg-faint">
+            <Lock className="h-3 w-3" />
+            App &amp; database stay at <span className="font-mono">{locData.dataDir}</span> (fixed with the install).
+          </p>
+        )}
       </div>
 
-      {/* delete footage */}
-      <div className="border-t border-line pt-4 mt-4">
-        <p className="text-xs font-medium text-fg-muted mb-2.5">Delete footage</p>
-        <div className="grid grid-cols-2 gap-3 mb-3">
+      {/* Delete footage */}
+      <div className="border-t border-line pt-4">
+        <p className="mb-2.5 text-xs font-medium text-fg-muted">Delete footage</p>
+        <div className="mb-3 grid grid-cols-2 gap-3">
           <div>
             <label className="label">Camera</label>
             <select className="input" value={cameraId} onChange={(e) => setCameraId(e.target.value)}>
@@ -317,7 +346,7 @@ export function StorageManager() {
           </div>
         </div>
         {preset === "custom" && (
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="mb-3 grid grid-cols-2 gap-3">
             <div>
               <label className="label">From</label>
               <input type="datetime-local" className="input" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
@@ -352,33 +381,29 @@ export function StorageManager() {
         onConfirm={doPurge}
         onCancel={() => setConfirmOpen(false)}
       />
-    </div>
-  );
-}
-
-function LegendRow({
-  color,
-  label,
-  value,
-  total,
-  ring,
-}: {
-  color: string;
-  label: string;
-  value: number;
-  total: number;
-  ring?: boolean;
-}) {
-  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
-  return (
-    <div className="flex items-center gap-2 text-xs">
-      <span
-        className="h-2.5 w-2.5 rounded-sm shrink-0"
-        style={{ backgroundColor: color, border: ring ? "1px solid #2a2f3a" : undefined }}
+      <ConfirmDialog
+        open={!!delLoc}
+        danger
+        busy={del.isPending}
+        title="Remove destination"
+        message={`Remove “${delLoc?.name}” as a recording destination? Its cameras must be reassigned and its footage removed first.`}
+        confirmLabel="Remove"
+        onConfirm={() => removeLoc(false)}
+        onCancel={() => setDelLoc(null)}
       />
-      <span className="flex-1 truncate text-fg-muted">{label}</span>
-      <span className="text-fg-faint tabular-nums w-10 text-right">{pct}%</span>
-      <span className="text-fg-muted tabular-nums w-16 text-right">{formatBytes(value)}</span>
+      <ConfirmDialog
+        open={!!forceLoc}
+        danger
+        busy={del.isPending}
+        title="Force-remove destination"
+        message={`“${forceLoc?.name}” still has cameras or footage. Force-removing reassigns its cameras back to the primary storage and permanently deletes the footage stored here. This cannot be undone.`}
+        confirmLabel="Force remove"
+        onConfirm={() => removeLoc(true)}
+        onCancel={() => setForceLoc(null)}
+      />
+
+      <StorageSetupWizard open={wizardOpen} onClose={() => setWizardOpen(false)} initialStep="type" />
+      <EditLocationModal loc={editLoc} onClose={() => setEditLoc(null)} />
     </div>
   );
 }
