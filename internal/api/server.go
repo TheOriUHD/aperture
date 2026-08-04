@@ -106,6 +106,22 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 	})
 }
 
+// apiVersionHeaders stamps every API response with the served contract version.
+// On the unversioned /api alias it also emits an RFC 8594 Deprecation marker and
+// a successor-version Link to /api/v1; the alias is retired in Phase 5.4.
+func (s *Server) apiVersionHeaders(version string, deprecated bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Aperture-Api-Version", version)
+			if deprecated {
+				w.Header().Set("Deprecation", "true")
+				w.Header().Set("Link", `</api/v1>; rel="successor-version"`)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func (s *Server) routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -114,7 +130,7 @@ func (s *Server) routes() http.Handler {
 	r.Use(s.logRequests)
 	r.Use(s.am.Context)
 
-	r.Route("/api", func(r chi.Router) {
+	apiRoutes := func(r chi.Router) {
 		// Public.
 		r.Get("/system/health", s.handleHealth)
 		r.Get("/system/version", s.handleVersion)
@@ -265,6 +281,19 @@ func (s *Server) routes() http.Handler {
 			r.Get("/system/audit", s.handleGetAudit)
 			r.Get("/system/audit/verify", s.handleVerifyAudit)
 		})
+	}
+
+	// Mount the full API at both the unversioned alias and /api/v1. Both share
+	// the same handlers — today v1 IS the one behavior (there are no external
+	// clients yet); the versioning machinery exists so a future v2 can diverge
+	// under the deprecation policy. The alias is retired in Phase 5.4.
+	r.Route("/api", func(r chi.Router) {
+		r.Use(s.apiVersionHeaders("v1", true))
+		apiRoutes(r)
+	})
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(s.apiVersionHeaders("v1", false))
+		apiRoutes(r)
 	})
 
 	// Public share viewer (chrome-less, token-gated).
