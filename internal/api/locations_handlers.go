@@ -332,15 +332,17 @@ func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if force {
-		// Move any cameras still targeting it back to the default and restart them,
-		// then delete its footage — the disk is being detached.
-		if cams, err := s.st.ListCameras(); err == nil {
-			for _, c := range cams {
-				if c.LocationID == id {
-					_ = s.st.SetCameraLocation(c.ID, store.DefaultLocationID)
-					s.rec.RestartCamera(c.ID)
-				}
-			}
+		// Detach the disk: move any cameras still targeting it back to the default
+		// (atomically, so an interrupt can't leave some reassigned and some not),
+		// restart their recorders so they stop writing here, then delete the
+		// footage while the backend is still resolvable.
+		moved, err := s.st.ReassignCameras(id, store.DefaultLocationID)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		for _, cid := range moved {
+			s.rec.RestartCamera(cid)
 		}
 		s.purgeLocationSegments(id)
 	}
@@ -348,6 +350,12 @@ func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// Drop the cached backend handle (an open SMB/SFTP connection or resolved
+	// local root) for the now-deleted location. Create and update both do this;
+	// delete previously forgot, leaving a stale connection and cache entry that a
+	// later location reusing the same id could pick up. Runs for empty locations
+	// too — a probe/test may have opened a connection.
+	s.registry.Invalidate(id)
 	s.logAudit(r, "storage.location.delete", loc.Name, "")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }

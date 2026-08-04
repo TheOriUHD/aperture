@@ -174,6 +174,46 @@ func (s *Store) SetCameraLocation(cameraID, locationID string) error {
 		locationID, time.Now().Unix(), cameraID))
 }
 
+// ReassignCameras moves every camera on fromLocationID to toLocationID in one
+// transaction (atomic — never a partial reassignment if interrupted) and returns
+// the affected camera IDs so the caller can restart their recorders. Used when a
+// storage location is force-deleted so no camera is left pointing at a location
+// that is about to disappear.
+func (s *Store) ReassignCameras(fromLocationID, toLocationID string) ([]string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id FROM cameras WHERE location_id = ?`, fromLocationID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) > 0 {
+		if _, err := tx.Exec(`UPDATE cameras SET location_id = ?, updated_at = ? WHERE location_id = ?`,
+			toLocationID, time.Now().Unix(), fromLocationID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // CamerasUsingLocation counts cameras that record to a location (delete guard).
 func (s *Store) CamerasUsingLocation(locationID string) (int64, error) {
 	var n int64
