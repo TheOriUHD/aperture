@@ -37,6 +37,13 @@ type Detection struct {
 	X, Y, W, H float64
 }
 
+// MaxBurst caps the frames sampled per event. detectBurst loops `Burst` times
+// with a network round-trip each, so an unbounded value is a denial-of-service
+// vector. Enforced at read time in LoadConfig so it holds no matter how the
+// setting was written (API, config restore, or a direct DB edit), and reused by
+// the API handler so the two limits can't drift.
+const MaxBurst = 5
+
 // Config is the operator-controlled detection setup (stored as JSON in settings).
 type Config struct {
 	Mode          string             `json:"mode"`          // off | bridge | onnx
@@ -105,6 +112,9 @@ func (e *Engine) LoadConfig() Config {
 	}
 	if c.Burst <= 0 {
 		c.Burst = 1
+	}
+	if c.Burst > MaxBurst {
+		c.Burst = MaxBurst
 	}
 	return c
 }

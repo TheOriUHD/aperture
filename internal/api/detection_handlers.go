@@ -41,8 +41,8 @@ func (s *Server) handleSetDetection(w http.ResponseWriter, r *http.Request) {
 	if c.Burst < 1 {
 		c.Burst = 1
 	}
-	if c.Burst > 5 {
-		c.Burst = 5
+	if c.Burst > detect.MaxBurst {
+		c.Burst = detect.MaxBurst
 	}
 	if err := s.detect.SaveConfig(c); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save detection config")
