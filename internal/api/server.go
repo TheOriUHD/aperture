@@ -134,6 +134,7 @@ func (s *Server) routes() http.Handler {
 		// Public.
 		r.Get("/system/health", s.handleHealth)
 		r.Get("/system/version", s.handleVersion)
+		r.Get("/version", s.handleAPIVersion) // API contract version (pre-auth negotiation)
 		r.Get("/setup/status", s.handleSetupStatus)
 		r.Post("/setup", s.handleSetup)
 		r.Post("/auth/login", s.handleLogin)
@@ -153,6 +154,7 @@ func (s *Server) routes() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireAuth)
 			r.Get("/auth/me", s.handleMe)
+			r.Get("/capabilities", s.handleCapabilities) // enabled subsystems + contract features
 			r.Post("/auth/password", s.handleChangePassword)
 			r.Post("/auth/2fa/setup", s.handle2FASetup)
 			r.Post("/auth/2fa/enable", s.handle2FAEnable)

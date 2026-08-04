@@ -20,6 +20,7 @@ import (
 
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
+	"github.com/TheOriUHD/aperture/internal/detect"
 	"github.com/TheOriUHD/aperture/internal/store"
 )
 
@@ -46,11 +47,13 @@ func newTestServer(t *testing.T) *Server {
 		false,
 	)
 	cfg := &config.Config{DataDir: dir, RecordingsDir: filepath.Join(dir, "recordings")}
+	lg := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := &Server{
 		st:        st,
 		am:        am,
 		cfg:       cfg,
-		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		detect:    detect.New(st, nil, dir, lg),
+		log:       lg,
 		startedAt: time.Now(),
 	}
 	s.router = s.routes()
