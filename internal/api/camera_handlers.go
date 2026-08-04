@@ -255,16 +255,23 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	name := id
-	if c, err := s.st.GetCamera(id); err == nil {
-		name = c.Name
+	c, err := s.st.GetCamera(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
 	}
+	// Reclaim the camera's on-disk footage and thumbnails BEFORE deleting the
+	// row: DeleteCamera cascades away the segment/event rows that tell us where
+	// those files live, so doing it first would orphan the bytes forever. (For a
+	// camera on a remote location with a long history this is done synchronously
+	// and may take a moment — acceptable for an admin delete.)
+	s.purgeCameraFiles(id)
 	if err := s.st.DeleteCamera(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	s.syncStreams()
-	s.logAudit(r, "camera.delete", name, "")
+	s.logAudit(r, "camera.delete", c.Name, "")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 

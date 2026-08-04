@@ -43,6 +43,44 @@ func (s *Server) removeSegmentFile(seg *store.Segment) {
 	}
 }
 
+// purgeCameraFiles removes every on-disk artifact owned by a camera — recorded
+// segment media (local or remote, routed through removeSegmentFile), event
+// thumbnails/snapshots, and the per-camera working directories. Deleting a
+// camera used to cascade only the DB rows, orphaning its footage (gigabytes)
+// on disk forever. The rows themselves are left to the camera-row cascade in
+// DeleteCamera; this only reclaims the bytes. Best-effort throughout: a missing
+// file or dir is not an error.
+func (s *Server) purgeCameraFiles(cameraID string) {
+	// [0, ~4.6e18 ms] spans every possible segment/event timestamp. SegmentsInRange
+	// is unfiltered by `locked`, so this reclaims all media (locked is inert today,
+	// but a camera delete must not leave anything behind regardless).
+	const allTime int64 = 1 << 62
+	if segs, err := s.st.SegmentsInRange(cameraID, 0, allTime); err == nil {
+		for _, seg := range segs {
+			s.removeSegmentFile(seg)
+		}
+	}
+	if evs, err := s.st.EventsInRange(cameraID, 0, allTime); err == nil {
+		for _, e := range evs {
+			if e.ThumbPath != "" {
+				_ = os.Remove(e.ThumbPath)
+			}
+			if e.SnapshotPath != "" {
+				_ = os.Remove(e.SnapshotPath)
+			}
+		}
+	}
+	// Sweep the per-camera working directories for anything ffmpeg wrote but had
+	// not yet indexed (reindex-gap stragglers, the in-flight segment).
+	for _, dir := range []string{
+		filepath.Join(s.cfg.RecordingsDir, cameraID),
+		filepath.Join(s.cfg.SpoolDir(), cameraID),
+		filepath.Join(s.cfg.FrameCacheDir(), cameraID),
+	} {
+		_ = os.RemoveAll(dir)
+	}
+}
+
 // localizeSegment returns a local filesystem path to a segment's media plus a
 // release func to call when done. Local segments return their own path (release
 // is a no-op); network segments are downloaded into a temp file under the remote
