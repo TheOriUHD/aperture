@@ -30,3 +30,13 @@ func TestFailClosed_UndeclaredRouteRefusesBoot(t *testing.T) {
 	}()
 	_ = s.routes() // must panic — an /api route skipped apiGroup
 }
+
+// TestRealRouterBootsClean pins that the guard is reachable from `go test`, not
+// only from nvrd startup: building the PRODUCTION route set (what every harness
+// test does via newTestServer → routes()) must not panic. So if a real route is
+// ever added without a spec, this — and every other harness test — fails the
+// suite, catching it before deploy rather than when nvrd refuses to start on a
+// recorder.
+func TestRealRouterBootsClean(t *testing.T) {
+	_ = newTestServer(t) // routes() runs the boot guard over every real route; panics ⇒ test fails
+}

@@ -32,6 +32,21 @@ type access struct {
 
 // Spec shorthands used at registration. Camera-scoped and scope-bearing specs
 // are built inline where needed.
+//
+// authedCam/adminCam (camScopeParam) cover routes whose camera IS the {id} path
+// param — enforce reads it and applies the ACL centrally. FOUR routes scope by
+// camera WITHOUT a {id} param, so they KEEP an in-handler allowedCamera check and
+// declare a non-camera spec. The boot guard proves a route HAS a spec, not that
+// the spec is CORRECT: a camera-touching route wrongly declared with no camScope
+// would pass the guard and leak. These four are the shape that mistake takes —
+// read them before declaring a camera-related route without camScopeParam:
+//   - GET  /cameras               (handleListCameras)  — filters the LIST to the
+//     caller's ACL; a gate would be wrong (you return fewer rows, not a 403).
+//   - GET  /events                (handleEventsAll)    — same list-filter shape.
+//   - GET  /events/{id}/thumb.jpg (handleEventThumb)   — camera comes from the
+//     event row (e.CameraID), not a path param.
+//   - POST /export                (handleCreateExport) — cameras come from the
+//     request body and are validated per-id.
 var (
 	pub       = access{public: true}                       // no auth
 	authed    = access{}                                   // any authenticated principal
