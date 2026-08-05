@@ -16,8 +16,50 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	}
 }
 
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeErrorCode(w, status, codeForStatus(status), msg)
+}
+
+// writeErrorCode writes the v1 error envelope: a stable machine-readable `code`
+// for programmatic handling alongside the human `error` prose (which the web app
+// still reads, so adding `code` is non-breaking). Third-party clients match on
+// `code`, never the English string. Handlers wanting a code more specific than
+// the status default (e.g. forbidden.camera vs forbidden.scope) call this
+// directly; everything else goes through writeError.
+func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
+}
+
+// codeForStatus is the default machine code for an HTTP status.
+func codeForStatus(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "validation"
+	case http.StatusUnauthorized:
+		return "unauthenticated"
+	case http.StatusForbidden:
+		return "forbidden"
+	case http.StatusNotFound:
+		return "not_found"
+	case http.StatusConflict:
+		return "conflict"
+	case http.StatusPreconditionFailed:
+		return "precondition_failed"
+	case http.StatusPreconditionRequired:
+		return "precondition_required"
+	case http.StatusRequestEntityTooLarge:
+		return "payload_too_large"
+	case http.StatusUnsupportedMediaType:
+		return "unsupported"
+	case http.StatusTooManyRequests:
+		return "rate_limited"
+	case http.StatusServiceUnavailable:
+		return "unavailable"
+	case http.StatusInternalServerError:
+		return "internal"
+	default:
+		return "error"
+	}
 }
 
 // writeStoreError maps store errors to HTTP responses.

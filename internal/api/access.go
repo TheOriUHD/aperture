@@ -97,14 +97,14 @@ func (s *Server) enforce(a access) func(http.Handler) http.Handler {
 				if c.Class == auth.ClassToken {
 					for _, need := range a.scopes {
 						if !hasScope(c.Scopes, need) {
-							writeError(w, http.StatusForbidden, "missing required scope: "+need)
+							writeErrorCode(w, http.StatusForbidden, "forbidden.scope", "missing required scope: "+need)
 							return
 						}
 					}
 				}
 			}
 			if a.camera == camScopeParam && !s.allowedCamera(r, chi.URLParam(r, "id")) {
-				writeError(w, http.StatusForbidden, "access denied")
+				writeErrorCode(w, http.StatusForbidden, "forbidden.camera", "access denied")
 				return
 			}
 			next.ServeHTTP(w, r)
