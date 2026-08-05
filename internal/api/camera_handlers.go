@@ -313,6 +313,8 @@ func cameraView(c *store.Camera) map[string]any {
 		"postrollMs":        c.PostrollMs,
 		"cooldownMs":        c.CooldownMs,
 		"minDurationMs":     c.MinDurationMs,
+		"createdAtMs":       msFromSec(c.CreatedAt), // stored in seconds; wire is ms (DD-WIRE-TIME)
+		"updatedAtMs":       msFromSec(c.UpdatedAt),
 	}
 }
 

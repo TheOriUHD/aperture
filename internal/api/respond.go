@@ -35,3 +35,10 @@ func decodeJSON(r *http.Request, v any) error {
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
 }
+
+// msFromSec converts a unix-seconds column (e.g. created_at/updated_at, stored in
+// seconds) to unix milliseconds for the wire. v1 normalizes every timestamp to
+// unix ms and names the field with an "Ms" suffix so the unit is unambiguous
+// (DD-WIRE-TIME); storage is left as-is. Fields already stored in ms (segments/
+// events *_ts) are emitted directly.
+func msFromSec(sec int64) int64 { return sec * 1000 }
