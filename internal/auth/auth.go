@@ -51,16 +51,30 @@ func (m *Manager) CLISession(bearer string) *SessionClaims {
 	if subtle.ConstantTimeCompare([]byte(bearer), m.cliToken) != 1 {
 		return nil
 	}
-	return &SessionClaims{UserID: "cli", Email: "cli@local", Name: "nvrctl", Role: "admin"}
+	return &SessionClaims{UserID: "cli", Email: "cli@local", Name: "nvrctl", Role: "admin", Class: ClassCLI}
 }
 
 // SessionClaims is the payload carried in the session cookie.
+// Credential classes — how a request authenticated. Set at resolution time, not
+// carried in the signed cookie. session and cli carry full user authority; a
+// token is limited to its scopes and camera grants and can never exceed its
+// owner.
+const (
+	ClassSession = "session" // cookie-authenticated user (the web app)
+	ClassCLI     = "cli"     // local nvrctl token — synthetic superuser
+	ClassToken   = "token"   // scoped API token (an extension)
+)
+
 type SessionClaims struct {
 	UserID string `json:"uid"`
 	Email  string `json:"email"`
 	Name   string `json:"name"`
 	Role   string `json:"role"`
 	Stage  string `json:"stg,omitempty"` // "" = full session; "2fa" = password ok, awaiting code
+	// Runtime-only (json:"-" — derived at resolution, never serialized into the JWT).
+	Class        string   `json:"-"` // ClassSession | ClassCLI | ClassToken
+	Scopes       []string `json:"-"` // token scopes; empty for session/cli means all scopes
+	CameraGrants []string `json:"-"` // token per-camera allowlist; empty means the owner's full ACL
 	jwt.RegisteredClaims
 }
 
@@ -167,6 +181,7 @@ func (m *Manager) SessionFromRequest(r *http.Request) (*SessionClaims, error) {
 	if claims.Stage != "" {
 		return nil, errors.New("incomplete session")
 	}
+	claims.Class = ClassSession
 	return claims, nil
 }
 

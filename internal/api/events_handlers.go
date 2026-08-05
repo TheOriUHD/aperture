@@ -65,10 +65,6 @@ func (s *Server) attachObjects(evs []*store.Event) {
 // handleCameraEvents lists motion events for a camera in a time range.
 func (s *Server) handleCameraEvents(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	from, to := parseRange(r)
 	evs, err := s.st.ListEvents(id, from, to)
 	if err != nil {

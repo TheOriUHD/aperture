@@ -231,7 +231,7 @@ func main() {
 		if err != nil || u.Disabled {
 			return nil
 		}
-		return &auth.SessionClaims{UserID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role}
+		return &auth.SessionClaims{UserID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role, Class: auth.ClassToken}
 	})
 	// Applying a record-mode change (from an automation or HA command) means
 	// re-syncing both the recorder and the motion detector immediately.

@@ -10,10 +10,6 @@ import (
 
 func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	scheds, err := s.st.ListSchedules(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")

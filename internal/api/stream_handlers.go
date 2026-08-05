@@ -17,10 +17,6 @@ const streamTokenTTL = 5 * time.Minute
 // WebSocket for a camera without exposing camera credentials.
 func (s *Server) handleStreamToken(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	if _, err := s.st.GetCamera(id); err != nil {
 		writeStoreError(w, err)
 		return
@@ -47,10 +43,6 @@ func (s *Server) handleStreamToken(w http.ResponseWriter, r *http.Request) {
 // handleSnapshot returns a single JPEG frame for a camera (used for thumbnails).
 func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	if _, err := s.st.GetCamera(id); err != nil {
 		writeStoreError(w, err)
 		return

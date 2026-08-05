@@ -1,0 +1,141 @@
+package api
+
+import (
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/TheOriUHD/aperture/internal/auth"
+)
+
+// camScope describes how a route is scoped to cameras.
+type camScope int
+
+const (
+	camScopeNone  camScope = iota // not camera-scoped
+	camScopeParam                  // scoped to the {id} route param (403 if the caller can't see it)
+)
+
+// access declares what a route requires. It is attached to a route only through
+// apiRouter (the sanctioned registration surface); a route reachable without one
+// crashes the process at boot (see assertAllRoutesDeclared) — the fail-closed
+// backstop. The zero value means "authenticated, no further requirement".
+type access struct {
+	public      bool      // no authentication required
+	admin       bool      // require role == admin
+	sessionOnly bool      // reject class == token (session/cli only) — mechanism for 1.4
+	scopes      []string  // token must hold all of these (unused until Phase 3)
+	camera      camScope // per-camera gate
+}
+
+// Spec shorthands used at registration. Camera-scoped and scope-bearing specs
+// are built inline where needed.
+var (
+	pub       = access{public: true}                       // no auth
+	authed    = access{}                                   // any authenticated principal
+	admin     = access{admin: true}                        // admin only
+	authedCam = access{camera: camScopeParam}                // authed + camera-scoped
+	adminCam  = access{admin: true, camera: camScopeParam}   // admin + camera-scoped
+)
+
+// apiRouter is the only sanctioned way to register an API route: every method
+// takes an access spec, records the route in the declared set (for the boot-time
+// guard), and wraps the handler in the enforcing middleware.
+type apiRouter struct {
+	s *Server
+	r chi.Router
+}
+
+func (s *Server) apiGroup(r chi.Router) *apiRouter { return &apiRouter{s: s, r: r} }
+
+func (g *apiRouter) method(method, path string, a access, h http.HandlerFunc) {
+	g.s.declaredRoutes[method+" "+path] = true
+	g.r.With(g.s.enforce(a)).MethodFunc(method, path, h)
+}
+
+func (g *apiRouter) Get(path string, a access, h http.HandlerFunc)    { g.method(http.MethodGet, path, a, h) }
+func (g *apiRouter) Post(path string, a access, h http.HandlerFunc)   { g.method(http.MethodPost, path, a, h) }
+func (g *apiRouter) Put(path string, a access, h http.HandlerFunc)    { g.method(http.MethodPut, path, a, h) }
+func (g *apiRouter) Delete(path string, a access, h http.HandlerFunc) { g.method(http.MethodDelete, path, a, h) }
+
+// enforce is the per-route authorization middleware. Authentication comes from
+// am.Context (installed at the router root); this layer decides admissibility.
+func (s *Server) enforce(a access) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c := auth.FromContext(r.Context())
+			if !a.public {
+				if c == nil {
+					writeError(w, http.StatusUnauthorized, "authentication required")
+					return
+				}
+				if a.admin && c.Role != "admin" {
+					writeError(w, http.StatusForbidden, "administrator access required")
+					return
+				}
+				if a.sessionOnly && c.Class == auth.ClassToken {
+					writeError(w, http.StatusForbidden, "not available to API tokens")
+					return
+				}
+				if c.Class == auth.ClassToken {
+					for _, need := range a.scopes {
+						if !hasScope(c.Scopes, need) {
+							writeError(w, http.StatusForbidden, "missing required scope: "+need)
+							return
+						}
+					}
+				}
+			}
+			if a.camera == camScopeParam && !s.allowedCamera(r, chi.URLParam(r, "id")) {
+				writeError(w, http.StatusForbidden, "access denied")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func hasScope(have []string, need string) bool {
+	for _, s := range have {
+		if s == need {
+			return true
+		}
+	}
+	return false
+}
+
+// assertAllRoutesDeclared is the fail-closed backstop: after the router is built
+// it walks the whole tree and panics (refusing to boot) if any /api or /api/v1
+// route was registered without going through apiRouter. An undeclared route thus
+// cannot reach production — strictly earlier than any request-time check.
+func (s *Server) assertAllRoutesDeclared(root chi.Router) {
+	err := chi.Walk(root, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		rel, ok := apiRelPath(route)
+		if !ok {
+			return nil // outside the API surface (SPA, share viewer) — not guarded
+		}
+		if !s.declaredRoutes[method+" "+rel] {
+			return fmt.Errorf("%s %s registered without an Access descriptor (bypassed apiGroup)", method, route)
+		}
+		return nil
+	})
+	if err != nil {
+		panic("fail-closed authorization guard: " + err.Error())
+	}
+}
+
+// apiRelPath strips the /api or /api/v1 mount prefix, returning the mount-relative
+// pattern and whether the route is part of the API surface at all.
+func apiRelPath(route string) (string, bool) {
+	for _, p := range []string{"/api/v1", "/api"} { // check the longer prefix first
+		if route == p {
+			return "/", true
+		}
+		if strings.HasPrefix(route, p+"/") {
+			return strings.TrimPrefix(route, p), true
+		}
+	}
+	return "", false
+}

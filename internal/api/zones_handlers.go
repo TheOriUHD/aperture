@@ -17,10 +17,6 @@ type motionMaskReq struct {
 
 func (s *Server) handleGetZones(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	c, err := s.st.GetCamera(id)
 	if err != nil {
 		writeStoreError(w, err)

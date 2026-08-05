@@ -131,10 +131,6 @@ var frameSem = make(chan struct{}, 2)
 // to 1s so a fast hover collapses to a handful of cache keys.
 func (s *Server) handleFrame(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	t, err := strconv.ParseInt(r.URL.Query().Get("t"), 10, 64)
 	if err != nil || t <= 0 {
 		writeError(w, http.StatusBadRequest, "invalid t")
@@ -239,10 +235,6 @@ func parseRange(r *http.Request) (from, to int64) {
 // used to draw the timeline.
 func (s *Server) handleSegmentsList(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	from, to := parseRange(r)
 	segs, err := s.st.ListSegments(id, from, to)
 	if err != nil {
@@ -267,10 +259,6 @@ func (s *Server) handleSegmentsList(w http.ResponseWriter, r *http.Request) {
 // (saved) segments are skipped so an accidental sweep can't wipe kept clips.
 func (s *Server) handleDeleteRecordings(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	c := auth.FromContext(r.Context())
 	if c == nil || c.Role != store.RoleAdmin {
 		writeError(w, http.StatusForbidden, "admin required")
@@ -331,10 +319,6 @@ func (s *Server) handleDeleteRecordings(w http.ResponseWriter, r *http.Request) 
 // Time gaps (e.g. an ffmpeg restart) become EXT-X-DISCONTINUITY markers.
 func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	from, to := parseRange(r)
 	segs, err := s.st.ListSegments(id, from, to)
 	if err != nil {
@@ -373,10 +357,6 @@ func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request) {
 // seeking).
 func (s *Server) handleSegmentFile(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if !s.allowedCamera(r, id) {
-		writeError(w, http.StatusForbidden, "access denied")
-		return
-	}
 	segID := strings.TrimSuffix(chi.URLParam(r, "seg"), ".ts")
 	seg, err := s.st.SegmentByID(segID)
 	if err != nil || seg.CameraID != id {

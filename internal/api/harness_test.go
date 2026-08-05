@@ -28,10 +28,18 @@ import (
 // auth manager; the `cli` credential class in the matrix presents it.
 const testCLIToken = "test-cli-token"
 
-// newTestServer builds a Server with just the fields the exercised routes need.
-// Other subsystems (recorder, streams, exporter, …) stay nil; tests must only
-// hit routes whose handlers don't dereference them.
+// newTestServer builds a Server with just the fields the exercised routes need
+// and its router mounted. Other subsystems (recorder, streams, exporter, …) stay
+// nil; tests must only hit routes whose handlers don't dereference them.
 func newTestServer(t *testing.T) *Server {
+	s := newTestServerNoRouter(t)
+	s.router = s.routes()
+	return s
+}
+
+// newTestServerNoRouter builds the Server but leaves s.router unset, so a caller
+// can install test-only seams (e.g. s.extraAPIRoutes) before s.routes() runs.
+func newTestServerNoRouter(t *testing.T) *Server {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "test.db"))
@@ -48,7 +56,7 @@ func newTestServer(t *testing.T) *Server {
 	)
 	cfg := &config.Config{DataDir: dir, RecordingsDir: filepath.Join(dir, "recordings")}
 	lg := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := &Server{
+	return &Server{
 		st:        st,
 		am:        am,
 		cfg:       cfg,
@@ -56,8 +64,6 @@ func newTestServer(t *testing.T) *Server {
 		log:       lg,
 		startedAt: time.Now(),
 	}
-	s.router = s.routes()
-	return s
 }
 
 func mustDo(t *testing.T, err error) {
