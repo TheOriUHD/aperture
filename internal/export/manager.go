@@ -56,6 +56,25 @@ func (m *Manager) setProgress(id string, progress float64) {
 	}
 }
 
+// emitExportState fires the change-feed export.progress hook after a job's row has
+// been moved to a terminal state (done/error) by FinishExport/FailExport, which
+// write the DB directly and so emit nothing on their own. The message carries no
+// status field, so subscribers use it purely as a signal to refetch the export
+// list — which is what a finished/failed job needs so it doesn't sit at its last
+// mid-run percentage until the view is remounted (the 1.2s poll that used to catch
+// this was dropped once the feed took over). Reads back the row so the emitted
+// progress is the true stored value (1.0 on success).
+func (m *Manager) emitExportState(id string) {
+	if m.onProgress == nil {
+		return
+	}
+	p := 1.0
+	if job, err := m.st.GetExport(id); err == nil {
+		p = job.Progress
+	}
+	m.onProgress(id, p)
+}
+
 // localizeSegments returns a local filesystem path for each segment plus a
 // cleanup func. Local segments (absolute path) are used in place; network
 // segments (backend-relative path) are downloaded into temp files under the
@@ -155,6 +174,7 @@ func (m *Manager) process(ctx context.Context, id string) {
 	fail := func(msg string) {
 		m.log.Error("export failed", "id", id, "err", msg)
 		_ = m.st.FailExport(id, msg, time.Now().Unix())
+		m.emitExportState(id) // nudge the feed so the list leaves "running"
 	}
 
 	cams := job.Cameras()
@@ -218,6 +238,7 @@ func (m *Manager) process(ctx context.Context, id string) {
 		return
 	}
 	_ = m.st.FinishExport(id, out, fi.Size(), time.Now().Unix())
+	m.emitExportState(id) // done → 100%, so the list flips off "running" without a poll
 	m.log.Info("export done", "id", id, "bytes", fi.Size(), "mode", job.Mode, "cameras", len(cams))
 }
 
