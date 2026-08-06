@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,21 @@ func newTestServerNoRouter(t *testing.T) *Server {
 		[]byte(testCLIToken),
 		false,
 	)
+	// Mirror the production API-token resolver so tests can exercise class=token.
+	am.SetAPITokenResolver(func(bearer string) *auth.SessionClaims {
+		if !strings.HasPrefix(bearer, store.APITokenPrefix) {
+			return nil
+		}
+		uid, scopes, grants, ok := st.ResolveAPIToken(bearer)
+		if !ok {
+			return nil
+		}
+		u, err := st.GetUserByID(uid)
+		if err != nil || u.Disabled {
+			return nil
+		}
+		return &auth.SessionClaims{UserID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role, Class: auth.ClassToken, Scopes: scopes, CameraGrants: grants}
+	})
 	cfg := &config.Config{DataDir: dir, RecordingsDir: filepath.Join(dir, "recordings")}
 	lg := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return &Server{

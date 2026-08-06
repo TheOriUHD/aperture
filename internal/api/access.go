@@ -53,6 +53,12 @@ var (
 	admin     = access{admin: true}                        // admin only
 	authedCam = access{camera: camScopeParam}                // authed + camera-scoped
 	adminCam  = access{admin: true, camera: camScopeParam}   // admin + camera-scoped
+
+	// Session-only specs reject class=token regardless of scope: these operations
+	// are secret-exfil, destructive/irreversible, availability, or escalation
+	// vectors and require full user authority (a cookie session or the CLI token).
+	authedSessionOnly = access{sessionOnly: true}
+	adminSessionOnly  = access{admin: true, sessionOnly: true}
 )
 
 // apiRouter is the only sanctioned way to register an API route: every method

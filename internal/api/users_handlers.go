@@ -161,15 +161,28 @@ func (s *Server) allowedCameraSet(r *http.Request) (bool, map[string]bool) {
 	if c == nil {
 		return false, map[string]bool{}
 	}
-	if c.Role == store.RoleAdmin {
-		return true, nil
+	isAdmin := c.Role == store.RoleAdmin
+	var set map[string]bool
+	if !isAdmin {
+		ids, _ := s.st.GetUserCameraIDs(c.UserID)
+		set = make(map[string]bool, len(ids))
+		for _, id := range ids {
+			set[id] = true
+		}
 	}
-	ids, _ := s.st.GetUserCameraIDs(c.UserID)
-	set := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		set[id] = true
+	// A scoped token can never exceed its owner, and is further narrowed to its
+	// camera grants (empty grants = the owner's full access). Composing with the
+	// owner set guarantees the intersection, never a superset.
+	if c.Class == auth.ClassToken && len(c.CameraGrants) > 0 {
+		grant := make(map[string]bool, len(c.CameraGrants))
+		for _, id := range c.CameraGrants {
+			if isAdmin || set[id] {
+				grant[id] = true
+			}
+		}
+		return false, grant
 	}
-	return false, set
+	return isAdmin, set
 }
 
 // allowedCamera reports whether the current user may access a camera (admins:

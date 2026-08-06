@@ -29,18 +29,24 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	c := auth.FromContext(r.Context())
 	var req struct {
-		Name          string `json:"name"`
-		ExpiresInDays int    `json:"expiresInDays"`
+		Name          string   `json:"name"`
+		ExpiresInDays int      `json:"expiresInDays"`
+		Scopes        []string `json:"scopes"`
+		CameraGrants  []string `json:"cameraGrants"`
 	}
 	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
 		writeError(w, http.StatusBadRequest, "name required")
+		return
+	}
+	if bad := validateScopes(req.Scopes); bad != "" {
+		writeError(w, http.StatusBadRequest, "unknown scope(s): "+bad)
 		return
 	}
 	var exp int64
 	if req.ExpiresInDays > 0 {
 		exp = time.Now().Add(time.Duration(req.ExpiresInDays) * 24 * time.Hour).UnixMilli()
 	}
-	tok, plain, err := s.st.CreateAPIToken(c.UserID, strings.TrimSpace(req.Name), exp)
+	tok, plain, err := s.st.CreateAPIToken(c.UserID, strings.TrimSpace(req.Name), exp, req.Scopes, req.CameraGrants)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create token")
 		return
