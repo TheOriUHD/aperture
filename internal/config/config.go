@@ -62,6 +62,13 @@ func (c *Config) SpoolDir() string { return filepath.Join(c.DataDir, "spool") }
 // that need a local file (scrub thumbnails, exports).
 func (c *Config) RemoteCacheDir() string { return filepath.Join(c.DataDir, "rcache") }
 
+// ExtensionsDir is the root for installed-extension files (Extension System).
+// Each extension gets its own <id>/ subtree, owned by a per-extension non-root
+// uid and hardened at boot (see the deploy entrypoint); it lives under DataDir —
+// never RecordingsDir, which the janitor manages — so it persists and backs up
+// as a unit with the rest of the runtime state.
+func (c *Config) ExtensionsDir() string { return filepath.Join(c.DataDir, "ext") }
+
 func env(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
 		return v
@@ -86,7 +93,7 @@ func Load() (*Config, error) {
 		WebDir:         env("APERTURE_WEB_DIR", ""),
 	}
 
-	for _, dir := range []string{c.DataDir, c.RecordingsDir, c.FrameCacheDir(), c.SpoolDir(), c.RemoteCacheDir()} {
+	for _, dir := range []string{c.DataDir, c.RecordingsDir, c.FrameCacheDir(), c.SpoolDir(), c.RemoteCacheDir(), c.ExtensionsDir()} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create dir %s: %w", dir, err)
 		}
