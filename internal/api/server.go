@@ -174,14 +174,16 @@ func (s *Server) routes() http.Handler {
 		// until the matrix pins each route (removed in the same task).
 		g.Get("/auth/me", authed, s.handleMe)
 		g.Get("/capabilities", authed, s.handleCapabilities)
-		g.Post("/auth/password", authed, s.handleChangePassword)
-		g.Post("/auth/2fa/setup", authed, s.handle2FASetup)
-		g.Post("/auth/2fa/enable", authed, s.handle2FAEnable)
-		g.Post("/auth/2fa/disable", authed, s.handle2FADisable)
-		g.Post("/auth/passkey/register/begin", authed, s.handlePasskeyRegisterBegin)
-		g.Post("/auth/passkey/register/finish", authed, s.handlePasskeyRegisterFinish)
+		// Account-credential mutations are session-only: a scoped token must never
+		// be able to change its owner's password/2FA/passkeys (account takeover).
+		g.Post("/auth/password", authedSessionOnly, s.handleChangePassword)
+		g.Post("/auth/2fa/setup", authedSessionOnly, s.handle2FASetup)
+		g.Post("/auth/2fa/enable", authedSessionOnly, s.handle2FAEnable)
+		g.Post("/auth/2fa/disable", authedSessionOnly, s.handle2FADisable)
+		g.Post("/auth/passkey/register/begin", authedSessionOnly, s.handlePasskeyRegisterBegin)
+		g.Post("/auth/passkey/register/finish", authedSessionOnly, s.handlePasskeyRegisterFinish)
 		g.Get("/auth/passkeys", authed, s.handleListPasskeys)
-		g.Delete("/auth/passkeys/{id}", authed, s.handleDeletePasskey)
+		g.Delete("/auth/passkeys/{id}", authedSessionOnly, s.handleDeletePasskey)
 		g.Get("/users/me/preferences", authed, s.handleGetPrefs)
 		g.Put("/users/me/preferences", authed, s.handleSetPrefs)
 		g.Get("/cameras", scoped(ScopeCamerasRead), s.handleListCameras)
@@ -269,9 +271,9 @@ func (s *Server) routes() http.Handler {
 		g.Get("/system/weather", adminScoped(ScopeSiteRead), s.handleGetWeather)
 		g.Put("/system/weather", adminScoped(ScopeSiteWrite), s.handleSetWeather)
 		g.Post("/system/purge", adminSessionOnly, s.handlePurge)
-		g.Get("/system/status", admin, s.handleSystemStatus)
-		g.Get("/system/metrics", admin, s.handleMetrics)
-		g.Get("/system/diagnostics", admin, s.handleDiagnostics)
+		g.Get("/system/status", adminScoped(ScopeSystemRead), s.handleSystemStatus)
+		g.Get("/system/metrics", adminScoped(ScopeSystemRead), s.handleMetrics)
+		g.Get("/system/diagnostics", adminScoped(ScopeSystemRead), s.handleDiagnostics)
 		g.Post("/cameras/test", adminScoped(ScopeCamerasWrite), s.handleTestCamera)
 		g.Get("/system/backup", adminSessionOnly, s.handleBackup)
 		g.Post("/system/restore", adminSessionOnly, s.handleRestore)
@@ -308,8 +310,8 @@ func (s *Server) routes() http.Handler {
 		g.Put("/automations/{id}", adminScoped(ScopeAutomationWrite), s.handleUpdateAutomation)
 		g.Delete("/automations/{id}", adminScoped(ScopeAutomationWrite), s.handleDeleteAutomation)
 		g.Post("/automations/{id}/test", adminScoped(ScopeAutomationWrite), s.handleTestAutomation)
-		g.Get("/system/audit", admin, s.handleGetAudit)
-		g.Get("/system/audit/verify", admin, s.handleVerifyAudit)
+		g.Get("/system/audit", adminScoped(ScopeSystemRead), s.handleGetAudit)
+		g.Get("/system/audit/verify", adminScoped(ScopeSystemRead), s.handleVerifyAudit)
 	}
 
 	// Mount the full API at both the unversioned alias and /api/v1. Both share
