@@ -6,6 +6,14 @@ services:
     image: aperture/nvrd:latest
     container_name: aperture-nvrd
     restart: unless-stopped
+    # Container-level backstop for a runaway backend extension. The per-extension
+    # V8 heap cap + oom_score_adj make an extension die first; these bound the whole
+    # cgroup (nvrd + ffmpeg + extensions) as a last resort. Sized ~10x current
+    # usage (~210 MiB / 8% CPU / 62 PIDs on a 4-core host) so recording is never
+    # starved. Applied only on container recreate, not a plain restart.
+    mem_limit: 2g
+    pids_limit: 1024
+    cpus: "3.0"
     depends_on:
       - go2rtc
       - mosquitto

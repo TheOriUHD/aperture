@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -61,17 +62,41 @@ const (
 	logRingLines = 200
 )
 
+// Defaults the caller (install/T1.5) applies when building a Spec. MemMB caps V8's
+// old-space heap so a leaking extension dies with a clean OOM exit (a crash the
+// supervisor restarts, then gives up on) instead of pushing the shared container
+// cgroup to its mem_limit — where the kernel OOM killer might pick ffmpeg or nvrd
+// instead. OOMScoreAdj biases the kernel toward the extension if the cap is ever
+// hit anyway (a positive value = more killable; raising one's own is unprivileged,
+// so it works after the setuid drop).
+const (
+	DefaultMemMB       = 256
+	DefaultNOFILE      = 256
+	DefaultNPROC       = 64
+	DefaultOOMScoreAdj = 800
+)
+
 // Spec is a resolved launch request. Entry, DenoFlags, Env, and the ext data dir
 // are computed by the caller (install/handlers) from the validated manifest.
 type Spec struct {
-	ID        string
-	Entry     string   // absolute path to the backend entry (.ts)
-	DenoFlags []string // --allow-net=…, --allow-read=…, --deny-run, --deny-ffi, --import-map=…, etc.
-	Env       []string // minimal: APERTURE_TOKEN, APERTURE_API
-	WorkDir   string   // the extension's own data dir (cwd, --allow-write target)
-	UID, GID  int      // per-extension non-root ids; 0 = do not drop (tests)
-	NOFILE    uint64   // RLIMIT_NOFILE (0 = leave default)
-	NPROC     uint64   // RLIMIT_NPROC  (0 = leave default)
+	ID          string
+	Entry       string   // absolute path to the backend entry (.ts)
+	DenoFlags   []string // --allow-net=…, --allow-read=…, --deny-run, --deny-ffi, --import-map=…, etc.
+	Env         []string // minimal: APERTURE_TOKEN, APERTURE_API
+	WorkDir     string   // the extension's own data dir (cwd, --allow-write target)
+	UID, GID    int      // per-extension non-root ids; 0 = do not drop (tests)
+	MemMB       int      // V8 --max-old-space-size (0 = leave default)
+	NOFILE      uint64   // RLIMIT_NOFILE (0 = leave default)
+	NPROC       uint64   // RLIMIT_NPROC  (0 = leave default)
+	OOMScoreAdj int      // /proc/self/oom_score_adj (0 = leave default)
+}
+
+// spawnLimits is the JSON the trampoline receives (rlimits + oom bias). Kept in
+// one place so buildCmd and RunSpawnTrampoline agree.
+type spawnLimits struct {
+	NOFILE uint64 `json:"nofile"`
+	NPROC  uint64 `json:"nproc"`
+	OOM    int    `json:"oom"`
 }
 
 type child struct {
@@ -95,9 +120,17 @@ func NewSupervisor(denoPath string, log *slog.Logger) *Supervisor {
 	return s
 }
 
-// denoArgv is the production launcher: `deno run <flags> <entry>`.
+// denoArgv is the production launcher: `deno run [--v8-flags…] <flags> <entry>`.
+// The V8 heap cap goes here (a deno run option) so a runaway extension hits its
+// OWN heap ceiling and exits cleanly, rather than dragging the shared cgroup up.
 func (s *Supervisor) denoArgv(spec Spec) (string, []string) {
-	return s.denoPath, append(append([]string{"run"}, spec.DenoFlags...), spec.Entry)
+	args := []string{"run"}
+	if spec.MemMB > 0 {
+		args = append(args, fmt.Sprintf("--v8-flags=--max-old-space-size=%d", spec.MemMB))
+	}
+	args = append(args, spec.DenoFlags...)
+	args = append(args, spec.Entry)
+	return s.denoPath, args
 }
 
 // Start launches an extension and supervises it in the background. If it is
@@ -238,9 +271,9 @@ func (s *Supervisor) buildCmd(ctx context.Context, spec Spec) *exec.Cmd {
 	path, args := s.argv(spec)
 
 	var cmd *exec.Cmd
-	if spec.NOFILE > 0 || spec.NPROC > 0 {
-		rl, _ := json.Marshal(map[string]uint64{"nofile": spec.NOFILE, "nproc": spec.NPROC})
-		wrapped := append([]string{spawnSubcommand, string(rl), "--", path}, args...)
+	if spec.NOFILE > 0 || spec.NPROC > 0 || spec.OOMScoreAdj != 0 {
+		lim, _ := json.Marshal(spawnLimits{NOFILE: spec.NOFILE, NPROC: spec.NPROC, OOM: spec.OOMScoreAdj})
+		wrapped := append([]string{spawnSubcommand, string(lim), "--", path}, args...)
 		cmd = exec.CommandContext(ctx, s.selfExe, wrapped...)
 	} else {
 		cmd = exec.CommandContext(ctx, path, args...)
@@ -356,10 +389,10 @@ func RunSpawnTrampoline() {
 	if len(os.Args) < 2 || os.Args[1] != spawnSubcommand {
 		return
 	}
-	// os.Args: [nvrd, __ext-spawn, <rlimit-json>, --, deno, run, …]
-	var rl map[string]uint64
+	// os.Args: [nvrd, __ext-spawn, <limits-json>, --, deno, run, …]
+	var lim spawnLimits
 	if len(os.Args) >= 3 {
-		_ = json.Unmarshal([]byte(os.Args[2]), &rl)
+		_ = json.Unmarshal([]byte(os.Args[2]), &lim)
 	}
 	sep := -1
 	for i, a := range os.Args {
@@ -372,11 +405,18 @@ func RunSpawnTrampoline() {
 		fmt.Fprintln(os.Stderr, "ext spawn: malformed trampoline invocation")
 		os.Exit(127)
 	}
-	if v, ok := rl["nofile"]; ok && v > 0 {
-		_ = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Cur: v, Max: v})
+	// Bias the OOM killer toward this extension first, so if the shared container
+	// cgroup ever hits its mem_limit the kernel prefers the extension over ffmpeg
+	// or nvrd. Raising one's OWN score is unprivileged, so this works even though we
+	// are already dropped to the extension's uid.
+	if lim.OOM != 0 {
+		_ = os.WriteFile("/proc/self/oom_score_adj", []byte(strconv.Itoa(lim.OOM)), 0)
 	}
-	if v, ok := rl["nproc"]; ok && v > 0 {
-		_ = syscall.Setrlimit(rlimitNProc, &syscall.Rlimit{Cur: v, Max: v})
+	if lim.NOFILE > 0 {
+		_ = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Cur: lim.NOFILE, Max: lim.NOFILE})
+	}
+	if lim.NPROC > 0 {
+		_ = syscall.Setrlimit(rlimitNProc, &syscall.Rlimit{Cur: lim.NPROC, Max: lim.NPROC})
 	}
 	cmd := os.Args[sep+1:]
 	if err := syscall.Exec(cmd[0], cmd, os.Environ()); err != nil {

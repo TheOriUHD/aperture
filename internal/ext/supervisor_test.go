@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"strings"
@@ -59,6 +60,32 @@ func TestSupervisorCrashLoopGivesUp(t *testing.T) {
 	waitState(t, s, "b", StateFailed, 3*time.Second)
 	if _, reason := s.Status("b"); !strings.Contains(reason, "keeps crashing") {
 		t.Fatalf("failed reason = %q, want it to mention crashing", reason)
+	}
+}
+
+func TestDenoArgvInjectsMemCap(t *testing.T) {
+	s := NewSupervisor("/usr/local/bin/deno", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_, args := s.denoArgv(Spec{Entry: "/x/main.ts", MemMB: 256, DenoFlags: []string{"--deny-run"}})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--v8-flags=--max-old-space-size=256") {
+		t.Fatalf("expected V8 heap cap flag, got: %s", joined)
+	}
+	if !strings.Contains(joined, "--deny-run") || args[len(args)-1] != "/x/main.ts" {
+		t.Fatalf("flags/entry order wrong: %s", joined)
+	}
+}
+
+func TestBuildCmdUsesTrampolineWhenLimited(t *testing.T) {
+	s := NewSupervisor("/usr/local/bin/deno", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	cmd := s.buildCmd(context.Background(), Spec{Entry: "/x/main.ts", NOFILE: 256, OOMScoreAdj: 800})
+	if cmd.Path != s.selfExe {
+		t.Fatalf("limited spawn should go via the trampoline (%s), got %s", s.selfExe, cmd.Path)
+	}
+	if joined := strings.Join(cmd.Args, " "); !strings.Contains(joined, spawnSubcommand) || !strings.Contains(joined, `"oom":800`) {
+		t.Fatalf("trampoline args missing subcommand/oom: %s", joined)
+	}
+	if cmd2 := s.buildCmd(context.Background(), Spec{Entry: "/x/main.ts"}); cmd2.Path != s.denoPath {
+		t.Fatalf("unlimited spawn should exec deno directly, got %s", cmd2.Path)
 	}
 }
 

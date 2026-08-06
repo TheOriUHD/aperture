@@ -5,6 +5,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"sync/atomic"
 
 	_ "modernc.org/sqlite"
@@ -48,6 +49,12 @@ func Open(path string) (*Store, error) {
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
+	}
+	// Restrict the DB files to owner-only so a non-root extension process sharing
+	// the container filesystem cannot read them even if it escaped the Deno sandbox
+	// (DD-FS). WAL/SHM exist by now (WAL mode + the migration writes created them).
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		_ = os.Chmod(p, 0o600)
 	}
 	// Seed the event-sequence counter from the high-water mark so new events keep
 	// strictly increasing across restarts (the 0022 backfill sets existing rows).

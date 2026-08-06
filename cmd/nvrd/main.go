@@ -23,6 +23,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/detect"
 	"github.com/TheOriUHD/aperture/internal/export"
+	"github.com/TheOriUHD/aperture/internal/ext"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/homekit"
 	"github.com/TheOriUHD/aperture/internal/logbuf"
@@ -43,6 +44,11 @@ import (
 )
 
 func main() {
+	// If this process is a re-exec to launch a backend extension
+	// (nvrd __ext-spawn …), apply its rlimits + OOM bias and exec Deno now — it
+	// must never fall through into the normal daemon boot.
+	ext.RunSpawnTrampoline()
+
 	logRing := logbuf.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}), 500)
 	log := slog.New(logRing)
 	log.Info("starting nvrd", "version", version.String())
@@ -299,6 +305,14 @@ func main() {
 	onvifSrv := onvif.New(cfg, st, log)
 	go onvifSrv.Run(bgCtx)
 
+	// Backend-extension supervisor (T1.3). Constructed here so it can be drained on
+	// shutdown; the install/manager handlers drive it in T1.5.
+	denoPath := os.Getenv("APERTURE_DENO_PATH")
+	if denoPath == "" {
+		denoPath = "/usr/local/bin/deno"
+	}
+	extSup := ext.NewSupervisor(denoPath, log)
+
 	srv := api.NewServer(cfg, st, am, sm, rec, det, detectEng, webhookDisp, automateEng, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
 	srv.SetStorage(storageRegistry, storageCipher)
 	srv.SetReconcile(janitor.EnforceNow)
@@ -325,6 +339,10 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 	log.Info("shutting down")
+
+	// Drain extension children first (SIGTERM → grace window) so they stop cleanly
+	// before the background context cancels the recorder and the rest.
+	extSup.StopAll()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
