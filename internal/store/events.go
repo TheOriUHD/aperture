@@ -9,6 +9,7 @@ import (
 // Event is a detected motion event (a clip with pre/post-roll).
 type Event struct {
 	ID           string  `json:"id"`
+	Seq          int64   `json:"seq"` // monotonic cursor (strictly increasing, not gapless)
 	CameraID     string  `json:"cameraId"`
 	Type         string  `json:"type"`
 	StartTS      int64   `json:"startTs"` // unix ms
@@ -41,11 +42,12 @@ func (s *Store) InsertEvent(e *Event) error {
 	if e.Type == "" {
 		e.Type = "motion"
 	}
+	e.Seq = s.eventSeq.Add(1)
 	_, err := s.db.Exec(
-		`INSERT INTO events (id, camera_id, type, start_ts, end_ts, thumb_path, snapshot_path, score, reviewed, saved)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO events (id, camera_id, type, start_ts, end_ts, thumb_path, snapshot_path, score, reviewed, saved, seq)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.CameraID, e.Type, e.StartTS, nullInt(e.EndTS), e.ThumbPath, e.SnapshotPath,
-		e.Score, boolInt(e.Reviewed), boolInt(e.Saved))
+		e.Score, boolInt(e.Reviewed), boolInt(e.Saved), e.Seq)
 	return err
 }
 
@@ -129,15 +131,15 @@ func (s *Store) CountEventsSince(ts int64) (int, error) {
 	return n, err
 }
 
-const eventSelect = `SELECT id, camera_id, type, start_ts, end_ts, thumb_path, snapshot_path, score, reviewed, saved, top_label, object_summary, motion_cells FROM events`
+const eventSelect = `SELECT id, camera_id, type, start_ts, end_ts, thumb_path, snapshot_path, score, reviewed, saved, top_label, object_summary, motion_cells, seq FROM events`
 
 func scanEvent(row rowScanner) (*Event, error) {
 	var e Event
-	var end sql.NullInt64
+	var end, seq sql.NullInt64
 	var reviewed, saved int
 	var cells string
 	err := row.Scan(&e.ID, &e.CameraID, &e.Type, &e.StartTS, &end, &e.ThumbPath, &e.SnapshotPath,
-		&e.Score, &reviewed, &saved, &e.TopLabel, &e.ObjectSummary, &cells)
+		&e.Score, &reviewed, &saved, &e.TopLabel, &e.ObjectSummary, &cells, &seq)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -145,6 +147,7 @@ func scanEvent(row rowScanner) (*Event, error) {
 		return nil, err
 	}
 	e.EndTS = end.Int64
+	e.Seq = seq.Int64
 	e.Reviewed = reviewed != 0
 	e.Saved = saved != 0
 	if cells != "" {

@@ -5,6 +5,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite"
 )
@@ -12,6 +13,10 @@ import (
 // Store owns the database handle and exposes typed data-access methods.
 type Store struct {
 	db *sql.DB
+	// eventSeq is the in-process source for events.seq: strictly increasing (not
+	// gapless), seeded at Open from the high-water mark. Safe under the
+	// single-writer pool with no per-insert SELECT.
+	eventSeq atomic.Int64
 }
 
 // Open opens (or creates) the SQLite database at path, applies pragmas for
@@ -42,6 +47,14 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// Seed the event-sequence counter from the high-water mark so new events keep
+	// strictly increasing across restarts (the 0022 backfill sets existing rows).
+	var maxSeq sql.NullInt64
+	if err := db.QueryRow(`SELECT MAX(seq) FROM events`).Scan(&maxSeq); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("seed event seq: %w", err)
+	}
+	s.eventSeq.Store(maxSeq.Int64)
 	return s, nil
 }
 

@@ -17,6 +17,7 @@ func eventView(e *store.Event, now int64) map[string]any {
 	}
 	v := map[string]any{
 		"id":       e.ID,
+		"seq":      e.Seq, // monotonic cursor for /events + SSE Last-Event-ID
 		"cameraId": e.CameraID,
 		"type":     e.Type,
 		"startTs":  e.StartTS,
