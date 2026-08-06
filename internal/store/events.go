@@ -91,9 +91,19 @@ func (s *Store) ListEvents(cameraID string, fromMs, toMs int64) ([]*Event, error
 // (admin), a non-nil slice restricts to those cameras, and an empty slice yields
 // no rows. Filtering in the query — rather than over-fetching and dropping rows
 // in the handler — makes a viewer's N-row request scan at most N rows.
-func (s *Store) ListEventsAllScoped(fromMs, toMs int64, limit int, cameraIDs []string) ([]*Event, error) {
+//
+// Ordering is by seq DESC (not start_ts): seq is unique and strictly increasing,
+// so it is a stable keyset key, whereas start_ts can tie. seq is assigned in
+// start order for live events and was backfilled in (start_ts,id) order, so the
+// visible newest-first order is unchanged. beforeSeq>0 selects the next keyset
+// page (rows with seq < beforeSeq); 0 starts from the newest.
+func (s *Store) ListEventsAllScoped(fromMs, toMs, beforeSeq int64, limit int, cameraIDs []string) ([]*Event, error) {
 	q := eventSelect + ` WHERE start_ts >= ? AND start_ts <= ?`
 	args := []any{fromMs, toMs}
+	if beforeSeq > 0 {
+		q += ` AND seq < ?`
+		args = append(args, beforeSeq)
+	}
 	if cameraIDs != nil {
 		if len(cameraIDs) == 0 {
 			return []*Event{}, nil
@@ -104,7 +114,7 @@ func (s *Store) ListEventsAllScoped(fromMs, toMs int64, limit int, cameraIDs []s
 			args = append(args, id)
 		}
 	}
-	q += ` ORDER BY start_ts DESC LIMIT ?`
+	q += ` ORDER BY seq DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := s.db.Query(q, args...)
 	if err != nil {

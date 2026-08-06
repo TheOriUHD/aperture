@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -89,9 +88,11 @@ func (s *Server) handleCameraEvents(w http.ResponseWriter, r *http.Request) {
 // handleEventsAll lists recent events across all cameras (for the Alarms feed).
 func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 	from, to := parseRange(r)
-	limit := 200
-	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 1000 {
-		limit = v
+	limit := pageLimit(r, 200) // default 200 for the alarm feed; convention max 1000
+	beforeSeq, present, ok := cursorInt(r)
+	if present && !ok {
+		writeErrorCode(w, http.StatusBadRequest, "validation", "invalid cursor")
+		return
 	}
 	// Camera ACL is pushed into SQL (T2.7): admins see all (nil filter); a viewer
 	// or scoped token is restricted to its camera set, so the query scans at most
@@ -104,7 +105,7 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 			cams = append(cams, id)
 		}
 	}
-	evs, err := s.st.ListEventsAllScoped(from, to, limit, cams)
+	evs, err := s.st.ListEventsAllScoped(from, to, beforeSeq, limit, cams)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -119,6 +120,10 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 			v["conditions"] = c
 		}
 		out = append(out, v)
+	}
+	// Keyset cursor (T2.4): the last row has the smallest seq on this page.
+	if n := len(evs); n > 0 {
+		setNextCursor(w, n, limit, evs[n-1].Seq)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

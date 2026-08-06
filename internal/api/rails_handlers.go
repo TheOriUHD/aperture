@@ -78,9 +78,15 @@ func (s *Server) handleGetAudit(w http.ResponseWriter, r *http.Request) {
 	f := store.AuditFilter{
 		Action: q.Get("action"),
 		Actor:  q.Get("actor"),
-		Limit:  atoiOr(q.Get("limit"), 200),
+		Limit:  pageLimit(r, 200),
 		Offset: atoiOr(q.Get("offset"), 0),
 	}
+	beforeID, present, ok := cursorInt(r)
+	if present && !ok {
+		writeErrorCode(w, http.StatusBadRequest, "validation", "invalid cursor")
+		return
+	}
+	f.BeforeID = beforeID
 	if v, err := strconv.ParseInt(q.Get("from"), 10, 64); err == nil {
 		f.From = v
 	}
@@ -91,6 +97,9 @@ func (s *Server) handleGetAudit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+	if n := len(entries); n > 0 {
+		setNextCursor(w, n, f.Limit, entries[n-1].ID)
 	}
 	actions, _ := s.st.DistinctAuditActions()
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "actions": actions})

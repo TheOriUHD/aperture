@@ -63,6 +63,10 @@ type AuditFilter struct {
 	To     int64
 	Limit  int
 	Offset int
+	// BeforeID is the keyset cursor: when >0, only rows with id < BeforeID are
+	// returned (entries are ordered id DESC). Preferred over Offset, which is
+	// retained for the current web viewer until it migrates (Phase 5).
+	BeforeID int64
 }
 
 // ListAudit returns audit entries newest-first matching the filter.
@@ -84,6 +88,10 @@ func (s *Store) ListAudit(f AuditFilter) ([]*AuditEntry, error) {
 	if f.To > 0 {
 		q += " AND ts <= ?"
 		args = append(args, f.To)
+	}
+	if f.BeforeID > 0 {
+		q += " AND id < ?"
+		args = append(args, f.BeforeID)
 	}
 	limit := f.Limit
 	if limit <= 0 || limit > 500 {
