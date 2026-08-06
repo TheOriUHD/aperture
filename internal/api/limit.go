@@ -38,8 +38,9 @@ const (
 // ≤1 MiB JSON body (≈34 KiB/s) yet cuts off a slowloris body. This is the
 // missing-ReadTimeout mitigation without a GLOBAL read deadline (which would
 // kill slow large uploads — plan C-4); it is applied per-request only where it
-// is safe (see limitBody).
-const readBodyTimeout = 30 * time.Second
+// is safe (see limitBody). A var, not a const, only so the keep-alive test can
+// shrink it; never reassigned in production.
+var readBodyTimeout = 30 * time.Second
 
 // limitBody caps the request body. Multipart uploads get the large cap; anything
 // else the JSON cap. A Content-Length past the cap is refused immediately; a
