@@ -17,10 +17,11 @@ func (s *Server) handleListAutomations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if autos == nil {
-		autos = []store.Automation{}
+	out := make([]map[string]any, len(autos))
+	for i := range autos {
+		out[i] = withETag(autos[i]) // per-item etag for If-Match round-trips
 	}
-	writeJSON(w, http.StatusOK, autos)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleCreateAutomation(w http.ResponseWriter, r *http.Request) {

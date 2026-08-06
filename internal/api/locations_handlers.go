@@ -137,6 +137,7 @@ func (s *Server) locationView(loc *store.StorageLocation) map[string]any {
 			}
 		}
 	}
+	m["etag"] = etagOf(loc) // matches the precondition etagOf(loc) on location writes
 	return m
 }
 

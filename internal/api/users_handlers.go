@@ -22,6 +22,7 @@ func (s *Server) userView(u *store.User) map[string]any {
 		"role":      u.Role,
 		"disabled":  u.Disabled,
 		"cameraIds": cams,
+		"etag":      etagOf(u), // matches the precondition etagOf(u) on user writes
 	}
 }
 

@@ -87,10 +87,11 @@ func (s *Server) handleListWebhooks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if whs == nil {
-		whs = []store.Webhook{}
+	out := make([]map[string]any, len(whs))
+	for i := range whs {
+		out[i] = withETag(whs[i]) // per-item etag for If-Match round-trips
 	}
-	writeJSON(w, http.StatusOK, whs)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) decodeWebhook(r *http.Request) (*store.Webhook, error) {

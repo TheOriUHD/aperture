@@ -40,6 +40,26 @@ func setETag(w http.ResponseWriter, v any) string {
 	return e
 }
 
+// withETag renders a struct as a JSON object with an added "etag" field, so a
+// LIST response exposes each item's ETag. The ETag is computed from the struct
+// (not the rendered map), so it equals the precondition's etagOf(item) — a token
+// can list, then send that ETag as If-Match and get a real 412 on staleness
+// rather than only If-Match: * (existence). Used for the raw-struct collections
+// (rules/automations/webhooks); the view-backed ones add "etag" to their view.
+func withETag(v any) map[string]any {
+	e := etagOf(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		return map[string]any{"etag": e}
+	}
+	var m map[string]any
+	if json.Unmarshal(b, &m) != nil || m == nil {
+		return map[string]any{"etag": e}
+	}
+	m["etag"] = e
+	return m
+}
+
 // precondition enforces the If-Match policy for a mutating request against the
 // resource's current ETag. It returns false — having already written the 428/412
 // response — when the request must be rejected; true to proceed with the write.

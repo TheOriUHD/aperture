@@ -61,6 +61,7 @@ var channelTypes = map[string]bool{
 func channelView(c *store.NotifyChannel) map[string]any {
 	return map[string]any{
 		"id": c.ID, "type": c.Type, "name": c.Name, "enabled": c.Enabled, "createdAt": c.CreatedAt,
+		"etag": etagOf(c), // matches the precondition etagOf(ch) on channel writes
 	}
 }
 
@@ -187,10 +188,11 @@ func (s *Server) handleListRules(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if rules == nil {
-		rules = []*store.NotifyRule{}
+	out := make([]map[string]any, len(rules))
+	for i, r := range rules {
+		out[i] = withETag(r) // per-item etag for If-Match round-trips
 	}
-	writeJSON(w, http.StatusOK, rules)
+	writeJSON(w, http.StatusOK, out)
 }
 
 type ruleReq struct {
