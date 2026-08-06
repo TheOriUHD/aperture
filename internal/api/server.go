@@ -67,6 +67,9 @@ type Server struct {
 	// declaredRoutes records every (METHOD path) registered through apiRouter,
 	// consulted by the boot-time fail-closed guard (assertAllRoutesDeclared).
 	declaredRoutes map[string]bool
+
+	// limiter is the per-(class,id) request rate limiter (T2.6).
+	limiter *rateLimiter
 }
 
 // SetStorage wires the storage-backend registry and credential cipher used for
@@ -90,6 +93,7 @@ func (s *Server) triggerReconcile() {
 // NewServer builds a Server and its routes.
 func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, detectEng *detect.Engine, webhookDisp *webhook.Dispatcher, automateEng *automate.Engine, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, wd *watchdog.Watchdog, logs *logbuf.Ring, log *slog.Logger) *Server {
 	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, detect: detectEng, webhook: webhookDisp, automate: automateEng, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
+	s.limiter = newRateLimiter()
 	s.router = s.routes()
 	return s
 }
@@ -141,6 +145,10 @@ func (s *Server) routes() http.Handler {
 
 	s.declaredRoutes = map[string]bool{}
 	apiRoutes := func(r chi.Router) {
+		// Rate-limit (per class+principal) then cap the request body, before any
+		// handler runs. Both mounts (/api, /api/v1) get these via apiRoutes.
+		r.Use(s.rateLimit)
+		r.Use(s.limitBody)
 		g := s.apiGroup(r)
 
 		// Public — no authentication.

@@ -294,10 +294,15 @@ func main() {
 	srv := api.NewServer(cfg, st, am, sm, rec, det, detectEng, webhookDisp, automateEng, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
 	srv.SetStorage(storageRegistry, storageCipher)
 	srv.SetReconcile(janitor.EnforceNow)
+	srv.StartRateLimitSweeper()
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second, // slowloris guard on headers
+		IdleTimeout:       120 * time.Second,
+		// ReadTimeout and WriteTimeout are deliberately left 0: a write deadline
+		// would kill SSE and long media exports, a read deadline slow large
+		// uploads. Body size is bounded by limitBody (MaxBytesReader) instead.
 	}
 
 	go func() {

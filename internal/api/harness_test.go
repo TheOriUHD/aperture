@@ -79,6 +79,15 @@ func newTestServerNoRouter(t *testing.T) *Server {
 		detect:    detect.New(st, nil, dir, lg),
 		log:       lg,
 		startedAt: time.Now(),
+		// Effectively unlimited by default so the shared auth-matrix tests (many
+		// requests per principal) aren't throttled; the rate-limit test shrinks
+		// a specific bucket to exercise 429s.
+		limiter: &rateLimiter{
+			buckets: map[string]*bucket{},
+			session: rateConfig{burst: 1e9, refill: 1e9},
+			token:   rateConfig{burst: 1e9, refill: 1e9},
+			anon:    rateConfig{burst: 1e9, refill: 1e9},
+		},
 	}
 }
 
