@@ -4,6 +4,7 @@ import "strings"
 
 // EventObject is one detected object within an event (bbox normalized 0..1).
 type EventObject struct {
+	ID         int64   `json:"id"` // stable, addressable id (assigned once at save)
 	Label      string  `json:"label"`
 	Confidence float64 `json:"confidence"`
 	X          float64 `json:"x"`
@@ -28,9 +29,9 @@ func (s *Store) SaveEventDetections(eventID, topLabel, summary string, objs []Ev
 	}
 	for _, o := range objs {
 		if _, err := tx.Exec(
-			`INSERT INTO event_objects (event_id, label, confidence, bbox_x, bbox_y, bbox_w, bbox_h, ts)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			eventID, o.Label, o.Confidence, o.X, o.Y, o.W, o.H, o.TS); err != nil {
+			`INSERT INTO event_objects (event_id, label, confidence, bbox_x, bbox_y, bbox_w, bbox_h, ts, id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			eventID, o.Label, o.Confidence, o.X, o.Y, o.W, o.H, o.TS, s.objectSeq.Add(1)); err != nil {
 			return err
 		}
 	}
@@ -44,7 +45,7 @@ func (s *Store) SaveEventDetections(eventID, topLabel, summary string, objs []Ev
 // EventObjects returns the detected objects for a single event.
 func (s *Store) EventObjects(eventID string) ([]EventObject, error) {
 	rows, err := s.db.Query(
-		`SELECT label, confidence, bbox_x, bbox_y, bbox_w, bbox_h, ts
+		`SELECT id, label, confidence, bbox_x, bbox_y, bbox_w, bbox_h, ts
 		 FROM event_objects WHERE event_id = ? ORDER BY confidence DESC`, eventID)
 	if err != nil {
 		return nil, err
@@ -53,7 +54,7 @@ func (s *Store) EventObjects(eventID string) ([]EventObject, error) {
 	var out []EventObject
 	for rows.Next() {
 		var o EventObject
-		if err := rows.Scan(&o.Label, &o.Confidence, &o.X, &o.Y, &o.W, &o.H, &o.TS); err != nil {
+		if err := rows.Scan(&o.ID, &o.Label, &o.Confidence, &o.X, &o.Y, &o.W, &o.H, &o.TS); err != nil {
 			return nil, err
 		}
 		out = append(out, o)
@@ -74,7 +75,7 @@ func (s *Store) EventObjectsFor(ids []string) (map[string][]EventObject, error) 
 		args[i] = id
 	}
 	rows, err := s.db.Query(
-		`SELECT event_id, label, confidence, bbox_x, bbox_y, bbox_w, bbox_h, ts
+		`SELECT event_id, id, label, confidence, bbox_x, bbox_y, bbox_w, bbox_h, ts
 		 FROM event_objects WHERE event_id IN (`+ph+`) ORDER BY confidence DESC`, args...)
 	if err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func (s *Store) EventObjectsFor(ids []string) (map[string][]EventObject, error) 
 	for rows.Next() {
 		var id string
 		var o EventObject
-		if err := rows.Scan(&id, &o.Label, &o.Confidence, &o.X, &o.Y, &o.W, &o.H, &o.TS); err != nil {
+		if err := rows.Scan(&id, &o.ID, &o.Label, &o.Confidence, &o.X, &o.Y, &o.W, &o.H, &o.TS); err != nil {
 			return nil, err
 		}
 		out[id] = append(out[id], o)

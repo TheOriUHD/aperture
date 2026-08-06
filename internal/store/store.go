@@ -17,6 +17,8 @@ type Store struct {
 	// gapless), seeded at Open from the high-water mark. Safe under the
 	// single-writer pool with no per-insert SELECT.
 	eventSeq atomic.Int64
+	// objectSeq is the same for event_objects.id (addressable detections).
+	objectSeq atomic.Int64
 }
 
 // Open opens (or creates) the SQLite database at path, applies pragmas for
@@ -55,6 +57,12 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("seed event seq: %w", err)
 	}
 	s.eventSeq.Store(maxSeq.Int64)
+	var maxObj sql.NullInt64
+	if err := db.QueryRow(`SELECT MAX(id) FROM event_objects`).Scan(&maxObj); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("seed object id: %w", err)
+	}
+	s.objectSeq.Store(maxObj.Int64)
 	return s, nil
 }
 
