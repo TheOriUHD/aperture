@@ -22,6 +22,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/detect"
+	"github.com/TheOriUHD/aperture/internal/notify"
 	"github.com/TheOriUHD/aperture/internal/store"
 )
 
@@ -77,6 +78,7 @@ func newTestServerNoRouter(t *testing.T) *Server {
 		am:        am,
 		cfg:       cfg,
 		detect:    detect.New(st, nil, dir, lg),
+		notify:    notify.New(cfg, st, lg),
 		log:       lg,
 		startedAt: time.Now(),
 		// Effectively unlimited by default so the shared auth-matrix tests (many

@@ -34,6 +34,8 @@ type Engine struct {
 	subMu   sync.Mutex
 	subs    map[int]*subscriber
 	nextSub int
+
+	feedHub // general change-feed hub (T2.5)
 }
 
 // New builds the engine and ensures a VAPID keypair exists (persisted in
@@ -76,6 +78,14 @@ func (e *Engine) OnEvent(ev *store.Event) {
 	// event is streamed to subscribers allowed to see the camera, and the browser
 	// shows it via the Notification API — no external push service required.
 	e.broadcast(ev, cam)
+
+	// Change feed (T2.5): a durable event.created message keyed by the event's
+	// seq, so a reconnecting client resumes from the DB by Last-Event-ID.
+	e.PublishFeed(FeedMessage{
+		ID: ev.Seq, Type: "event.created", TS: ev.StartTS, Camera: ev.CameraID,
+		Data:    map[string]any{"eventId": ev.ID, "eventType": ev.Type, "score": ev.Score},
+		Durable: true,
+	})
 
 	// Arm/disarm (driven from Home Assistant, §14.2): when disarmed, keep the
 	// in-app live feed but suppress external channel notifications.

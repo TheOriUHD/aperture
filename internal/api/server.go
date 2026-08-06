@@ -197,6 +197,7 @@ func (s *Server) routes() http.Handler {
 		g.Get("/cameras/{id}/seg/{seg}", authedCam, s.handleSegmentFile)
 		g.Delete("/cameras/{id}/recordings", authedCam, s.handleDeleteRecordings) // + internal admin check
 		g.Get("/events", authed, s.handleEventsAll)
+			g.Get("/feed", access{scopes: []string{ScopeEventsRead}}, s.handleFeed) // T2.5 change feed (SSE)
 		g.Get("/events/{id}/thumb.jpg", authed, s.handleEventThumb) // camera resolved from the event row (hand-checked)
 		g.Post("/export", authed, s.withIdempotency(s.handleCreateExport))             // cameras validated from the body (hand-checked)
 		g.Get("/export", authed, s.handleListExports)

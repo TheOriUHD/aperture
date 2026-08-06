@@ -71,8 +71,8 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		// capability lands (Phase 2), so a client can feature-detect rather than
 		// assume.
 		"features": map[string]bool{
-			"cursorPagination": true,  // T2.4 (Phase 2.A) — live
-			"changeFeed":       false, // T2.5 (Phase 2.C)
+			"cursorPagination": true, // T2.4 (Phase 2.A) — live
+			"changeFeed":       true, // T2.5 (Phase 2.C) — live
 			"coverageEndpoint": true,  // T2.1 (Phase 2.A) — live
 			"idempotencyKey":   false,
 			"etagIfMatch":      false,

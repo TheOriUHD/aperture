@@ -138,6 +138,43 @@ func (s *Store) EventsInRange(cameraID string, fromMs, toMs int64) ([]*Event, er
 	return collectEvents(rows)
 }
 
+// EventsSinceSeq returns events with seq > afterSeq in ascending seq order,
+// camera-scoped as in ListEventsAllScoped (nil = all). Backs change-feed resume:
+// a reconnecting client replays durable messages it missed straight from the DB.
+func (s *Store) EventsSinceSeq(afterSeq int64, limit int, cameraIDs []string) ([]*Event, error) {
+	q := eventSelect + ` WHERE seq > ?`
+	args := []any{afterSeq}
+	if cameraIDs != nil {
+		if len(cameraIDs) == 0 {
+			return []*Event{}, nil
+		}
+		ph := strings.TrimSuffix(strings.Repeat("?,", len(cameraIDs)), ",")
+		q += ` AND camera_id IN (` + ph + `)`
+		for _, id := range cameraIDs {
+			args = append(args, id)
+		}
+	}
+	q += ` ORDER BY seq ASC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collectEvents(rows)
+}
+
+// OldestEventSeq returns the smallest seq still present (0 if no events). The
+// change feed sends a `reset` when a client's cursor predates this (its missed
+// events have been pruned), telling it to refetch rather than resume.
+func (s *Store) OldestEventSeq() (int64, error) {
+	var seq sql.NullInt64
+	err := s.db.QueryRow(`SELECT MIN(seq) FROM events`).Scan(&seq)
+	if err != nil {
+		return 0, err
+	}
+	return seq.Int64, nil
+}
+
 // DeleteEvent removes an event row by id.
 func (s *Store) DeleteEvent(id string) error {
 	_, err := s.db.Exec(`DELETE FROM events WHERE id = ?`, id)
