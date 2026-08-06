@@ -371,8 +371,19 @@ func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
 	var prevEnd int64
 	for i, seg := range segs {
-		if i > 0 && seg.StartTS-prevEnd > 1000 {
+		disc := i > 0 && seg.StartTS-prevEnd > 1000
+		if disc {
 			b.WriteString("#EXT-X-DISCONTINUITY\n")
+		}
+		// EXT-X-PROGRAM-DATE-TIME anchors wall-clock to the segment's exact
+		// start_ts before segment 0 and re-emitted after every discontinuity —
+		// hls.js resets its PDT accumulation at a discontinuity, so each
+		// independent run needs its own anchor (T2.2). The anchor is exact even
+		// for reindexed footage (start_ts is stored precisely); only intra-run
+		// EXTINF durations can drift, which the PDT re-anchoring bounds per run.
+		if i == 0 || disc {
+			b.WriteString("#EXT-X-PROGRAM-DATE-TIME:" +
+				time.UnixMilli(seg.StartTS).UTC().Format("2006-01-02T15:04:05.000Z07:00") + "\n")
 		}
 		b.WriteString("#EXTINF:" + strconv.FormatFloat(float64(seg.DurationMS)/1000, 'f', 3, 64) + ",\n")
 		b.WriteString("seg/" + seg.ID + ".ts\n")
@@ -383,6 +394,29 @@ func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write([]byte(b.String()))
+}
+
+// handleSetPlayback flips runtime playback switches (T2.2). Currently just
+// playback.pdt_seek: the seek strategy the client uses. It is a settings write,
+// so a seek regression is rolled back instantly by flipping it back — no
+// redeploy. The new value is echoed and also surfaces in GET /capabilities.
+func (s *Server) handleSetPlayback(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PdtSeek *bool `json:"pdtSeek"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if req.PdtSeek != nil {
+		if err := s.st.SetSetting("playback.pdt_seek", boolStr(*req.PdtSeek)); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not save")
+			return
+		}
+		s.logAudit(r, "playback.config", "pdt_seek", boolStr(*req.PdtSeek))
+	}
+	v, _ := s.st.GetSetting("playback.pdt_seek")
+	writeJSON(w, http.StatusOK, map[string]any{"pdtSeek": v == "true"})
 }
 
 // handleSegmentFile serves a single recorded segment (with range support for

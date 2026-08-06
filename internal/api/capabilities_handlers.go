@@ -50,6 +50,11 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	// require v2. Empty until the first non-first-party client exists.
 	frozenAt, _ := s.st.GetSetting("api.v1.frozen_at")
 
+	// Runtime switch (T2.2): when true, the playback client derives seek time
+	// from the HLS EXT-X-PROGRAM-DATE-TIME tags instead of /segments math.
+	// Default off; flipped via PUT /system/playback with no redeploy.
+	pdtSeek, _ := s.st.GetSetting("playback.pdt_seek")
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"apiVersions":   apiVersions,
 		"serverVersion": version.Version,
@@ -66,11 +71,12 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		// capability lands (Phase 2), so a client can feature-detect rather than
 		// assume.
 		"features": map[string]bool{
-			"cursorPagination": false,
-			"changeFeed":       false,
-			"coverageEndpoint": false,
+			"cursorPagination": true,  // T2.4 (Phase 2.A) — live
+			"changeFeed":       false, // T2.5 (Phase 2.C)
+			"coverageEndpoint": true,  // T2.1 (Phase 2.A) — live
 			"idempotencyKey":   false,
 			"etagIfMatch":      false,
+			"pdtSeek":          pdtSeek == "true", // T2.2 runtime switch (default off)
 		},
 		"deprecations": []map[string]any{
 			{"surface": "/api", "successor": "/api/v1", "sunset": nil},

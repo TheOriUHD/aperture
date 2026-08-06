@@ -266,7 +266,8 @@ func (s *Server) routes() http.Handler {
 		g.Post("/system/restore", adminSessionOnly, s.handleRestore)
 		g.Post("/system/reindex", adminSessionOnly, s.handleReindex)
 		g.Put("/system/storage", admin, s.handleSetStorageConfig)
-		g.Get("/system/storage/disk", admin, s.handleDiskStats)
+		g.Put("/system/playback", admin, s.handleSetPlayback) // T2.2 runtime seek switch
+			g.Get("/system/storage/disk", admin, s.handleDiskStats)
 		g.Post("/system/storage/reserve", admin, s.handleReserveStorage)
 		g.Get("/system/storage/locations", admin, s.handleListLocations)
 		g.Post("/system/storage/locations", admin, s.handleCreateLocation)

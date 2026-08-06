@@ -136,3 +136,14 @@ func (s *Server) reqAs(method, path string, c cred) *httptest.ResponseRecorder {
 	s.ServeHTTP(rec, r)
 	return rec
 }
+
+// reqBody is reqAs with a request body (PUT/POST).
+func (s *Server) reqBody(method, path string, c cred, body io.Reader) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(method, path, body)
+	if c.apply != nil {
+		c.apply(r)
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, r)
+	return rec
+}
