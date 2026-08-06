@@ -61,6 +61,16 @@ var (
 	adminSessionOnly  = access{admin: true, sessionOnly: true}
 )
 
+// Scoped-spec helpers (Phase 3): every non-public, non-session-only route names
+// the scope(s) a token must hold. Session and CLI credentials bypass the scope
+// check, so these only constrain class=token — and an empty-scope token is
+// denied on any scoped route (A3). `*Cam` variants add the {id} camera gate;
+// `admin*` variants also require the token's owner to be an admin.
+func scoped(scopes ...string) access         { return access{scopes: scopes} }
+func scopedCam(scopes ...string) access      { return access{scopes: scopes, camera: camScopeParam} }
+func adminScoped(scopes ...string) access    { return access{admin: true, scopes: scopes} }
+func adminScopedCam(scopes ...string) access { return access{admin: true, scopes: scopes, camera: camScopeParam} }
+
 // apiRouter is the only sanctioned way to register an API route: every method
 // takes an access spec, records the route in the declared set (for the boot-time
 // guard), and wraps the handler in the enforcing middleware.

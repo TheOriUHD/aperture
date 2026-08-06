@@ -14,6 +14,13 @@ func eventView(e *store.Event, now int64) map[string]any {
 	if end == 0 {
 		end = now // ongoing
 	}
+	// bug 4.6: the v1 contract exposes endTsMs = null while an event is ongoing,
+	// added alongside the legacy endTs (which stays `now` so the current web app,
+	// still on /api, keeps drawing the live bar until it adopts endTsMs in 5.2).
+	var endTsMs any
+	if e.EndTS != 0 {
+		endTsMs = e.EndTS
+	}
 	v := map[string]any{
 		"id":       e.ID,
 		"seq":      e.Seq, // monotonic cursor for /events + SSE Last-Event-ID
@@ -21,6 +28,7 @@ func eventView(e *store.Event, now int64) map[string]any {
 		"type":     e.Type,
 		"startTs":  e.StartTS,
 		"endTs":    end,
+		"endTsMs":  endTsMs,
 		"ongoing":  e.EndTS == 0,
 		"score":    e.Score,
 		"reviewed": e.Reviewed,
@@ -124,6 +132,43 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 	// Keyset cursor (T2.4): the last row has the smallest seq on this page.
 	if n := len(evs); n > 0 {
 		setNextCursor(w, n, limit, evs[n-1].Seq)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleGetEvent returns a single event as an addressable v1 resource. events:read;
+// the camera is resolved from the event row and checked against the caller's ACL.
+func (s *Server) handleGetEvent(w http.ResponseWriter, r *http.Request) {
+	e, err := s.st.EventByID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.allowedCamera(r, e.CameraID) {
+		writeErrorCode(w, http.StatusForbidden, "forbidden.camera", "access denied")
+		return
+	}
+	s.attachObjects([]*store.Event{e})
+	writeJSON(w, http.StatusOK, eventView(e, time.Now().UnixMilli()))
+}
+
+// handleEventDetections returns an event's detection objects, each addressable
+// by its stable id (T1.6). events:read; camera resolved from the event row.
+func (s *Server) handleEventDetections(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	e, err := s.st.EventByID(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.allowedCamera(r, e.CameraID) {
+		writeErrorCode(w, http.StatusForbidden, "forbidden.camera", "access denied")
+		return
+	}
+	objs, _ := s.st.EventObjectsFor([]string{id})
+	out := objs[id]
+	if out == nil {
+		out = []store.EventObject{}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

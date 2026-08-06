@@ -69,7 +69,7 @@ func TestRateLimitPerClass(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
-	_, plain, err := s.st.CreateAPIToken(admin.ID, "ext", 0, nil, nil)
+	_, plain, err := s.st.CreateAPIToken(admin.ID, "ext", 0, []string{ScopeCamerasRead}, nil)
 	mustDo(t, err)
 
 	// Shrink the token bucket to 3 with no refill; leave the session bucket large.

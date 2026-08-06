@@ -36,8 +36,9 @@ func TestScopedTokenSessionOnlyAndGrants(t *testing.T) {
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam2", Name: "2"}))
 
-	// Admin-owned token, granted only cam1, no scopes.
-	_, plain, err := s.st.CreateAPIToken(admin.ID, "ext", 0, nil, []string{"cam1"})
+	// Admin-owned token, granted only cam1, holding cameras:read (Phase 3 scoped
+	// /cameras, so a token needs the scope to reach it — see the A3 assertion).
+	_, plain, err := s.st.CreateAPIToken(admin.ID, "ext", 0, []string{ScopeCamerasRead}, []string{"cam1"})
 	mustDo(t, err)
 	tokenC := cred{"token", bearerCred(plain)}
 
@@ -51,7 +52,7 @@ func TestScopedTokenSessionOnlyAndGrants(t *testing.T) {
 		t.Errorf("token minting a token: got %d, want 403 (session-only)", rec.Code)
 	}
 
-	// A non-session-only authed route with no required scope works for the token.
+	// A route whose scope the token holds works (cameras:read → /cameras).
 	if rec := s.reqAs("GET", "/api/v1/cameras", tokenC); rec.Code != http.StatusOK {
 		t.Errorf("token GET /cameras: got %d, want 200", rec.Code)
 	}
