@@ -56,6 +56,12 @@ func RequireAdmin(next http.Handler) http.Handler {
 	})
 }
 
+// WithClaims returns a context carrying the given session claims. Used by the
+// Context middleware and by tests that drive handlers directly.
+func WithClaims(ctx context.Context, c *SessionClaims) context.Context {
+	return context.WithValue(ctx, claimsKey, c)
+}
+
 // FromContext returns the session claims stored on the context, or nil.
 func FromContext(ctx context.Context) *SessionClaims {
 	c, _ := ctx.Value(claimsKey).(*SessionClaims)
