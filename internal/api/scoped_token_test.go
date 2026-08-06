@@ -1,11 +1,30 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/TheOriUHD/aperture/internal/store"
 )
+
+// TestTokenCreationBlockedUntilPhase3 covers the v1-freeze guard: minting a PAT
+// is refused (503, scopes_not_enforced) until scope enforcement ships in Phase 3.
+func TestTokenCreationBlockedUntilPhase3(t *testing.T) {
+	s := newTestServer(t)
+	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
+	mustDo(t, s.st.CreateUser(admin))
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	rec := s.reqAs("POST", "/api/v1/tokens", adminC)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /tokens (admin session): got %d, want 503 (blocked until Phase 3)", rec.Code)
+	}
+	var body map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["code"] != "scopes_not_enforced" {
+		t.Errorf("code = %q, want scopes_not_enforced", body["code"])
+	}
+}
 
 // TestScopedTokenSessionOnlyAndGrants covers T1.4: a class=token credential is
 // rejected from session-only operations even when its owner is an admin, and its

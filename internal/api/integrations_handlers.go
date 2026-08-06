@@ -26,7 +26,18 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toks)
 }
 
+// tokenCreationEnabled gates PAT minting. It stays false until Phase 3 assigns
+// scopes to routes: a token issued before then would carry scopes that no route
+// enforces (so it would not actually be scope-limited) and, per DD-FREEZE, would
+// prematurely freeze the v1 contract. REMOVE this guard in Phase 3.
+var tokenCreationEnabled = false
+
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
+	if !tokenCreationEnabled {
+		writeErrorCode(w, http.StatusServiceUnavailable, "scopes_not_enforced",
+			"API token creation is disabled until scope enforcement ships (Phase 3): a token issued now would not be scope-limited")
+		return
+	}
 	c := auth.FromContext(r.Context())
 	var req struct {
 		Name          string   `json:"name"`
