@@ -216,6 +216,7 @@ func main() {
 	exporter := export.New(st, storageRegistry, filepath.Join(cfg.DataDir, "exports"), log)
 	exporter.Start(bgCtx)
 	notifyEng := notify.New(cfg, st, log)
+	exporter.SetOnProgress(notifyEng.OnExportProgress) // change feed export.progress (3.2)
 	// Outbound event webhooks (open-platform integration firehose).
 	webhookDisp := webhook.New(st, cfg.PublicURL, log)
 	// API tokens authenticate as their owning user (inherit role + camera ACLs).

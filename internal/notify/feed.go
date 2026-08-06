@@ -181,6 +181,16 @@ func (e *Engine) OnDetections(eventID, cameraID string) {
 	})
 }
 
+// OnExportProgress emits an ephemeral export.progress. No camera — an export can
+// span several — so it is delivered to every subscriber (progress % isn't
+// camera-sensitive); the durable export result is fetched via the export API.
+func (e *Engine) OnExportProgress(id string, progress float64) {
+	e.PublishFeed(FeedMessage{
+		Type: "export.progress", TS: time.Now().UnixMilli(),
+		Data: map[string]any{"exportId": id, "progress": progress},
+	})
+}
+
 // OnCameraState emits an ephemeral camera.state on an online/offline transition.
 func (e *Engine) OnCameraState(cameraID string, online bool) {
 	state := "offline"

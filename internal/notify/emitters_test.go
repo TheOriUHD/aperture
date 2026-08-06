@@ -42,6 +42,27 @@ func TestEphemeralEmitters(t *testing.T) {
 	}
 }
 
+// TestExportProgressEmitter covers export.progress: ephemeral and camera-less,
+// so it reaches even a subscriber whose camera authz denies everything.
+func TestExportProgressEmitter(t *testing.T) {
+	e := &Engine{}
+	_, ch := e.SubscribeFeed(FeedFilter{}, func(string) bool { return false })
+	e.OnExportProgress("exp1", 0.5)
+	select {
+	case f := <-ch:
+		if f.Durable {
+			t.Error("export.progress should be ephemeral")
+		}
+		var m map[string]any
+		_ = json.Unmarshal(f.Data, &m)
+		if m["type"] != "export.progress" {
+			t.Errorf("type = %v, want export.progress", m["type"])
+		}
+	default:
+		t.Fatal("expected an export.progress frame (camera-less messages bypass authz)")
+	}
+}
+
 // TestEventClosedDurable covers event.closed carrying the event's seq (durable),
 // so a resuming client sees it via Last-Event-ID replay.
 func TestEventClosedDurable(t *testing.T) {

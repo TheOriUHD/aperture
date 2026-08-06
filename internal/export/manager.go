@@ -31,16 +31,29 @@ const (
 
 // Manager owns the export output directory and the single-worker job queue.
 type Manager struct {
-	st    *store.Store
-	reg   *storage.Registry
-	dir   string
-	log   *slog.Logger
-	queue chan string
+	st         *store.Store
+	reg        *storage.Registry
+	dir        string
+	log        *slog.Logger
+	queue      chan string
+	onProgress func(id string, progress float64) // change-feed export.progress hook
 }
 
 func New(st *store.Store, reg *storage.Registry, dir string, log *slog.Logger) *Manager {
 	_ = os.MkdirAll(dir, 0o755)
 	return &Manager{st: st, reg: reg, dir: dir, log: log, queue: make(chan string, 64)}
+}
+
+// SetOnProgress registers a callback invoked with a job's fractional progress.
+// Used to emit the change feed's export.progress.
+func (m *Manager) SetOnProgress(fn func(id string, progress float64)) { m.onProgress = fn }
+
+// setProgress records job progress and notifies the change-feed hook.
+func (m *Manager) setProgress(id string, progress float64) {
+	_ = m.st.SetExportProgress(id, progress)
+	if m.onProgress != nil {
+		m.onProgress(id, progress)
+	}
 }
 
 // localizeSegments returns a local filesystem path for each segment plus a
@@ -138,7 +151,7 @@ func (m *Manager) process(ctx context.Context, id string) {
 	if err != nil {
 		return
 	}
-	_ = m.st.SetExportProgress(id, 0)
+	m.setProgress(id, 0)
 	fail := func(msg string) {
 		m.log.Error("export failed", "id", id, "err", msg)
 		_ = m.st.FailExport(id, msg, time.Now().Unix())
@@ -320,7 +333,7 @@ func (m *Manager) zipClips(ctx context.Context, id string, job *store.ExportJob,
 		}
 		tmp = append(tmp, cp)
 		clips = append(clips, clip{cp, names[cid]})
-		_ = m.st.SetExportProgress(id, float64(i+1)/float64(len(cams))*0.9)
+		m.setProgress(id, float64(i+1)/float64(len(cams))*0.9)
 	}
 	if len(clips) == 0 {
 		return fmt.Errorf("no footage in the selected range")
@@ -477,7 +490,7 @@ func (m *Manager) trackProgress(id string, r io.Reader, durMs int64) {
 		}
 		if p-last >= 0.02 {
 			last = p
-			_ = m.st.SetExportProgress(id, p)
+			m.setProgress(id, p)
 		}
 	}
 }
