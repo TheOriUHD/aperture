@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,18 +27,7 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toks)
 }
 
-// tokenCreationEnabled gates PAT minting. It stays false until Phase 3 assigns
-// scopes to routes: a token issued before then would carry scopes that no route
-// enforces (so it would not actually be scope-limited) and, per DD-FREEZE, would
-// prematurely freeze the v1 contract. REMOVE this guard in Phase 3.
-var tokenCreationEnabled = false
-
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
-	if !tokenCreationEnabled {
-		writeErrorCode(w, http.StatusServiceUnavailable, "scopes_not_enforced",
-			"API token creation is disabled until scope enforcement ships (Phase 3): a token issued now would not be scope-limited")
-		return
-	}
 	c := auth.FromContext(r.Context())
 	var req struct {
 		Name          string   `json:"name"`
@@ -53,6 +43,13 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unknown scope(s): "+bad)
 		return
 	}
+	// A3: an empty-scope token is denied on every scoped route, so it is useless
+	// and there is no scope-update endpoint — reject at creation rather than mint
+	// a dead token. Scopes must be named explicitly.
+	if len(req.Scopes) == 0 {
+		writeErrorCode(w, http.StatusBadRequest, "validation", "at least one scope is required")
+		return
+	}
 	var exp int64
 	if req.ExpiresInDays > 0 {
 		exp = time.Now().Add(time.Duration(req.ExpiresInDays) * 24 * time.Hour).UnixMilli()
@@ -61,6 +58,11 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create token")
 		return
+	}
+	// DD-FREEZE: the first extension PAT issued makes v1 a public contract —
+	// record the freeze moment (idempotent). After this, breaking changes need v2.
+	if v, _ := s.st.GetSetting("api.v1.frozen_at"); v == "" {
+		_ = s.st.SetSetting("api.v1.frozen_at", strconv.FormatInt(time.Now().UnixMilli(), 10))
 	}
 	s.logAudit(r, "token.create", tok.Name, "API token created")
 	// Plaintext is returned exactly once.
