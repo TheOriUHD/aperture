@@ -12,6 +12,25 @@ import (
 	"github.com/TheOriUHD/aperture/internal/notify"
 )
 
+// emitConfig publishes a config.updated change-feed message for a domain
+// ("site", "detection", "schedule", …) after a successful config mutation.
+func (s *Server) emitConfig(domain string) {
+	if s.notify != nil {
+		s.notify.PublishFeed(notify.FeedMessage{
+			Type: "config.updated", TS: time.Now().UnixMilli(),
+			Data: map[string]any{"domain": domain},
+		})
+	}
+}
+
+// emitStorage publishes a storage.updated change-feed message after a storage
+// config or allocation change (lets the web drop its storage poll).
+func (s *Server) emitStorage() {
+	if s.notify != nil {
+		s.notify.PublishFeed(notify.FeedMessage{Type: "storage.updated", TS: time.Now().UnixMilli()})
+	}
+}
+
 // handleFeed is the v1 change feed (T2.5): a Server-Sent-Events stream of
 // {id,type,ts,camera,data} envelopes. On (re)connect it (1) replays durable
 // messages the client missed — events with seq > Last-Event-ID, straight from

@@ -49,6 +49,7 @@ func (s *Server) handleSetDetection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logAudit(r, "detection.config", c.Mode, "object detection configured")
+	s.emitConfig("detection")
 	writeJSON(w, http.StatusOK, c)
 }
 

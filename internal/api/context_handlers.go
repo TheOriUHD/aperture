@@ -36,6 +36,7 @@ func (s *Server) handleSetSite(w http.ResponseWriter, r *http.Request) {
 		s.weather.Reconcile()
 	}
 	s.logAudit(r, "site.update", req.AddressLabel, "")
+	s.emitConfig("site")
 	writeJSON(w, http.StatusOK, site.Load(s.st))
 }
 

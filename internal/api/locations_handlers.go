@@ -442,6 +442,7 @@ func (s *Server) handleAllocateLocation(w http.ResponseWriter, r *http.Request) 
 	}
 	s.triggerReconcile()
 	s.logAudit(r, "storage.allocate", req.LocationID, strconv.FormatInt(req.AllocationBytes, 10))
+	s.emitStorage()
 	writeJSON(w, http.StatusOK, map[string]any{"locations": s.allLocationViews(), "dataDir": s.cfg.DataDir})
 }
 

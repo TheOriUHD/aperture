@@ -175,6 +175,7 @@ func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = s.st.SetSetting(spotlightsKey, v)
 	}
+	s.emitConfig("site")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"siteName":           s.siteName(),
 		"overviewTempSensor": s.overviewTemp(),

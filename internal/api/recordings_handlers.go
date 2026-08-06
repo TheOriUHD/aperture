@@ -607,6 +607,7 @@ func (s *Server) handleSetStorageConfig(w http.ResponseWriter, r *http.Request) 
 		s.logAudit(r, "storage.path", newPath, "recordings path changed")
 	}
 	s.logAudit(r, "storage.config", "", "cap="+strconv.FormatInt(req.CapBytes, 10))
+	s.emitStorage()
 	s.handleStorage(w, r)
 }
 

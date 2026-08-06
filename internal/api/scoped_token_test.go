@@ -36,9 +36,9 @@ func TestScopedTokenSessionOnlyAndGrants(t *testing.T) {
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam2", Name: "2"}))
 
-	// Admin-owned token, granted only cam1, holding cameras:read (Phase 3 scoped
-	// /cameras, so a token needs the scope to reach it — see the A3 assertion).
-	_, plain, err := s.st.CreateAPIToken(admin.ID, "ext", 0, []string{ScopeCamerasRead}, []string{"cam1"})
+	// Admin-owned token, granted only cam1, holding cameras:read + schedules:read
+	// (Phase 3 scoped these routes; the camera grant then narrows WHICH cameras).
+	_, plain, err := s.st.CreateAPIToken(admin.ID, "ext", 0, []string{ScopeCamerasRead, ScopeSchedulesRead}, []string{"cam1"})
 	mustDo(t, err)
 	tokenC := cred{"token", bearerCred(plain)}
 
