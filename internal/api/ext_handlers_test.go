@@ -135,6 +135,42 @@ func TestExtInstallLifecycle(t *testing.T) {
 	}
 }
 
+func TestExtAssetServing(t *testing.T) {
+	s, _ := newExtAdmin(t)
+	mustDo(t, s.st.CreateExtension(&store.Extension{ID: "com.x", Name: "X", Version: "1.0.0", Source: "sideload", Enabled: true, ManifestJSON: "{}"}))
+	dir := s.extDir("com.x")
+	mustDo(t, os.MkdirAll(dir+"/ui", 0o755))
+	mustDo(t, os.WriteFile(dir+"/ui/panel.html", []byte("<h1>panel</h1>"), 0o644))
+	mustDo(t, os.MkdirAll(dir+"/backend", 0o755))
+	mustDo(t, os.WriteFile(dir+"/backend/main.ts", []byte("secret code"), 0o644))
+
+	get := func(p string) *httptest.ResponseRecorder { return do(s, httptest.NewRequest("GET", p, nil)) }
+
+	// UI asset served (unauthenticated — the sandbox iframe has no cookie) with CSP.
+	rec := get("/ext/com.x/ui/panel.html")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "panel") {
+		t.Fatalf("serve ui: got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "connect-src 'none'") {
+		t.Fatalf("missing/weak CSP: %q", csp)
+	}
+	// Only the ui/ subtree — backend code and the manifest are never web-served.
+	if rec := get("/ext/com.x/backend/main.ts"); rec.Code != 404 {
+		t.Errorf("backend served: %d (must not be)", rec.Code)
+	}
+	if rec := get("/ext/com.x/manifest.json"); rec.Code != 404 {
+		t.Errorf("manifest served: %d (must not be)", rec.Code)
+	}
+	// Disabled extension → 404; unknown extension → 404.
+	mustDo(t, s.st.SetExtensionEnabled("com.x", false))
+	if rec := get("/ext/com.x/ui/panel.html"); rec.Code != 404 {
+		t.Errorf("disabled extension served: %d", rec.Code)
+	}
+	if rec := get("/ext/nope/ui/x.html"); rec.Code != 404 {
+		t.Errorf("unknown extension served: %d", rec.Code)
+	}
+}
+
 func TestExtInstallRejectsTraversal(t *testing.T) {
 	s, adminC := newExtAdmin(t)
 	mustDo(t, s.st.SetSetting("ext.enabled", "1"))

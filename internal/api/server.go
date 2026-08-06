@@ -372,6 +372,10 @@ func (s *Server) routes() http.Handler {
 	r.Get("/s/{token}", s.handleSharePage)
 	r.Get("/s/{token}/media", s.handleShareMedia)
 
+	// Sandboxed UI-extension assets (enabled-only, restrictive CSP). Unauthenticated
+	// because the sandbox iframe carries no cookie; data access is via the broker.
+	r.Get("/ext/{id}/*", s.handleExtAsset)
+
 	// Everything else: the SPA.
 	r.NotFound(s.spaHandler())
 
