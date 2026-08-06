@@ -188,6 +188,7 @@ func (s *Server) routes() http.Handler {
 		// Management (admin, session-only): the gate, install (stage → confirm),
 		// list, enable/disable, uninstall (T1.5).
 		g.Post("/ext/gate", adminSessionOnly, s.handleExtGate)
+		g.Delete("/ext/gate", adminSessionOnly, s.handleExtGateDisable)
 		g.Get("/ext", adminSessionOnly, s.handleExtList)
 		g.Post("/ext/install", adminSessionOnly, s.handleExtInstall)
 		g.Post("/ext/install/confirm", adminSessionOnly, s.handleExtConfirm)

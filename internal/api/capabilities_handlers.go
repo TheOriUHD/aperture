@@ -82,5 +82,12 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 			{"surface": "/api", "successor": "/api/v1", "sunset": nil},
 		},
 		"apiV1FrozenAt": frozenAt, // "" until the contract is frozen
+		// Paths exempt from the freeze. The extension management + broker surface
+		// (/api/v1/ext/*) is FIRST-PARTY host machinery — the web app and the SDK
+		// talk to it — not the stable third-party contract, so it stays mutable
+		// after the freeze and its protocol/payloads may still change. The frozen
+		// contract is the resource surface extensions actually consume (cameras,
+		// events, coverage, …), which they reach through the broker or a token.
+		"frozenExempt": []string{"/api/v1/ext/"},
 	})
 }

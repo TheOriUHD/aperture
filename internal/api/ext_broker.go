@@ -43,6 +43,10 @@ func (s *Server) handleExtBroker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
+	if !s.extEnabled() {
+		writeError(w, http.StatusNotFound, "extensions are disabled")
+		return
+	}
 	ex, err := s.st.GetExtension(chi.URLParam(r, "id"))
 	if err != nil || !ex.Enabled {
 		writeError(w, http.StatusNotFound, "extension not found or disabled")

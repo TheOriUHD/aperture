@@ -61,7 +61,22 @@ func (s *Server) handleExtGate(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.st.SetSetting("ext.enabled", "1")
 	s.freezeV1()
+	s.StartEnabledExtensions() // re-spawn any previously-installed enabled backends
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true})
+}
+
+// handleExtGateDisable turns the extension subsystem off: it stops every running
+// extension and makes the broker + asset routes refuse, but LEAVES installed rows
+// in place (re-enabling restores them) and does NOT clear api.v1.frozen_at. The
+// freeze is a one-way latch by design — the contract was published the moment
+// extensions could exist, so un-publishing it would be a fiction. Clearing the
+// freeze is a deliberate v2 decision, never a side effect of toggling the gate.
+func (s *Server) handleExtGateDisable(w http.ResponseWriter, r *http.Request) {
+	_ = s.st.SetSetting("ext.enabled", "0")
+	if s.extSup != nil {
+		s.extSup.StopAll()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "frozenAtCleared": false})
 }
 
 // handleExtInstall stages an uploaded bundle and returns its consent metadata,
@@ -236,7 +251,7 @@ func (s *Server) handleExtUninstall(w http.ResponseWriter, r *http.Request) {
 // flags any whose on-disk files are missing (e.g. after a DB restore) instead of
 // silently running stale code. Called from main after SetExtensions.
 func (s *Server) StartEnabledExtensions() {
-	if s.extSup == nil {
+	if s.extSup == nil || !s.extEnabled() {
 		return
 	}
 	list, _ := s.st.ListExtensions()

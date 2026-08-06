@@ -26,6 +26,10 @@ const extCSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsaf
 // all DATA access is gated by the authed broker. Mounted at /ext/{id}/* below the
 // API routes and before the SPA catch-all.
 func (s *Server) handleExtAsset(w http.ResponseWriter, r *http.Request) {
+	if !s.extEnabled() {
+		http.NotFound(w, r)
+		return
+	}
 	id := chi.URLParam(r, "id")
 	ex, err := s.st.GetExtension(id)
 	if err != nil || !ex.Enabled {

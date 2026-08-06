@@ -22,6 +22,7 @@ func newBrokerTest(t *testing.T) (*Server, cred, cred) {
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "C1"}))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam2", Name: "C2"}))
 	mustDo(t, s.st.SetUserCameras(viewer.ID, []string{"cam1"})) // viewer sees cam1 only
+	mustDo(t, s.st.SetSetting("ext.enabled", "1"))              // the extension subsystem is on
 
 	mustDo(t, s.st.CreateExtension(&store.Extension{
 		ID: "ext.cams", Name: "Cams", Version: "1.0.0", Source: "sideload",

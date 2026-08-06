@@ -137,6 +137,7 @@ func TestExtInstallLifecycle(t *testing.T) {
 
 func TestExtAssetServing(t *testing.T) {
 	s, _ := newExtAdmin(t)
+	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
 	mustDo(t, s.st.CreateExtension(&store.Extension{ID: "com.x", Name: "X", Version: "1.0.0", Source: "sideload", Enabled: true, ManifestJSON: "{}"}))
 	dir := s.extDir("com.x")
 	mustDo(t, os.MkdirAll(dir+"/ui", 0o755))
@@ -168,6 +169,52 @@ func TestExtAssetServing(t *testing.T) {
 	}
 	if rec := get("/ext/nope/ui/x.html"); rec.Code != 404 {
 		t.Errorf("unknown extension served: %d", rec.Code)
+	}
+}
+
+func TestExtGateDisableGuardsAndLatch(t *testing.T) {
+	s, adminC := newExtAdmin(t)
+	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
+	mustDo(t, s.st.CreateExtension(&store.Extension{ID: "com.x", Name: "X", Version: "1.0.0", Source: "sideload", Enabled: true, ManifestJSON: "{}"}))
+	dir := s.extDir("com.x")
+	mustDo(t, os.MkdirAll(dir+"/ui", 0o755))
+	mustDo(t, os.WriteFile(dir+"/ui/p.html", []byte("x"), 0o644))
+	s.freezeV1()
+	frozen, _ := s.st.GetSetting("api.v1.frozen_at")
+	if frozen == "" {
+		t.Fatal("precondition: freeze should be set")
+	}
+
+	// Gate on: asset serves.
+	if rec := do(s, httptest.NewRequest("GET", "/ext/com.x/ui/p.html", nil)); rec.Code != 200 {
+		t.Fatalf("asset with gate on: %d", rec.Code)
+	}
+
+	// Disable the gate.
+	if rec := s.reqAs("DELETE", "/api/v1/ext/gate", adminC); rec.Code != 200 {
+		t.Fatalf("disable gate: %d", rec.Code)
+	}
+	if v, _ := s.st.GetSetting("ext.enabled"); v == "1" {
+		t.Fatal("gate should be off after DELETE")
+	}
+	// The freeze is a one-way latch — disabling the gate must NOT clear it.
+	if v, _ := s.st.GetSetting("api.v1.frozen_at"); v != frozen {
+		t.Fatalf("disable cleared frozen_at (was %q, now %q) — it must not", frozen, v)
+	}
+	// With the gate off both extension surfaces refuse.
+	if rec := do(s, httptest.NewRequest("GET", "/ext/com.x/ui/p.html", nil)); rec.Code != 404 {
+		t.Errorf("asset with gate off: %d, want 404", rec.Code)
+	}
+	if rec := s.reqBody("POST", "/api/v1/ext/com.x/broker", adminC, strings.NewReader(`{"method":"GET","path":"/cameras"}`)); rec.Code != 404 {
+		t.Errorf("broker with gate off: %d, want 404", rec.Code)
+	}
+
+	// Re-enable restores it (the row was left in place).
+	if rec := s.reqBody("POST", "/api/v1/ext/gate", adminC, strings.NewReader(`{"confirm":"enable extensions"}`)); rec.Code != 200 {
+		t.Fatalf("re-enable gate: %d", rec.Code)
+	}
+	if rec := do(s, httptest.NewRequest("GET", "/ext/com.x/ui/p.html", nil)); rec.Code != 200 {
+		t.Errorf("asset after re-enable: %d, want 200", rec.Code)
 	}
 }
 
