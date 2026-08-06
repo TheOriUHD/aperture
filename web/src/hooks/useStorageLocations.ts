@@ -8,12 +8,15 @@ export interface LocationsResponse {
 }
 
 export function useStorageLocations() {
-  // Poll dropped: storage.updated invalidates ["storage-locations"] (fired on
-  // every location create/edit/allocate/assign/delete via emitStorage), so the
-  // list refreshes on the mutations that change it.
+  // storage.updated (fired on every location create/edit/allocate/assign/delete
+  // via emitStorage) is the primary driver, but each location's used/free/diskFree
+  // bytes also drift with external/passive disk-fill — no mutation, no feed message
+  // — exactly as the aggregate storage bar does. A slow 60s backstop stays
+  // alongside the feed (was 30s), matching useStorage and useSystemStatus.
   return useQuery({
     queryKey: ["storage-locations"],
     queryFn: () => api.get<LocationsResponse>("/api/system/storage/locations"),
+    refetchInterval: 60_000,
   });
 }
 

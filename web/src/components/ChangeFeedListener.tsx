@@ -6,10 +6,11 @@ import { useQueryClient } from "@tanstack/react-query";
 // updates live, so the polls it replaces have now been removed ("pin before
 // remove"): system-status/cameras (camera.state + alarm.state), storage and
 // storage-locations (storage.updated), exports (export.progress), and every
-// events list incl. the dashboard cards (event.*/detection.*). Two of those keep a
-// slow 60s backstop ALONGSIDE the feed (feed still primary): system-status, whose
-// uptime/go2rtc counters free-run between transitions, and storage, whose disk
-// fills from outside Aperture with no mutation to emit storage.updated. Polls with
+// events list incl. the dashboard cards (event.*/detection.*). Three of those keep
+// a slow 60s backstop ALONGSIDE the feed (feed still primary): system-status, whose
+// uptime/go2rtc counters free-run between transitions, and storage plus
+// storage-locations, whose disk fills from outside Aperture with no mutation to
+// emit storage.updated (per-location used/free bytes drift the same way). Polls with
 // NO corresponding feed message stay as full polls by design — bitrate, Home
 // Assistant config/sensors, the live snapshot thumbnails, and the per-day
 // segments/coverage rail (segments carry no per-row feed message). Additive and
