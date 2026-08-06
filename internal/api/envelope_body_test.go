@@ -50,6 +50,69 @@ func TestAutomationUpdateRejectsEnvelopeEtag(t *testing.T) {
 	}
 }
 
+// TestAutomationETagExcludesLastFired pins the stability the web app's new
+// collection-item If-Match relies on: an automation's concurrency token must not
+// change when the engine bumps LastFired (a fire between the list load and a
+// user's save would otherwise 412 a normal single-user edit), but MUST change on a
+// real config edit.
+func TestAutomationETagExcludesLastFired(t *testing.T) {
+	base := store.Automation{
+		ID: "a1", Name: "A", Enabled: true, CooldownMs: 5,
+		Trigger: json.RawMessage("{}"), Conditions: json.RawMessage("{}"), Actions: json.RawMessage("[]"),
+	}
+	fired := base
+	fired.LastFired = 1_700_000_000_000 // engine fired between read and edit
+	if automationETag(&base) != automationETag(&fired) {
+		t.Fatal("etag must not change when LastFired changes (would spuriously 412 a normal save)")
+	}
+	edited := base
+	edited.Name = "B" // a real config edit
+	if automationETag(&base) == automationETag(&edited) {
+		t.Fatal("etag must change when an editable field changes")
+	}
+}
+
+// TestAutomationSessionIfMatchRoundTrip mirrors the web app's new collection-item
+// flow for a session: read the per-item etag from the LIST, replay it as If-Match
+// on the update. A match must 200 (no regression), and the now-stale tag must 412
+// (a concurrent editor's change is caught) — the lost-update protection sessions
+// previously lacked on these resources.
+func TestAutomationSessionIfMatchRoundTrip(t *testing.T) {
+	s := newTestServer(t)
+	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
+	mustDo(t, s.st.CreateUser(admin))
+	auto := &store.Automation{
+		Name: "A", Enabled: true,
+		Trigger: json.RawMessage("{}"), Conditions: json.RawMessage("{}"), Actions: json.RawMessage("[]"),
+	}
+	mustDo(t, s.st.CreateAutomation(auto))
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+
+	rec := s.reqAs("GET", "/api/v1/automations", adminC)
+	var list []map[string]any
+	mustDo(t, json.Unmarshal(rec.Body.Bytes(), &list))
+	etag, _ := list[0]["etag"].(string)
+	if etag == "" || etag == "*" {
+		t.Fatalf("list item etag = %q, want a real strong ETag", etag)
+	}
+
+	put := func(ifMatch string) *httptest.ResponseRecorder {
+		body := `{"name":"Renamed","enabled":true,"trigger":{},"conditions":{},"actions":[],"cooldownMs":0}`
+		r := httptest.NewRequest("PUT", "/api/v1/automations/"+auto.ID, strings.NewReader(body))
+		adminC.apply(r)
+		r.Header.Set("If-Match", ifMatch)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if rec := put(etag); rec.Code != http.StatusOK {
+		t.Fatalf("matching If-Match from the list: got %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if rec := put(etag); rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("stale If-Match after the resource changed: got %d, want 412", rec.Code)
+	}
+}
+
 func TestWebhookUpdateRejectsEnvelopeEtag(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}

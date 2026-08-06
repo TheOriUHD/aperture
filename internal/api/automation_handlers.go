@@ -11,6 +11,19 @@ import (
 	"github.com/TheOriUHD/aperture/internal/store"
 )
 
+// automationETag is the optimistic-concurrency token for an automation, computed
+// over its EDITABLE representation only. LastFired is bumped by the engine every
+// time the automation fires; hashing it would make a client's If-Match go stale
+// for a benign reason (a fire between read and edit) and 412 a normal single-user
+// save. Excluding it means the token changes only on a real config edit. Both the
+// list (withETagOf) and the precondition use it, so the advertised and the checked
+// ETag always agree.
+func automationETag(a *store.Automation) string {
+	c := *a
+	c.LastFired = 0
+	return etagOf(c)
+}
+
 func (s *Server) handleListAutomations(w http.ResponseWriter, r *http.Request) {
 	autos, err := s.st.ListAutomations()
 	if err != nil {
@@ -19,7 +32,7 @@ func (s *Server) handleListAutomations(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, len(autos))
 	for i := range autos {
-		out[i] = withETag(autos[i]) // per-item etag for If-Match round-trips
+		out[i] = withETagOf(autos[i], automationETag(&autos[i])) // stable per-item etag (excl. LastFired)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -49,7 +62,7 @@ func (s *Server) handleUpdateAutomation(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	if !s.precondition(w, r, etagOf(cur)) {
+	if !s.precondition(w, r, automationETag(cur)) {
 		return
 	}
 	var a store.Automation
@@ -77,7 +90,7 @@ func (s *Server) handleDeleteAutomation(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	if !s.precondition(w, r, etagOf(cur)) {
+	if !s.precondition(w, r, automationETag(cur)) {
 		return
 	}
 	if err := s.st.DeleteAutomation(chi.URLParam(r, "id")); err != nil {

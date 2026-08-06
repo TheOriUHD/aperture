@@ -47,7 +47,15 @@ func setETag(w http.ResponseWriter, v any) string {
 // rather than only If-Match: * (existence). Used for the raw-struct collections
 // (rules/automations/webhooks); the view-backed ones add "etag" to their view.
 func withETag(v any) map[string]any {
-	e := etagOf(v)
+	return withETagOf(v, etagOf(v))
+}
+
+// withETagOf is withETag with an explicitly supplied ETag, for a resource whose
+// concurrency token is computed over a SUBSET of its representation (e.g. an
+// automation's token excludes the runtime LastFired — see automationETag). The
+// body still exposes the full object; only the "etag" it advertises is the stable
+// one the precondition will compare against.
+func withETagOf(v any, e string) map[string]any {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return map[string]any{"etag": e}
