@@ -40,6 +40,8 @@ func TestAutomationUpdateRejectsEnvelopeEtag(t *testing.T) {
 	withEtag := `{"id":"` + auto.ID + `","name":"Renamed","enabled":false,"trigger":{},"conditions":{},"actions":[],"cooldownMs":0,"etag":"\"deadbeef\""}`
 	if rec := put(withEtag); rec.Code != http.StatusBadRequest {
 		t.Fatalf("automation body carrying envelope etag: got %d, want 400", rec.Code)
+	} else if b := rec.Body.String(); !strings.Contains(b, "unknown field") || !strings.Contains(b, "etag") {
+		t.Errorf("400 message should name the offending field, got: %s", b)
 	}
 	// The fixed body: envelope stripped, everything the server declares intact.
 	noEtag := `{"id":"` + auto.ID + `","name":"Renamed","enabled":false,"trigger":{},"conditions":{},"actions":[],"cooldownMs":0}`
@@ -62,6 +64,8 @@ func TestWebhookUpdateRejectsEnvelopeEtag(t *testing.T) {
 	withEtag := `{"id":"` + wh.ID + `","name":"H","url":"http://x","events":[],"enabled":false,"createdAt":0,"etag":"\"deadbeef\""}`
 	if rec := put(withEtag); rec.Code != http.StatusBadRequest {
 		t.Fatalf("webhook body carrying envelope etag: got %d, want 400", rec.Code)
+	} else if b := rec.Body.String(); !strings.Contains(b, "unknown field") || !strings.Contains(b, "etag") {
+		t.Errorf("400 message should name the offending field, got: %s", b)
 	}
 	noEtag := `{"id":"` + wh.ID + `","name":"H","url":"http://x","events":[],"enabled":false,"createdAt":0}`
 	if rec := put(noEtag); rec.Code != http.StatusOK {

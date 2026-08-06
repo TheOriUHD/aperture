@@ -51,7 +51,7 @@ type userReq struct {
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req userReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
@@ -106,7 +106,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var req userReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if req.Name != "" {

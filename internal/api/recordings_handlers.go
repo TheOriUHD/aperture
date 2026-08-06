@@ -580,7 +580,7 @@ func (s *Server) handleSetStorageConfig(w http.ResponseWriter, r *http.Request) 
 		Path     string `json:"path"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if req.CapBytes < 0 {
@@ -678,7 +678,7 @@ func (s *Server) handleReserveStorage(w http.ResponseWriter, r *http.Request) {
 		AllocatedBytes int64 `json:"allocatedBytes"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	bd := s.diskBreakdown()

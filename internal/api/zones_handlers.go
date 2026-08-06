@@ -47,7 +47,7 @@ func (s *Server) handleSetZones(w http.ResponseWriter, r *http.Request) {
 	}
 	var req motionMaskReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if req.Cols < 0 || req.Cols > 64 || req.Rows < 0 || req.Rows > 36 {

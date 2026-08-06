@@ -78,7 +78,7 @@ func (s *Server) handleLogin2FA(w http.ResponseWriter, r *http.Request) {
 		Code  string `json:"code"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	uid, err := s.am.ParsePending2FA(req.Token)
@@ -118,7 +118,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		NewPassword     string `json:"newPassword"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if len(req.NewPassword) < 8 {
@@ -171,7 +171,7 @@ func (s *Server) handle2FAEnable(w http.ResponseWriter, r *http.Request) {
 		Code string `json:"code"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	u, err := s.st.GetUserByID(c.UserID)
@@ -201,7 +201,7 @@ func (s *Server) handle2FADisable(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	u, err := s.st.GetUserByID(c.UserID)

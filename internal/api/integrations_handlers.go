@@ -106,7 +106,11 @@ func (s *Server) decodeWebhook(r *http.Request) (*store.Webhook, error) {
 
 func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	wh, err := s.decodeWebhook(r)
-	if err != nil || wh.Name == "" || !strings.HasPrefix(wh.URL, "http") {
+	if err != nil {
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	if wh.Name == "" || !strings.HasPrefix(wh.URL, "http") {
 		writeError(w, http.StatusBadRequest, "name and a valid http(s) URL are required")
 		return
 	}
@@ -131,7 +135,11 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wh, err := s.decodeWebhook(r)
-	if err != nil || wh.Name == "" {
+	if err != nil {
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	if wh.Name == "" {
 		writeError(w, http.StatusBadRequest, "invalid webhook")
 		return
 	}

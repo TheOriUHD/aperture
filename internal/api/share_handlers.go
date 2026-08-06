@@ -43,7 +43,7 @@ func (s *Server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		MaxViews     int    `json:"maxViews"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	job, err := s.st.GetExport(req.ExportID)

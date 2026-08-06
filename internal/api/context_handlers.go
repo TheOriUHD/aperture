@@ -30,7 +30,7 @@ func (s *Server) handleSetSite(w http.ResponseWriter, r *http.Request) {
 	}
 	var req site.Site
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if err := site.Save(s.st, req); err != nil {
@@ -105,7 +105,7 @@ func (s *Server) handleSetWeather(w http.ResponseWriter, r *http.Request) {
 		IntervalMin int    `json:"intervalMin"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	cfg := weather.Config{Enabled: req.Enabled, Source: req.Source, IntervalMin: req.IntervalMin}

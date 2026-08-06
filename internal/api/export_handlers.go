@@ -32,7 +32,7 @@ func (s *Server) handleCreateExport(w http.ResponseWriter, r *http.Request) {
 		Speed     int      `json:"speed"` // 0/1 realtime, N = timelapse N×
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	cams := req.CameraIDs

@@ -26,7 +26,11 @@ func (s *Server) handleListAutomations(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateAutomation(w http.ResponseWriter, r *http.Request) {
 	var a store.Automation
-	if err := decodeJSON(r, &a); err != nil || strings.TrimSpace(a.Name) == "" {
+	if err := decodeJSON(r, &a); err != nil {
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	if strings.TrimSpace(a.Name) == "" {
 		writeError(w, http.StatusBadRequest, "name required")
 		return
 	}
@@ -49,7 +53,11 @@ func (s *Server) handleUpdateAutomation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var a store.Automation
-	if err := decodeJSON(r, &a); err != nil || strings.TrimSpace(a.Name) == "" {
+	if err := decodeJSON(r, &a); err != nil {
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	if strings.TrimSpace(a.Name) == "" {
 		writeError(w, http.StatusBadRequest, "name required")
 		return
 	}

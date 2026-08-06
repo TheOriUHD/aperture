@@ -55,7 +55,7 @@ func (s *Server) handleSetHA(w http.ResponseWriter, r *http.Request) {
 		SensorTopic string `json:"sensorTopic"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	prefix := strings.TrimSpace(req.Prefix)

@@ -21,7 +21,7 @@ func (s *Server) handleSetDetection(w http.ResponseWriter, r *http.Request) {
 	}
 	var c detect.Config
 	if err := decodeJSON(r, &c); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	switch c.Mode {

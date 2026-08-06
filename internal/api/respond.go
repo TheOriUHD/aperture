@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/TheOriUHD/aperture/internal/store"
 )
@@ -71,11 +72,33 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusInternalServerError, "internal error")
 }
 
-// decodeJSON reads a JSON body into v, rejecting unknown fields.
+// decodeJSON reads a JSON body into v, rejecting unknown fields. The contract is
+// deliberately strict for a public API: a request must carry ONLY the fields its
+// operation declares. This is why adding a field to a *response* (e.g. the per-item
+// etag in Item 2) can break a *write* — a client that spreads a fetched object back
+// into a body now sends a field the request struct doesn't declare, and this 400s.
+// Extension authors hit it whenever they round-trip a GET into a PUT; the OpenAPI
+// info.description spells out the rule, and decodeErrMsg names the offending field
+// so the failure is self-explanatory instead of a blank "invalid request body".
 func decodeJSON(r *http.Request, v any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
+}
+
+// decodeErrMsg turns a decodeJSON error into a client-facing message. For the
+// DisallowUnknownFields case it names the offending field — turning a silent,
+// hard-to-diagnose 400 into a one-line fix — and points at the usual cause (a
+// response object echoed back into a request). Other malformed-body errors keep the
+// generic text: their stdlib detail leaks Go types and isn't actionable. Pass the
+// non-nil error from decodeJSON; the machine-readable code stays "validation".
+func decodeErrMsg(err error) string {
+	if err != nil && strings.HasPrefix(err.Error(), "json: unknown field ") {
+		field := strings.TrimPrefix(err.Error(), "json: unknown field ")
+		return "unknown field " + field + ": this endpoint accepts only its declared fields — " +
+			"do not send server-only response fields (e.g. etag, id, createdAt) back in a request body"
+	}
+	return "invalid request body"
 }
 
 // msFromSec converts a unix-seconds column (e.g. created_at/updated_at, stored in

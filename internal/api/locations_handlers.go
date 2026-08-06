@@ -163,7 +163,7 @@ func (s *Server) handleListLocations(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateLocation(w http.ResponseWriter, r *http.Request) {
 	var req locationReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	name := strings.TrimSpace(req.Name)
@@ -270,7 +270,7 @@ func (s *Server) handleUpdateLocation(w http.ResponseWriter, r *http.Request) {
 	}
 	var req locationUpdateReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
@@ -391,7 +391,7 @@ func (s *Server) purgeLocationSegments(locationID string) {
 func (s *Server) handleTestLocation(w http.ResponseWriter, r *http.Request) {
 	var req locationReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	// Local: guard against aliasing the app data or default recordings dir before
@@ -421,7 +421,7 @@ func (s *Server) handleAllocateLocation(w http.ResponseWriter, r *http.Request) 
 		AllocationBytes int64  `json:"allocationBytes"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if req.AllocationBytes < 0 {
@@ -458,7 +458,7 @@ func (s *Server) handleReorderLocations(w http.ResponseWriter, r *http.Request) 
 		IDs []string `json:"ids"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if err := s.st.ReorderStorageLocations(req.IDs); err != nil {
@@ -474,7 +474,7 @@ func (s *Server) handleAssignCameras(w http.ResponseWriter, r *http.Request) {
 		CameraIDs  []string `json:"cameraIds"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	// Validate the target exists (or is the default) before moving anything.

@@ -51,7 +51,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	var req groupReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if req.Name != "" {
@@ -91,7 +91,7 @@ func (s *Server) handleSetCameraGroups(w http.ResponseWriter, r *http.Request) {
 		GroupIDs []string `json:"groupIds"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if err := s.st.SetCameraGroups(id, req.GroupIDs); err != nil {

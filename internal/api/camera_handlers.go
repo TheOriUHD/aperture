@@ -19,7 +19,7 @@ func (s *Server) handleReorderCameras(w http.ResponseWriter, r *http.Request) {
 		CameraIDs []string `json:"cameraIds"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if err := s.st.ReorderCameras(req.CameraIDs); err != nil {
@@ -37,7 +37,7 @@ func (s *Server) handleTestCamera(w http.ResponseWriter, r *http.Request) {
 		RTSPMainURL string `json:"rtspMainUrl"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if strings.TrimSpace(req.RTSPMainURL) == "" {
@@ -124,7 +124,7 @@ func validDetectMethod(m string) string {
 func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 	var req cameraReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.RTSPMainURL) == "" {
@@ -173,7 +173,7 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	var req cameraReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if req.Name != "" {

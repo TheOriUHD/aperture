@@ -44,7 +44,7 @@ func (s *Server) handleSetSchedule(w http.ResponseWriter, r *http.Request) {
 		} `json:"windows"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	scheds := make([]*store.Schedule, 0, len(req.Windows))

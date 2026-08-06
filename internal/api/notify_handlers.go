@@ -88,7 +88,7 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		Config map[string]string `json:"config"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if !channelTypes[req.Type] {
@@ -132,7 +132,7 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 		Enabled bool   `json:"enabled"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	if req.Name != "" {
@@ -213,7 +213,7 @@ type ruleReq struct {
 func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 	var req ruleReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	c := auth.FromContext(r.Context())
@@ -251,7 +251,7 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	var req ruleReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
 	rule.Name, rule.Enabled = req.Name, req.Enabled
