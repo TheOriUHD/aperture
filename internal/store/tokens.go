@@ -66,6 +66,32 @@ func (s *Store) CreateAPIToken(userID, name string, expiresAt int64, scopes, cam
 	return t, plain, nil
 }
 
+// CreateExtensionToken mints a scoped token owned by an extension (its ext_id),
+// for a backend extension to call /api/v1 over HTTP. Returns the plaintext once.
+// Bounded by the owner exactly like any token; revoked as a set via
+// DeleteExtensionTokens when the extension is disabled or uninstalled.
+func (s *Store) CreateExtensionToken(userID, extID, name string, scopes, cameraGrants []string) (string, error) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	plain := APITokenPrefix + hex.EncodeToString(raw)
+	_, err := s.db.Exec(
+		`INSERT INTO api_tokens (id, user_id, name, token_hash, prefix, scopes, camera_grants, ext_id, created_at, last_used, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+		NewID(), userID, name, hashToken(plain), plain[:12], csvJoin(scopes), csvJoin(cameraGrants), extID, time.Now().UnixMilli())
+	if err != nil {
+		return "", err
+	}
+	return plain, nil
+}
+
+// DeleteExtensionTokens revokes every token owned by an extension (disable/uninstall).
+func (s *Store) DeleteExtensionTokens(extID string) error {
+	_, err := s.db.Exec(`DELETE FROM api_tokens WHERE ext_id = ?`, extID)
+	return err
+}
+
 // ListAPITokens returns a user's tokens (never the secret).
 func (s *Store) ListAPITokens(userID string) ([]APIToken, error) {
 	rows, err := s.db.Query(

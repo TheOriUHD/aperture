@@ -159,10 +159,12 @@ func (s *Server) routes() http.Handler {
 		s.legacyAPI = newLegacyAPICounter()
 	}
 	apiRoutes := func(r chi.Router) {
-		// Rate-limit (per class+principal) then cap the request body, before any
-		// handler runs. Both mounts (/api, /api/v1) get these via apiRoutes.
+		// Rate-limit (per class+principal), cap the request body, then block a
+		// cross-site cookie write (CSRF), before any handler runs. Both mounts
+		// (/api, /api/v1) get these via apiRoutes.
 		r.Use(s.rateLimit)
 		r.Use(s.limitBody)
+		r.Use(s.csrfGuard)
 		g := s.apiGroup(r)
 
 		// Public — no authentication.
@@ -170,6 +172,11 @@ func (s *Server) routes() http.Handler {
 		g.Get("/system/version", pub, s.handleVersion)
 		g.Get("/version", pub, s.handleAPIVersion) // API contract version (pre-auth negotiation)
 		g.Get("/setup/status", pub, s.handleSetupStatus)
+
+		// Extension system. The UI broker relays a sandboxed panel's API call under
+		// the caller-session ∩ extension authority (T1.4); it is session-only (a
+		// backend extension uses its own Bearer token directly, not the broker).
+		g.Post("/ext/{id}/broker", authedSessionOnly, s.handleExtBroker)
 		g.Post("/setup", pub, s.handleSetup)
 		g.Post("/auth/login", pub, s.handleLogin)
 		g.Post("/auth/login/2fa", pub, s.handleLogin2FA)
