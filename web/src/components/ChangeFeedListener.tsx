@@ -6,12 +6,15 @@ import { useQueryClient } from "@tanstack/react-query";
 // updates live, so the polls it replaces have now been removed ("pin before
 // remove"): system-status/cameras (camera.state + alarm.state), storage and
 // storage-locations (storage.updated), exports (export.progress), and every
-// events list incl. the dashboard cards (event.*/detection.*). Polls with NO
-// corresponding feed message stay as polls by design — bitrate, Home Assistant
-// config/sensors, the live snapshot thumbnails, and the per-day segments/coverage
-// rail (segments carry no per-row feed message). Additive and safe: an unknown or
-// mis-keyed message type is a no-op. Mounted only when authenticated (rendered
-// next to DeviceNotifications in App).
+// events list incl. the dashboard cards (event.*/detection.*). Two of those keep a
+// slow 60s backstop ALONGSIDE the feed (feed still primary): system-status, whose
+// uptime/go2rtc counters free-run between transitions, and storage, whose disk
+// fills from outside Aperture with no mutation to emit storage.updated. Polls with
+// NO corresponding feed message stay as full polls by design — bitrate, Home
+// Assistant config/sensors, the live snapshot thumbnails, and the per-day
+// segments/coverage rail (segments carry no per-row feed message). Additive and
+// safe: an unknown or mis-keyed message type is a no-op. Mounted only when
+// authenticated (rendered next to DeviceNotifications in App).
 export function ChangeFeedListener() {
   const qc = useQueryClient();
   useEffect(() => {

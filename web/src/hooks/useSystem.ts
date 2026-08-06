@@ -86,13 +86,15 @@ export interface SystemStatus {
 }
 
 export function useSystemStatus() {
-  // Poll dropped: the change feed drives this. camera.state (watchdog on/offline
-  // transitions) and alarm.state both invalidate ["system-status"], so per-camera
-  // health and the armed state refresh on the transitions that matter rather than
-  // on a 10s timer (uptime/go2rtc counters simply stop free-running between them).
+  // The change feed is the primary driver: camera.state (watchdog on/offline
+  // transitions) and alarm.state invalidate ["system-status"] the moment they
+  // change. A slow 60s backstop stays alongside it (was 10s) so the free-running
+  // fields — uptime, go2rtc stream count — keep advancing on the dashboard instead
+  // of freezing between transitions, which can be far apart on a stable system.
   return useQuery({
     queryKey: ["system-status"],
     queryFn: () => api.get<SystemStatus>("/api/system/status"),
+    refetchInterval: 60_000,
   });
 }
 

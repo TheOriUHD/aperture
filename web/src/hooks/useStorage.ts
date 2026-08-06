@@ -48,13 +48,15 @@ export interface StorageLocation {
 }
 
 export function useStorage() {
-  // Poll dropped: storage.updated invalidates ["storage"]. It fires on storage
-  // mutations (config change, location create/edit/allocate/assign/delete), so the
-  // panel refreshes on the changes a user makes; slow passive disk-fill now
-  // refreshes on the next mutation or navigation rather than every 30s.
+  // storage.updated (fired on storage mutations — config change, location
+  // create/edit/allocate/assign/delete) is the primary driver, but the disk on
+  // this VM also fills from OUTSIDE Aperture, which produces no mutation and no
+  // feed message. A bar driven only by the feed would never show that, so a slow
+  // 60s backstop stays alongside it (was 30s) to catch external/passive disk-fill.
   return useQuery({
     queryKey: ["storage"],
     queryFn: () => api.get<Storage>("/api/system/storage"),
+    refetchInterval: 60_000,
   });
 }
 
