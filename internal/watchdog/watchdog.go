@@ -33,15 +33,21 @@ type Watchdog struct {
 	sm  *stream.Manager
 	log *slog.Logger
 
-	mu       sync.Mutex
-	state    map[string]*camState
-	dayStamp string
+	mu            sync.Mutex
+	state         map[string]*camState
+	dayStamp      string
+	onCameraState func(cameraID string, online bool) // change-feed camera.state hook
 }
 
 // New constructs a Watchdog.
 func New(st *store.Store, sm *stream.Manager, log *slog.Logger) *Watchdog {
 	return &Watchdog{st: st, sm: sm, log: log, state: map[string]*camState{}}
 }
+
+// SetOnCameraState registers a callback invoked (async) with a camera's
+// online/offline state on first observation and on every transition. Used to
+// emit the change feed's camera.state (and seed its snapshot).
+func (w *Watchdog) SetOnCameraState(fn func(cameraID string, online bool)) { w.onCameraState = fn }
 
 // Run checks every interval until ctx is cancelled.
 func (w *Watchdog) Run(ctx context.Context) {
@@ -91,12 +97,19 @@ func (w *Watchdog) tick(ctx context.Context) {
 
 		w.mu.Lock()
 		s := w.state[c.ID]
-		if s == nil {
+		firstObs := s == nil
+		if firstObs {
 			s = &camState{}
 			w.state[c.ID] = s
 		}
+		was := s.stale
 		s.lastSeen = newest
 		s.stale = stale
+		// Emit camera.state on first observation (seeds the feed snapshot) and on
+		// every online/offline transition.
+		if w.onCameraState != nil && (firstObs || was != stale) {
+			go w.onCameraState(c.ID, !stale)
+		}
 		needRecover := stale && time.Since(s.lastRecover) > recoverBackoff
 		if needRecover {
 			s.lastRecover = now

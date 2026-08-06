@@ -61,7 +61,8 @@ type Detector struct {
 
 	evMu    sync.Mutex
 	events  map[string]*activeEvent // cameraID -> ongoing event
-	onEvent func(*store.Event)      // notified when a new event opens
+	onEvent      func(*store.Event) // notified when a new event opens
+	onEventClose func(string)       // notified (event id) when an event finalizes
 }
 
 // camTune is a camera's per-event timing, captured at event open.
@@ -74,6 +75,10 @@ type camTune struct {
 
 // SetOnEvent registers a callback invoked (async) when a new event starts.
 func (d *Detector) SetOnEvent(fn func(*store.Event)) { d.onEvent = fn }
+
+// SetOnEventClose registers a callback invoked (async) with the event id when an
+// event finalizes. Used to emit the change feed's event.closed.
+func (d *Detector) SetOnEventClose(fn func(string)) { d.onEventClose = fn }
 
 // New constructs a Detector.
 func New(cfg *config.Config, st *store.Store, sm snapshotter, log *slog.Logger) *Detector {
@@ -351,6 +356,8 @@ func (d *Detector) finalizeStale() {
 		}
 		if err := d.st.FinalizeEvent(ev.id, end, ev.maxScore, cellIndices(ev.cells)); err != nil {
 			d.log.Error("motion: finalize event", "err", err)
+		} else if d.onEventClose != nil {
+			go d.onEventClose(ev.id)
 		}
 	}
 }

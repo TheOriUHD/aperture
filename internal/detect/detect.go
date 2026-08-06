@@ -90,11 +90,16 @@ type Engine struct {
 	dataDir string
 	log     *slog.Logger
 
-	mu       sync.Mutex
-	sig      string             // signature of the config the backends were built for
-	cfg      Config             // last-loaded config
-	backends map[string]Backend // built lazily per method ("bridge"/"onnx"); nil entry = unavailable
+	mu           sync.Mutex
+	sig          string                    // signature of the config the backends were built for
+	cfg          Config                    // last-loaded config
+	backends     map[string]Backend        // built lazily per method ("bridge"/"onnx"); nil entry = unavailable
+	onDetections func(eventID, cameraID string) // notified when objects are attached (change feed)
 }
+
+// SetOnDetections registers a callback invoked (async) after detection objects
+// are saved for an event. Used to emit the change feed's detection.created.
+func (e *Engine) SetOnDetections(fn func(eventID, cameraID string)) { e.onDetections = fn }
 
 // New builds the engine. It does not touch any model until detection is enabled.
 func New(st *store.Store, sm snapshotter, dataDir string, log *slog.Logger) *Engine {
@@ -229,6 +234,9 @@ func (e *Engine) Enrich(ev *store.Event) {
 	if err := e.st.SaveEventDetections(ev.ID, top, summary, objs); err != nil {
 		e.log.Error("detect: save detections", "err", err)
 		return
+	}
+	if e.onDetections != nil {
+		go e.onDetections(ev.ID, ev.CameraID)
 	}
 	ev.TopLabel, ev.ObjectSummary, ev.Labels, ev.Objects = top, summary, labels, objs
 	e.log.Info("detect: tagged event", "event", ev.ID, "camera", ev.CameraID, "objects", summary)

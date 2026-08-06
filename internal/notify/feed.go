@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Change feed (T2.5). A general Server-Sent-Events feed layered on the same hub
@@ -148,6 +149,48 @@ func (e *Engine) EphemeralSnapshot(f FeedFilter, authz func(camera string) bool)
 		out = append(out, m)
 	}
 	return out
+}
+
+// --- domain emitters (Phase 3) --------------------------------------------
+// These are the hooks the detector, detect engine, and watchdog invoke; each
+// publishes a change-feed message. event.created is emitted from OnEvent.
+
+// OnEventClose emits a durable event.closed carrying the same seq as its
+// event.created, so a resuming client sees the close via Last-Event-ID replay.
+func (e *Engine) OnEventClose(eventID string) {
+	ev, err := e.st.EventByID(eventID)
+	if err != nil {
+		return
+	}
+	e.PublishFeed(FeedMessage{
+		ID: ev.Seq, Type: "event.closed", TS: ev.EndTS, Camera: ev.CameraID,
+		Data:    map[string]any{"eventId": ev.ID, "endTsMs": ev.EndTS},
+		Durable: true,
+	})
+}
+
+// OnDetections emits detection.created when objects are attached to an event.
+// Ephemeral (in-process id): making it durable would set the SSE id: to the
+// event's seq and let Last-Event-ID regress when an older event's detections
+// land after a newer event.created. The event itself is durable by seq, so a
+// resuming client refetches /events/{id}/detections — no data lost.
+func (e *Engine) OnDetections(eventID, cameraID string) {
+	e.PublishFeed(FeedMessage{
+		Type: "detection.created", TS: time.Now().UnixMilli(), Camera: cameraID,
+		Data: map[string]any{"eventId": eventID},
+	})
+}
+
+// OnCameraState emits an ephemeral camera.state on an online/offline transition.
+func (e *Engine) OnCameraState(cameraID string, online bool) {
+	state := "offline"
+	if online {
+		state = "online"
+	}
+	e.PublishFeed(FeedMessage{
+		Type: "camera.state", TS: time.Now().UnixMilli(), Camera: cameraID,
+		Data: map[string]any{"state": state},
+	})
 }
 
 // feed hub state, embedded in Engine.

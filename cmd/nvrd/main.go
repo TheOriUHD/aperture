@@ -269,6 +269,9 @@ func main() {
 			hkBridge.MotionPulse(ev.CameraID)
 		}
 	})
+	// Change-feed domain emitters (Phase 3): event.closed, detection.created.
+	det.SetOnEventClose(notifyEng.OnEventClose)
+	detectEng.SetOnDetections(notifyEng.OnDetections)
 	// Audio events flow through the same notify/automation fan-out (minus object
 	// detection, which is video-only).
 	audioDet.SetOnEvent(func(ev *store.Event) {
@@ -276,6 +279,8 @@ func main() {
 		webhookDisp.OnEvent(ev)
 		automateEng.OnEvent(ev)
 	})
+	// (audio.Detector has no close hook yet; audio events emit event.created but
+	// not event.closed — a minor asymmetry, video is the common case.)
 
 	// Environmental context: poll weather into a time-series for "past weather
 	// at the playhead". No-ops until a site location is configured.
@@ -284,6 +289,7 @@ func main() {
 
 	// Watchdog: detect stale recordings (wedged producers) and self-heal.
 	wd := watchdog.New(st, sm, log)
+	wd.SetOnCameraState(notifyEng.OnCameraState)
 	go wd.Run(bgCtx)
 
 	// ONVIF Profile S provider (external VMS/NVR consumption). No-op unless
