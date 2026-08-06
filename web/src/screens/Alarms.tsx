@@ -56,10 +56,10 @@ export function Alarms() {
   }, [cameras]);
 
   const now = Date.now();
+  // Poll dropped: event.*/detection.* feed messages invalidate ["events-all"].
   const { data: events, isLoading } = useQuery({
     queryKey: ["events-all"],
     queryFn: () => api.get<MotionEvent[]>(`/api/events?from=${now - 7 * DAY_MS}&to=${now}&limit=300`),
-    refetchInterval: 20000,
   });
 
   const hasConditions = (events ?? []).some((e) => e.conditions);

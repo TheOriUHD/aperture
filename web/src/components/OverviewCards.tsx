@@ -336,10 +336,10 @@ function VideoArchivingCard({ cameras }: { cameras: Camera[] }) {
 
 function RecentDetectionsCard({ cameras }: { cameras: Camera[] }) {
   const navigate = useNavigate();
+  // Poll dropped: event.*/detection.* feed messages invalidate ["events-recent-dash"].
   const { data: events } = useQuery({
     queryKey: ["events-recent-dash"],
     queryFn: () => api.get<MotionEvent[]>(`/api/events?from=${Date.now() - 2 * 864e5}&to=${Date.now()}&limit=20`),
-    refetchInterval: 30_000,
   });
   const nameOf = (id: string) => cameras.find((c) => c.id === id)?.name ?? "Camera";
   const list = (events ?? []).slice(0, 6);

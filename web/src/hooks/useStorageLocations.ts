@@ -8,10 +8,12 @@ export interface LocationsResponse {
 }
 
 export function useStorageLocations() {
+  // Poll dropped: storage.updated invalidates ["storage-locations"] (fired on
+  // every location create/edit/allocate/assign/delete via emitStorage), so the
+  // list refreshes on the mutations that change it.
   return useQuery({
     queryKey: ["storage-locations"],
     queryFn: () => api.get<LocationsResponse>("/api/system/storage/locations"),
-    refetchInterval: 30000,
   });
 }
 

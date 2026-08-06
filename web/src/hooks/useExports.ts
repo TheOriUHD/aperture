@@ -18,13 +18,12 @@ export interface ExportJob {
 }
 
 export function useExports() {
+  // Poll dropped: export.progress invalidates ["exports"] on every progress tick
+  // of a running job (export/manager.go → OnExportProgress), which is exactly what
+  // the old 1.2s while-active poll was for; create/delete still invalidate too.
   return useQuery({
     queryKey: ["exports"],
     queryFn: () => api.get<ExportJob[]>("/api/export"),
-    refetchInterval: (q) => {
-      const data = q.state.data as ExportJob[] | undefined;
-      return data && data.some((j) => j.status === "queued" || j.status === "running") ? 1200 : false;
-    },
   });
 }
 

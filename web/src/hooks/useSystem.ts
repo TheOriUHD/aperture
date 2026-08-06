@@ -48,6 +48,8 @@ export interface BitrateData {
 }
 
 // Recording-throughput series for the overview chart (one point per minute).
+// Poll kept: the change feed has no bitrate.updated message (the series advances
+// one bucket per minute regardless of any discrete event), so this stays a poll.
 export function useBitrate() {
   return useQuery({
     queryKey: ["bitrate"],
@@ -84,10 +86,13 @@ export interface SystemStatus {
 }
 
 export function useSystemStatus() {
+  // Poll dropped: the change feed drives this. camera.state (watchdog on/offline
+  // transitions) and alarm.state both invalidate ["system-status"], so per-camera
+  // health and the armed state refresh on the transitions that matter rather than
+  // on a 10s timer (uptime/go2rtc counters simply stop free-running between them).
   return useQuery({
     queryKey: ["system-status"],
     queryFn: () => api.get<SystemStatus>("/api/system/status"),
-    refetchInterval: 10000,
   });
 }
 
@@ -130,6 +135,8 @@ export interface HAConfig {
   streams: HAStream[];
 }
 
+// Poll kept: no ha.* feed message exists (broker connection state and the MQTT
+// stream list have no server-side emitter), so this stays a poll.
 export function useHA() {
   return useQuery({
     queryKey: ["ha"],
@@ -162,6 +169,8 @@ export interface HASensor {
   updatedAt: number;
 }
 
+// Poll kept: sensor values arrive over inbound MQTT continuously and have no
+// discrete ha.* feed message, so this stays a poll.
 export function useHASensors(enabled = true) {
   return useQuery({
     queryKey: ["ha-sensors"],

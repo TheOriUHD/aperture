@@ -2,12 +2,16 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 // ChangeFeedListener subscribes to the v1 change feed (SSE, T2.5) and refreshes
-// the affected react-query caches on each message. It runs ALONGSIDE the existing
-// polls — those stay as the guard until this is verified in a browser to actually
-// drive updates, and only then are they dropped ("pin before remove"). Additive
-// and safe: an unknown or mis-keyed message type is a no-op, so a silent or
-// partial feed simply falls back to the polls. Mounted only when authenticated
-// (rendered next to DeviceNotifications in App).
+// the affected react-query caches on each message. Verified in a browser to drive
+// updates live, so the polls it replaces have now been removed ("pin before
+// remove"): system-status/cameras (camera.state + alarm.state), storage and
+// storage-locations (storage.updated), exports (export.progress), and every
+// events list incl. the dashboard cards (event.*/detection.*). Polls with NO
+// corresponding feed message stay as polls by design — bitrate, Home Assistant
+// config/sensors, the live snapshot thumbnails, and the per-day segments/coverage
+// rail (segments carry no per-row feed message). Additive and safe: an unknown or
+// mis-keyed message type is a no-op. Mounted only when authenticated (rendered
+// next to DeviceNotifications in App).
 export function ChangeFeedListener() {
   const qc = useQueryClient();
   useEffect(() => {
@@ -22,7 +26,7 @@ export function ChangeFeedListener() {
         return;
       }
       if (type.startsWith("event.") || type.startsWith("detection.")) {
-        inval("events", "events-today", "events-all");
+        inval("events", "events-today", "events-all", "events-recent-dash");
       } else if (type === "camera.state") {
         inval("cameras", "system-status");
       } else if (type === "storage.updated") {

@@ -263,10 +263,10 @@ function MobileCameraTile({
 
 export function MobileDashboard({ cameras, onOpen }: { cameras: Camera[]; onOpen: (c: Camera) => void }) {
   const { data: groups } = useCameraGroups();
+  // Poll dropped: event.*/detection.* feed messages invalidate ["events-today"].
   const { data: events } = useQuery({
     queryKey: ["events-today"],
     queryFn: () => api.get<MotionEvent[]>(`/api/events?from=${startOfToday()}&to=${Date.now()}&limit=1000`),
-    refetchInterval: 30_000,
   });
   const evs = events ?? [];
 

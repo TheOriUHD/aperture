@@ -48,10 +48,13 @@ export interface StorageLocation {
 }
 
 export function useStorage() {
+  // Poll dropped: storage.updated invalidates ["storage"]. It fires on storage
+  // mutations (config change, location create/edit/allocate/assign/delete), so the
+  // panel refreshes on the changes a user makes; slow passive disk-fill now
+  // refreshes on the next mutation or navigation rather than every 30s.
   return useQuery({
     queryKey: ["storage"],
     queryFn: () => api.get<Storage>("/api/system/storage"),
-    refetchInterval: 30000,
   });
 }
 
