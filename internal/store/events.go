@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 // Event is a detected motion event (a clip with pre/post-roll).
@@ -85,11 +86,27 @@ func (s *Store) ListEvents(cameraID string, fromMs, toMs int64) ([]*Event, error
 	return collectEvents(rows)
 }
 
-// ListEventsAll returns recent events across all cameras (newest first).
-func (s *Store) ListEventsAll(fromMs, toMs int64, limit int) ([]*Event, error) {
-	rows, err := s.db.Query(eventSelect+
-		` WHERE start_ts >= ? AND start_ts <= ? ORDER BY start_ts DESC LIMIT ?`,
-		fromMs, toMs, limit)
+// ListEventsAllScoped returns recent events (newest first) within [fromMs,toMs],
+// capped at limit. cameraIDs restricts the result in SQL: nil means all cameras
+// (admin), a non-nil slice restricts to those cameras, and an empty slice yields
+// no rows. Filtering in the query — rather than over-fetching and dropping rows
+// in the handler — makes a viewer's N-row request scan at most N rows.
+func (s *Store) ListEventsAllScoped(fromMs, toMs int64, limit int, cameraIDs []string) ([]*Event, error) {
+	q := eventSelect + ` WHERE start_ts >= ? AND start_ts <= ?`
+	args := []any{fromMs, toMs}
+	if cameraIDs != nil {
+		if len(cameraIDs) == 0 {
+			return []*Event{}, nil
+		}
+		ph := strings.TrimSuffix(strings.Repeat("?,", len(cameraIDs)), ",")
+		q += ` AND camera_id IN (` + ph + `)`
+		for _, id := range cameraIDs {
+			args = append(args, id)
+		}
+	}
+	q += ` ORDER BY start_ts DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

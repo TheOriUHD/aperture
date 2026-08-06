@@ -93,15 +93,18 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 1000 {
 		limit = v
 	}
+	// Camera ACL is pushed into SQL (T2.7): admins see all (nil filter); a viewer
+	// or scoped token is restricted to its camera set, so the query scans at most
+	// `limit` of the caller's own rows instead of over-fetching and dropping.
 	isAdmin, allowed := s.allowedCameraSet(r)
-	fetch := limit
+	var cams []string
 	if !isAdmin {
-		fetch = limit * 4 // over-fetch, then filter to the viewer's cameras
-		if fetch > 1000 {
-			fetch = 1000
+		cams = make([]string, 0, len(allowed))
+		for id := range allowed {
+			cams = append(cams, id)
 		}
 	}
-	evs, err := s.st.ListEventsAll(from, to, fetch)
+	evs, err := s.st.ListEventsAllScoped(from, to, limit, cams)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -111,12 +114,6 @@ func (s *Server) handleEventsAll(w http.ResponseWriter, r *http.Request) {
 	enr := s.newCondEnricher()
 	out := make([]map[string]any, 0, len(evs))
 	for _, e := range evs {
-		if !isAdmin && !allowed[e.CameraID] {
-			continue
-		}
-		if len(out) >= limit {
-			break
-		}
 		v := eventView(e, now)
 		if c := enr.conditions(e.StartTS); c != nil {
 			v["conditions"] = c
