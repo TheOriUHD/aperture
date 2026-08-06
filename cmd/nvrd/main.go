@@ -314,6 +314,16 @@ func main() {
 	extSup := ext.NewSupervisor(denoPath, log)
 
 	srv := api.NewServer(cfg, st, am, sm, rec, det, detectEng, webhookDisp, automateEng, haPub, oidcAuth, auditLog, exporter, notifyEng, weatherPoller, wd, logRing, log)
+	sdkModule := os.Getenv("APERTURE_EXT_SDK")
+	if sdkModule == "" {
+		sdkModule = "/usr/local/share/aperture-sdk/mod.ts"
+	}
+	apiBase := os.Getenv("APERTURE_URL")
+	if apiBase == "" {
+		apiBase = "http://localhost:8080"
+	}
+	srv.SetExtensions(extSup, denoPath, sdkModule, apiBase)
+	srv.StartEnabledExtensions() // (re)start enabled backend extensions across the restart
 	srv.SetStorage(storageRegistry, storageCipher)
 	srv.SetReconcile(janitor.EnforceNow)
 	srv.StartRateLimitSweeper()

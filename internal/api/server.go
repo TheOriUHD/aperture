@@ -15,6 +15,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/detect"
 	"github.com/TheOriUHD/aperture/internal/export"
+	"github.com/TheOriUHD/aperture/internal/ext"
 	"github.com/TheOriUHD/aperture/internal/ha"
 	"github.com/TheOriUHD/aperture/internal/logbuf"
 	"github.com/TheOriUHD/aperture/internal/motion"
@@ -79,6 +80,13 @@ type Server struct {
 	// legacyAPI tallies hits on the deprecated /api (non-v1) alias, for the 5.4
 	// retirement precondition (surfaced in /system/metrics).
 	legacyAPI *legacyAPICounter
+
+	// Extension system (T1.5): the backend supervisor + the runtime paths used to
+	// build a Deno launch spec. Nil in tests that don't exercise extensions.
+	extSup    *ext.Supervisor
+	denoPath  string
+	sdkModule string // absolute path to the local backend SDK module (--import-map target)
+	apiBase   string // base URL a backend extension calls (e.g. http://localhost:8080)
 }
 
 // SetStorage wires the storage-backend registry and credential cipher used for
@@ -177,6 +185,15 @@ func (s *Server) routes() http.Handler {
 		// the caller-session ∩ extension authority (T1.4); it is session-only (a
 		// backend extension uses its own Bearer token directly, not the broker).
 		g.Post("/ext/{id}/broker", authedSessionOnly, s.handleExtBroker)
+		// Management (admin, session-only): the gate, install (stage → confirm),
+		// list, enable/disable, uninstall (T1.5).
+		g.Post("/ext/gate", adminSessionOnly, s.handleExtGate)
+		g.Get("/ext", adminSessionOnly, s.handleExtList)
+		g.Post("/ext/install", adminSessionOnly, s.handleExtInstall)
+		g.Post("/ext/install/confirm", adminSessionOnly, s.handleExtConfirm)
+		g.Post("/ext/{id}/enable", adminSessionOnly, s.handleExtEnable)
+		g.Post("/ext/{id}/disable", adminSessionOnly, s.handleExtDisable)
+		g.Delete("/ext/{id}", adminSessionOnly, s.handleExtUninstall)
 		g.Post("/setup", pub, s.handleSetup)
 		g.Post("/auth/login", pub, s.handleLogin)
 		g.Post("/auth/login/2fa", pub, s.handleLogin2FA)
