@@ -206,6 +206,10 @@ export function RuleModal({
               Only when raining
             </label>
           </div>
+          <p className="text-xs text-fg-faint mt-1.5">
+            Time of day and rain use your site’s sun times and recorded weather — ignored until a location is set
+            in Settings → Location &amp; weather.
+          </p>
           <input
             className="input mt-3"
             value={objects.join(", ")}
@@ -213,8 +217,8 @@ export function RuleModal({
             placeholder="Only these objects, e.g. person, car (optional)"
           />
           <p className="text-xs text-fg-faint mt-1.5">
-            Uses your site’s sun times and recorded weather. Ignored until a location is set in Settings →
-            Location &amp; weather.
+            Object filter: notify only when the detector tagged one of these labels (comma-separated). Needs object
+            detection enabled.
           </p>
         </div>
 

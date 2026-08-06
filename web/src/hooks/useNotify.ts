@@ -65,8 +65,10 @@ export function useRules() {
 export function useSaveRule() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: Partial<Rule> & { id?: string }) =>
-      b.id ? api.put<Rule>(`/api/notify/rules/${b.id}`, b) : api.post<Rule>("/api/notify/rules", b),
+    // The id belongs in the URL only — sending it in the body trips the server's
+    // DisallowUnknownFields and surfaces as "invalid request body".
+    mutationFn: ({ id, ...body }: Partial<Rule> & { id?: string }) =>
+      id ? api.put<Rule>(`/api/notify/rules/${id}`, body) : api.post<Rule>("/api/notify/rules", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["rules"] }),
   });
 }
