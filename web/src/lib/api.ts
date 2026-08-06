@@ -32,6 +32,26 @@ const etagCache = new Map<string, string>();
 const etagKey = (path: string) => v1Path(path).split("?")[0];
 const isWrite = (m: string) => m === "PUT" || m === "POST" || m === "PATCH" || m === "DELETE";
 
+// The server stamps a per-item `etag` onto objects it returns in list responses
+// (Item 2) for If-Match round-trips. That tag is metadata, never a request input:
+// writes are decoded with DisallowUnknownFields, so echoing it back in a body is a
+// hard 400 ("invalid request body"). The web frequently edits by spreading a
+// fetched object ({ ...item, changed }), so strip the envelope tag here — at the
+// one boundary every write passes through — instead of trusting each call site to
+// remember. It is deliberately NOT lifted into If-Match: list items carry
+// server-mutated fields (e.g. an automation's lastFired), so the tag can be stale
+// for benign reasons and would cause spurious 412s; last-writer-wins stays the
+// right default for these until a body-etag concurrency story lands. (The
+// header-based If-Match above, keyed off config GETs, is unaffected.)
+function stripServerEnvelope(body: unknown): unknown {
+  if (body && typeof body === "object" && !Array.isArray(body) && "etag" in body) {
+    const clone = { ...(body as Record<string, unknown>) };
+    delete clone.etag;
+    return clone;
+  }
+  return body;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const key = etagKey(path);
   const headers: Record<string, string> = {};
@@ -44,7 +64,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     method,
     credentials: "same-origin",
     headers: Object.keys(headers).length ? headers : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body !== undefined ? JSON.stringify(stripServerEnvelope(body)) : undefined,
   });
   const et = res.headers.get("ETag");
   if (et) {
