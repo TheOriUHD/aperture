@@ -83,6 +83,9 @@ func (s *Server) apiGroup(r chi.Router) *apiRouter { return &apiRouter{s: s, r: 
 
 func (g *apiRouter) method(method, path string, a access, h http.HandlerFunc) {
 	g.s.declaredRoutes[method+" "+path] = true
+	if g.s.routeSpecs != nil {
+		g.s.routeSpecs[method+" "+path] = a
+	}
 	g.r.With(g.s.enforce(a)).MethodFunc(method, path, h)
 }
 

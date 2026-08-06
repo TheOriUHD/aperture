@@ -68,6 +68,11 @@ type Server struct {
 	// consulted by the boot-time fail-closed guard (assertAllRoutesDeclared).
 	declaredRoutes map[string]bool
 
+	// routeSpecs records each route's access descriptor, so the OpenAPI spec is
+	// generated from the same source of truth that enforces authorization (5.1) —
+	// scopes-per-operation can never drift from what the enforce layer checks.
+	routeSpecs map[string]access
+
 	// limiter is the per-(class,id) request rate limiter (T2.6).
 	limiter *rateLimiter
 }
@@ -144,6 +149,7 @@ func (s *Server) routes() http.Handler {
 	r.Use(s.am.Context)
 
 	s.declaredRoutes = map[string]bool{}
+	s.routeSpecs = map[string]access{}
 	apiRoutes := func(r chi.Router) {
 		// Rate-limit (per class+principal) then cap the request body, before any
 		// handler runs. Both mounts (/api, /api/v1) get these via apiRoutes.
