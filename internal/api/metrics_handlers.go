@@ -71,6 +71,18 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(&b, "aperture_camera_live_ok{camera_id=%q,name=%q} %g\n", c.ID, c.Name, b2f(health.Reachable && reg))
 	}
 
+	// Deprecated /api (non-v1) alias usage — the 5.4-retirement precondition.
+	// Captures the GET 200s the request log can't (logRequests logs only non-GET
+	// + errors). A path labelled ":id" means an id-bearing route was hit.
+	if s.legacyAPI != nil {
+		byPath, aliasTotal := s.legacyAPI.snapshot()
+		gauge("aperture_legacy_api_requests_total", "Requests to the deprecated /api (non-v1) alias since start.", aliasTotal)
+		decl("aperture_legacy_api_requests_by_path", "Deprecated /api alias requests, by normalized path.", "gauge")
+		for path, n := range byPath {
+			fmt.Fprintf(&b, "aperture_legacy_api_requests_by_path{path=%q} %d\n", path, n)
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(b.String()))

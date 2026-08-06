@@ -75,6 +75,10 @@ type Server struct {
 
 	// limiter is the per-(class,id) request rate limiter (T2.6).
 	limiter *rateLimiter
+
+	// legacyAPI tallies hits on the deprecated /api (non-v1) alias, for the 5.4
+	// retirement precondition (surfaced in /system/metrics).
+	legacyAPI *legacyAPICounter
 }
 
 // SetStorage wires the storage-backend registry and credential cipher used for
@@ -134,6 +138,7 @@ func (s *Server) apiVersionHeaders(version string, deprecated bool) func(http.Ha
 			if deprecated {
 				w.Header().Set("Deprecation", "true")
 				w.Header().Set("Link", `</api/v1>; rel="successor-version"`)
+				s.legacyAPI.count(r.URL.Path) // 5.4 precondition: who still calls /api
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -150,6 +155,9 @@ func (s *Server) routes() http.Handler {
 
 	s.declaredRoutes = map[string]bool{}
 	s.routeSpecs = map[string]access{}
+	if s.legacyAPI == nil {
+		s.legacyAPI = newLegacyAPICounter()
+	}
 	apiRoutes := func(r chi.Router) {
 		// Rate-limit (per class+principal) then cap the request body, before any
 		// handler runs. Both mounts (/api, /api/v1) get these via apiRoutes.
