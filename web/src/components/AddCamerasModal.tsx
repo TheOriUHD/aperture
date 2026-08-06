@@ -90,7 +90,7 @@ export function AddCamerasModal({
               {previewCams.map((c, i) => (
                 <div key={c.id} className="relative min-h-0 bg-ink-800" style={pv.cellStyle(i)}>
                   <img
-                    src={`/api/cameras/${c.id}/snapshot.jpg`}
+                    src={`/api/v1/cameras/${c.id}/snapshot.jpg`}
                     alt=""
                     className="absolute inset-0 h-full w-full object-contain"
                     onError={(e) => (e.currentTarget.style.display = "none")}

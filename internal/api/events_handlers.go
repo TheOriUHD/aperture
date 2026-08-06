@@ -35,7 +35,7 @@ func eventView(e *store.Event, now int64) map[string]any {
 		"saved":    e.Saved,
 	}
 	if e.ThumbPath != "" {
-		v["thumbUrl"] = "/api/events/" + e.ID + "/thumb.jpg"
+		v["thumbUrl"] = "/api/v1/events/" + e.ID + "/thumb.jpg"
 	}
 	if e.TopLabel != "" {
 		v["topLabel"] = e.TopLabel

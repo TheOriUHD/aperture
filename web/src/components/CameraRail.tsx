@@ -84,7 +84,7 @@ function SnapshotThumb({ cameraId, enabled }: { cameraId: string; enabled: boole
     <div className="relative aspect-video bg-ink-800">
       {enabled && ok ? (
         <img
-          src={`/api/cameras/${cameraId}/snapshot.jpg?t=${tick}`}
+          src={`/api/v1/cameras/${cameraId}/snapshot.jpg?t=${tick}`}
           alt=""
           className="h-full w-full object-cover"
           onError={() => setOk(false)}

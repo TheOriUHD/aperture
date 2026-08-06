@@ -24,7 +24,7 @@ export function DeviceNotifications() {
 
   useEffect(() => {
     if (!user) return;
-    const es = new EventSource("/api/notify/stream", { withCredentials: true });
+    const es = new EventSource("/api/v1/notify/stream", { withCredentials: true });
     const lastShown = new Map<string, number>();
 
     es.onmessage = (e) => {

@@ -35,7 +35,7 @@ func (s *Server) handleStreamToken(w http.ResponseWriter, r *http.Request) {
 	// the Low quality option. The client appends &q=sub to wsUrl to request it.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":  token,
-		"wsUrl":  "/api/cameras/" + id + "/ws?token=" + token,
+		"wsUrl":  "/api/v1/cameras/" + id + "/ws?token=" + token,
 		"hasSub": cam.RTSPSubURL != "",
 	})
 }

@@ -70,7 +70,7 @@ function Tile({
     if (following || segments.length === 0) return;
     const video = videoRef.current;
     if (!video) return;
-    const url = `/api/cameras/${camera.id}/hls?from=${dayStart}&to=${dayEnd}`;
+    const url = `/api/v1/cameras/${camera.id}/hls?from=${dayStart}&to=${dayEnd}`;
     if (Hls.isSupported()) {
       const hls = new Hls({ maxBufferLength: 20, enableWorker: true });
       hlsRef.current = hls;

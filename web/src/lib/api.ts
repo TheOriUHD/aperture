@@ -9,8 +9,17 @@ export class ApiError extends Error {
   }
 }
 
+// v1Path upgrades a legacy "/api/…" path to "/api/v1/…" (Phase 5.2). The two are
+// the same handlers today; funnelling every call through here migrates them all
+// at once and future-proofs for a diverging v2. Idempotent; non-/api untouched.
+export function v1Path(path: string): string {
+  return path.startsWith("/api/") && !path.startsWith("/api/v1/")
+    ? "/api/v1/" + path.slice("/api/".length)
+    : path;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(v1Path(path), {
     method,
     credentials: "same-origin",
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,

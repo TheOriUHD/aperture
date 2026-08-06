@@ -313,7 +313,7 @@ export function Playback() {
     if (isLive || !selected || segments.length === 0) return;
     const video = playerVideoRef.current;
     if (!video) return;
-    const url = `/api/cameras/${selected.id}/hls?from=${dayStart}&to=${dayEnd}`;
+    const url = `/api/v1/cameras/${selected.id}/hls?from=${dayStart}&to=${dayEnd}`;
     if (Hls.isSupported()) {
       const hls = new Hls({ maxBufferLength: 30, enableWorker: true });
       hlsRef.current = hls;
@@ -1441,7 +1441,7 @@ function MobileThumb({ cameraId, enabled }: { cameraId: string; enabled: boolean
   }
   return (
     <img
-      src={`/api/cameras/${cameraId}/snapshot.jpg?t=${tick}`}
+      src={`/api/v1/cameras/${cameraId}/snapshot.jpg?t=${tick}`}
       alt=""
       className="h-full w-full object-cover"
       onError={() => setOk(false)}

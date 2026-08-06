@@ -37,7 +37,7 @@ export function CameraPopout({
 
   async function snapshot() {
     try {
-      const res = await fetch(`/api/cameras/${camera!.id}/snapshot.jpg`, { credentials: "same-origin" });
+      const res = await fetch(`/api/v1/cameras/${camera!.id}/snapshot.jpg`, { credentials: "same-origin" });
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

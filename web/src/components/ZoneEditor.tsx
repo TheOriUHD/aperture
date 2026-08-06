@@ -18,7 +18,7 @@ export function ZoneEditor({
   const [tool, setTool] = useState<"ignore" | "watch">("ignore");
   const [saving, setSaving] = useState(false);
   const painting = useRef(false);
-  const snapUrl = useRef(`/api/cameras/${cameraId}/snapshot.jpg?t=${Date.now()}`);
+  const snapUrl = useRef(`/api/v1/cameras/${cameraId}/snapshot.jpg?t=${Date.now()}`);
 
   useEffect(() => {
     void api

@@ -129,7 +129,7 @@ function useResolutions(cameras: Camera[]) {
       if (!c.enabled) continue;
       const img = new Image();
       img.onload = () => setRes((r) => ({ ...r, [c.id]: { w: img.naturalWidth, h: img.naturalHeight } }));
-      img.src = `/api/cameras/${c.id}/snapshot.jpg`;
+      img.src = `/api/v1/cameras/${c.id}/snapshot.jpg`;
       imgs.push(img);
     }
     return () => imgs.forEach((i) => (i.onload = null));

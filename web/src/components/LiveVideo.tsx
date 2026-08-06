@@ -196,7 +196,7 @@ export function LiveVideo({
           // A sharp recent frame as the placeholder, so opening a camera shows
           // the scene immediately instead of a blurred "loading" panel + dots.
           <img
-            src={`/api/cameras/${camera.id}/snapshot.jpg`}
+            src={`/api/v1/cameras/${camera.id}/snapshot.jpg`}
             alt=""
             className={`absolute inset-0 h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"}`}
             onError={() => setSnapOk(false)}
