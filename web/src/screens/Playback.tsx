@@ -57,7 +57,7 @@ import { usePrefs } from "../lib/prefs";
 import { api } from "../lib/api";
 import { warmLive, stopWarmLive } from "../lib/liveWarm";
 import { fmtTimeSec, fmtDate } from "../lib/format";
-import { wallToOffset, offsetToWall, mergeRanges, computeGaps, type Seg } from "../lib/playlist";
+import { wallToOffset, offsetToWall, computeGaps, type Seg } from "../lib/playlist";
 import type { MotionEvent } from "../lib/types";
 
 interface Segment extends Seg {
@@ -255,9 +255,14 @@ export function Playback() {
   // kept separate as the source of truth for the offset mapping.
   const railFrom = dayStart - DAY_MS;
   const railTo = dayEnd + DAY_MS;
-  const { data: railSegments = [] } = useQuery({
-    queryKey: ["rail-segments", selectedId, dayStart],
-    queryFn: () => api.get<Segment[]>(`/api/cameras/${selectedId}/segments?from=${railFrom}&to=${railTo}`),
+  // Rail coverage: the server merges segments into ranges (T2.1), replacing the
+  // wide ~12k-segment fetch + client mergeRanges. Same {start,end} shape, so the
+  // rail draws identically. The per-day `segments` query (offset mapping) is
+  // deliberately left on raw segments — do not point wallToOffset at coverage.
+  const { data: railRanges = [] } = useQuery({
+    queryKey: ["rail-coverage", selectedId, dayStart],
+    queryFn: () =>
+      api.get<TR[]>(`/api/cameras/${selectedId}/coverage?from=${railFrom}&to=${railTo}&tolerance_ms=2000`),
     enabled: !!selectedId,
     refetchInterval: followingToday ? 15000 : false,
     placeholderData: keepPreviousData,
@@ -270,7 +275,7 @@ export function Playback() {
     refetchInterval: followingToday ? 15000 : false,
   });
 
-  const recorded: TR[] = mergeRanges(railSegments);
+  const recorded: TR[] = railRanges;
   // "No recording" gaps only make sense for continuous cameras, and only up to
   // the present moment (the future isn't a gap). Computed across the wide rail
   // window so they, too, stay continuous across midnight.
@@ -284,7 +289,7 @@ export function Playback() {
   const tlEvents: TLEvent[] = filteredEvents.map((e) => ({
     id: e.id,
     start: e.startTs,
-    end: e.endTs,
+    end: e.endTsMs ?? e.endTs,
     thumbUrl: e.thumbUrl,
   }));
 
@@ -517,7 +522,7 @@ export function Playback() {
   function findPrevEvent(ms: number): number | null {
     let hit: number | null = null;
     for (const e of events) {
-      const end = e.endTs || nowMs;
+      const end = e.endTsMs ?? (e.endTs || nowMs);
       if (end < ms) hit = e.startTs;
     }
     return hit;

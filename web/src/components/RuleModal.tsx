@@ -65,6 +65,7 @@ export function RuleModal({
   const [cooldown, setCooldown] = useState(rule?.cooldownSec ?? 120);
   const [timeOfDay, setTimeOfDay] = useState<"" | "day" | "night">(rule?.conditions?.timeOfDay ?? "");
   const [onlyPrecip, setOnlyPrecip] = useState(rule?.conditions?.onlyPrecip ?? false);
+  const [objects, setObjects] = useState<string[]>(rule?.conditions?.objects ?? []);
   const [err, setErr] = useState("");
 
   const toggle = (arr: string[], set: (v: string[]) => void, id: string) =>
@@ -98,7 +99,7 @@ export function RuleModal({
                   quietStart: quiet ? hhmmToMin(qStart) : -1,
                   quietEnd: quiet ? hhmmToMin(qEnd) : -1,
                   cooldownSec: cooldown,
-                  conditions: { timeOfDay, onlyPrecip },
+                  conditions: { timeOfDay, onlyPrecip, objects },
                 });
                 onClose();
               } catch (e) {
@@ -205,6 +206,12 @@ export function RuleModal({
               Only when raining
             </label>
           </div>
+          <input
+            className="input mt-3"
+            value={objects.join(", ")}
+            onChange={(e) => setObjects(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+            placeholder="Only these objects, e.g. person, car (optional)"
+          />
           <p className="text-xs text-fg-faint mt-1.5">
             Uses your site’s sun times and recorded weather. Ignored until a location is set in Settings →
             Location &amp; weather.

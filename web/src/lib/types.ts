@@ -84,7 +84,8 @@ export interface MotionEvent {
   cameraId: string;
   type: string;
   startTs: number;
-  endTs: number;
+  endTs: number; // legacy: `now` while ongoing (kept until v2)
+  endTsMs?: number | null; // v1: null while ongoing (bug 4.6). Prefer this; fall back to endTs.
   ongoing: boolean;
   score: number;
   thumbUrl?: string;

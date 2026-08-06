@@ -12,6 +12,7 @@ export interface Channel {
 export interface RuleConditions {
   timeOfDay?: "" | "day" | "night";
   onlyPrecip?: boolean;
+  objects?: string[]; // require one of these detected object labels (e.g. "person")
 }
 
 export interface Rule {
