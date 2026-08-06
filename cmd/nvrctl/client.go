@@ -77,7 +77,7 @@ func (c *Client) do(method, path string, body, out any) error {
 		b, _ := json.Marshal(body)
 		rdr = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, c.baseURL+path, rdr)
+	req, err := http.NewRequest(method, c.baseURL+apiV1(path), rdr)
 	if err != nil {
 		return err
 	}
@@ -105,13 +105,23 @@ func (c *Client) do(method, path string, body, out any) error {
 
 func (c *Client) get(path string, out any) error { return c.do(http.MethodGet, path, nil, out) }
 
+// apiV1 upgrades a legacy "/api/…" path to "/api/v1/…" (Phase 5.3). The two are
+// the same handlers today (DD-ALIAS); the prefix future-proofs the CLI for when
+// a v2 diverges. Idempotent, and leaves any non-/api path untouched.
+func apiV1(path string) string {
+	if strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/api/v1/") {
+		return "/api/v1/" + path[len("/api/"):]
+	}
+	return path
+}
+
 // --- auth ----------------------------------------------------------------
 
 // Login exchanges credentials for a session cookie, which is retained on the
 // client and returned for persistence.
 func (c *Client) Login(email, password string) (*userInfo, error) {
 	body, _ := json.Marshal(map[string]string{"email": email, "password": password})
-	req, _ := http.NewRequest(http.MethodPost, c.baseURL+"/api/auth/login", bytes.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPost, c.baseURL+apiV1("/api/auth/login"), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
