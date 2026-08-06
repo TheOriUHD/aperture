@@ -11,6 +11,7 @@ interface Webhook {
   secret?: string;
   enabled: boolean;
   createdAt: number;
+  etag?: string; // per-item concurrency tag from the list; sent as If-Match, stripped from the body
 }
 
 // Outbound event webhooks: every matching event is POSTed as signed JSON to the
@@ -40,7 +41,7 @@ export function Webhooks() {
     invalidate();
   }
   async function toggle(h: Webhook) {
-    await api.put(`/api/webhooks/${h.id}`, { ...h, enabled: !h.enabled });
+    await api.put(`/api/webhooks/${h.id}`, { ...h, enabled: !h.enabled }, { ifMatch: h.etag });
     invalidate();
   }
   async function remove(id: string) {

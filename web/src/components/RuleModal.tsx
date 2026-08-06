@@ -91,6 +91,7 @@ export function RuleModal({
               try {
                 await save.mutateAsync({
                   id: rule?.id,
+                  etag: rule?.etag, // sent as If-Match (optimistic concurrency); stripped from the body
                   name: name.trim(),
                   enabled,
                   cameras: cams,

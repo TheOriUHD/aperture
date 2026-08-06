@@ -52,12 +52,16 @@ function stripServerEnvelope(body: unknown): unknown {
   return body;
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, opts?: { ifMatch?: string }): Promise<T> {
   const key = etagKey(path);
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (isWrite(method)) {
-    const tag = etagCache.get(key);
+    // An explicit If-Match — a collection item's per-item etag read from the LIST
+    // body — wins; else fall back to the path-keyed etag captured from a singleton
+    // GET's response header. Sent as a header, never in the body (the server's
+    // DisallowUnknownFields would 400 an etag field; stripServerEnvelope guards it).
+    const tag = opts?.ifMatch ?? etagCache.get(key);
     if (tag) headers["If-Match"] = tag;
   }
   const res = await fetch(v1Path(path), {
@@ -83,8 +87,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {}),
-  put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body ?? {}),
-  del: <T>(path: string) => request<T>("DELETE", path),
+  put: <T>(path: string, body?: unknown, opts?: { ifMatch?: string }) => request<T>("PUT", path, body ?? {}, opts),
+  del: <T>(path: string, opts?: { ifMatch?: string }) => request<T>("DELETE", path, undefined, opts),
 };
 
 // downloadFile streams a binary endpoint to a browser save dialog. The JSON

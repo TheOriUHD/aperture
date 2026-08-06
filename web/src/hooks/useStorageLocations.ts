@@ -48,15 +48,17 @@ export function useUpdateLocation() {
   return useMutation({
     mutationFn: ({
       id,
+      etag,
       ...patch
     }: {
       id: string;
+      etag?: string;
       name?: string;
       allocationBytes?: number;
       enabled?: boolean;
       config?: Record<string, string | number>;
       secret?: string;
-    }) => api.put<StorageLocation>(`/api/system/storage/locations/${id}`, patch),
+    }) => api.put<StorageLocation>(`/api/system/storage/locations/${id}`, patch, { ifMatch: etag }),
     onSuccess: () => invalidate(qc),
   });
 }

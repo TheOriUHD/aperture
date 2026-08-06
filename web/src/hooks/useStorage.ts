@@ -45,6 +45,7 @@ export interface StorageLocation {
   diskTotalBytes?: number;
   diskFreeBytes?: number;
   sortOrder?: number;
+  etag?: string; // per-item concurrency tag from the list; sent as If-Match, never in a body
 }
 
 export function useStorage() {

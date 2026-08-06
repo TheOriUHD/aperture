@@ -61,6 +61,7 @@ export function EditLocationModal({ loc, onClose }: { loc: StorageLocation | nul
       } else {
         await update.mutateAsync({
           id: loc!.id,
+          etag: loc!.etag, // If-Match: reject the save if the location changed since we loaded it
           name: name.trim() || loc!.name,
           enabled,
           config: isNetwork ? cfg : undefined,

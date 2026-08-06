@@ -30,6 +30,7 @@ interface Automation {
   conditions: Conditions;
   actions: Action[];
   cooldownMs: number;
+  etag?: string; // per-item concurrency tag from the list; sent as If-Match, stripped from the body
 }
 interface Channel {
   id: string;
@@ -69,14 +70,17 @@ export function Automations() {
     qc.invalidateQueries({ queryKey: ["automations"] });
   }
   async function save(a: Automation) {
+    // etag rides the If-Match header (optimistic concurrency); stripServerEnvelope
+    // drops it from the spread body so DisallowUnknownFields won't 400. A freshly
+    // built automation has no etag → create posts without If-Match.
     const body = { ...a, cooldownMs: a.cooldownMs || 0 };
-    if (a.id) await api.put(`/api/automations/${a.id}`, body);
+    if (a.id) await api.put(`/api/automations/${a.id}`, body, { ifMatch: a.etag });
     else await api.post("/api/automations", body);
     setEditing(null);
     invalidate();
   }
   async function toggle(a: Automation) {
-    await api.put(`/api/automations/${a.id}`, { ...a, enabled: !a.enabled });
+    await api.put(`/api/automations/${a.id}`, { ...a, enabled: !a.enabled }, { ifMatch: a.etag });
     invalidate();
   }
   async function remove(id: string) {

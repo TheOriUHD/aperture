@@ -9,6 +9,7 @@ export interface ManagedUser {
   role: Role;
   disabled: boolean;
   cameraIds: string[];
+  etag?: string; // per-item concurrency tag from the list; sent as If-Match, never in a body
 }
 
 export interface UserInput {
@@ -35,8 +36,8 @@ export function useCreateUser() {
 export function useUpdateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...input }: UserInput & { id: string }) =>
-      api.put<ManagedUser>(`/api/users/${id}`, input),
+    mutationFn: ({ id, etag, ...input }: UserInput & { id: string; etag?: string }) =>
+      api.put<ManagedUser>(`/api/users/${id}`, input, { ifMatch: etag }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });
 }

@@ -156,7 +156,7 @@ export function NotificationsSettings() {
                 <span className="flex-1 truncate text-fg">{ch.name}</span>
                 <Switch
                   checked={ch.enabled}
-                  onChange={(v) => updateCh.mutate({ id: ch.id, name: ch.name, enabled: v })}
+                  onChange={(v) => updateCh.mutate({ id: ch.id, name: ch.name, enabled: v, etag: ch.etag })}
                   label="Enabled"
                 />
                 <button className="btn-icon h-7 w-7" onClick={() => test(() => testCh.mutateAsync(ch.id))} aria-label="Test">

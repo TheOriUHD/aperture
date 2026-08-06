@@ -7,6 +7,7 @@ export interface Channel {
   name: string;
   enabled: boolean;
   createdAt: number;
+  etag?: string; // per-item concurrency tag from the list; sent as If-Match, never in a body
 }
 
 export interface RuleConditions {
@@ -27,6 +28,7 @@ export interface Rule {
   cooldownSec: number;
   conditions?: RuleConditions;
   createdAt: number;
+  etag?: string; // per-item concurrency tag from the list; sent as If-Match, never in a body
 }
 
 export function useChannels() {
@@ -43,8 +45,8 @@ export function useCreateChannel() {
 export function useUpdateChannel() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: { id: string; name: string; enabled: boolean }) =>
-      api.put<Channel>(`/api/notify/channels/${b.id}`, { name: b.name, enabled: b.enabled }),
+    mutationFn: (b: { id: string; name: string; enabled: boolean; etag?: string }) =>
+      api.put<Channel>(`/api/notify/channels/${b.id}`, { name: b.name, enabled: b.enabled }, { ifMatch: b.etag }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["channels"] }),
   });
 }
@@ -65,10 +67,11 @@ export function useRules() {
 export function useSaveRule() {
   const qc = useQueryClient();
   return useMutation({
-    // The id belongs in the URL only — sending it in the body trips the server's
-    // DisallowUnknownFields and surfaces as "invalid request body".
-    mutationFn: ({ id, ...body }: Partial<Rule> & { id?: string }) =>
-      id ? api.put<Rule>(`/api/notify/rules/${id}`, body) : api.post<Rule>("/api/notify/rules", body),
+    // id travels in the URL and etag in the If-Match header — both trip the
+    // server's DisallowUnknownFields if sent in the body. On create there is no
+    // etag yet, so it posts without If-Match.
+    mutationFn: ({ id, etag, ...body }: Partial<Rule> & { id?: string }) =>
+      id ? api.put<Rule>(`/api/notify/rules/${id}`, body, { ifMatch: etag }) : api.post<Rule>("/api/notify/rules", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["rules"] }),
   });
 }

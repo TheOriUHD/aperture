@@ -76,6 +76,7 @@ export function UserModal({
       if (user) {
         await update.mutateAsync({
           id: user.id,
+          etag: user.etag, // If-Match: reject the save if this user changed since we loaded it
           name,
           role,
           disabled,
