@@ -49,6 +49,29 @@ func (s *Store) ListSegments(cameraID string, fromMs, toMs int64) ([]*Segment, e
 	return collectSegments(rows)
 }
 
+// ListSegmentsPage returns up to limit segments for a camera overlapping
+// [fromMs,toMs], ordered (start_ts,id) ascending and starting strictly after the
+// (cursorStart,cursorID) keyset position — cursorStart<=0 && cursorID=="" starts
+// from the beginning. Segment ids are random, so (start_ts,id) is the stable
+// keyset: paging never dups or skips even as segments are recorded or pruned
+// between fetches. Backs the /segments inspection endpoint (T2.3); the render
+// path uses coverage (T2.1) instead.
+func (s *Store) ListSegmentsPage(cameraID string, fromMs, toMs, cursorStart int64, cursorID string, limit int) ([]*Segment, error) {
+	q := segmentSelect + ` WHERE camera_id = ? AND start_ts < ? AND end_ts > ?`
+	args := []any{cameraID, toMs, fromMs}
+	if cursorStart > 0 || cursorID != "" {
+		q += ` AND (start_ts > ? OR (start_ts = ? AND id > ?))`
+		args = append(args, cursorStart, cursorStart, cursorID)
+	}
+	q += ` ORDER BY start_ts ASC, id ASC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	return collectSegments(rows)
+}
+
 // RecordingGraceMs is how stale the newest segment may be before a camera in a
 // recording mode is treated as having stopped delivering. Shared by the health
 // handler and the watchdog (kept here in store to avoid an import cycle).

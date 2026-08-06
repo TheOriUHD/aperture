@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // Keyset pagination convention for v1 collections.
@@ -84,4 +85,32 @@ func setNextCursor(w http.ResponseWriter, returned, limit int, lastKey int64) {
 	if returned >= limit && limit > 0 {
 		w.Header().Set("X-Next-Cursor", encodeCursor(strconv.FormatInt(lastKey, 10)))
 	}
+}
+
+// encodeSegmentCursor encodes a segments (start_ts,id) composite keyset key.
+// segment ids are random strings, so start_ts alone can tie; the id breaks it.
+func encodeSegmentCursor(startTS int64, id string) string {
+	return encodeCursor(strconv.FormatInt(startTS, 10) + "|" + id)
+}
+
+// cursorSegment reads ?cursor as a (start_ts,id) segment key. Semantics match
+// cursorInt: present=false when absent, ok=false when malformed.
+func cursorSegment(r *http.Request) (startTS int64, id string, present, ok bool) {
+	raw := r.URL.Query().Get("cursor")
+	if raw == "" {
+		return 0, "", false, true
+	}
+	payload, good := decodeCursor(raw)
+	if !good {
+		return 0, "", true, false
+	}
+	sep := strings.IndexByte(payload, '|')
+	if sep < 0 {
+		return 0, "", true, false
+	}
+	n, err := strconv.ParseInt(payload[:sep], 10, 64)
+	if err != nil {
+		return 0, "", true, false
+	}
+	return n, payload[sep+1:], true, true
 }

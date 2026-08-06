@@ -233,9 +233,47 @@ func parseRange(r *http.Request) (from, to int64) {
 
 // handleSegmentsList returns the recorded segments overlapping a time range,
 // used to draw the timeline.
+func segmentView(seg *store.Segment) map[string]any {
+	return map[string]any{
+		"id":         seg.ID,
+		"startTs":    seg.StartTS,
+		"endTs":      seg.EndTS,
+		"durationMs": seg.DurationMS,
+		"hasMotion":  seg.HasMotion,
+	}
+}
+
 func (s *Server) handleSegmentsList(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	from, to := parseRange(r)
+
+	// Keyset inspection mode (T2.3), opt-in when ?cursor or ?limit is present:
+	// tooling/extensions page through segments by the (start_ts,id) cursor. The
+	// render path (no cursor/limit) still fetches the whole range; it is moving
+	// to /coverage (T2.1), after which /segments is inspection-only.
+	cStart, cID, present, ok := cursorSegment(r)
+	if present && !ok {
+		writeErrorCode(w, http.StatusBadRequest, "validation", "invalid cursor")
+		return
+	}
+	if present || r.URL.Query().Has("limit") {
+		limit := pageLimit(r, defaultPageLimit)
+		segs, err := s.st.ListSegmentsPage(id, from, to, cStart, cID, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		out := make([]map[string]any, 0, len(segs))
+		for _, seg := range segs {
+			out = append(out, segmentView(seg))
+		}
+		if n := len(segs); n >= limit && n > 0 {
+			w.Header().Set("X-Next-Cursor", encodeSegmentCursor(segs[n-1].StartTS, segs[n-1].ID))
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
 	segs, err := s.st.ListSegments(id, from, to)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -243,13 +281,7 @@ func (s *Server) handleSegmentsList(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(segs))
 	for _, seg := range segs {
-		out = append(out, map[string]any{
-			"id":         seg.ID,
-			"startTs":    seg.StartTS,
-			"endTs":      seg.EndTS,
-			"durationMs": seg.DurationMS,
-			"hasMotion":  seg.HasMotion,
-		})
+		out = append(out, segmentView(seg))
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -182,7 +182,7 @@ func (s *Server) routes() http.Handler {
 		g.Get("/cameras/{id}/stream-token", authedCam, s.handleStreamToken)
 		g.Get("/cameras/{id}/snapshot.jpg", authedCam, s.handleSnapshot)
 		g.Get("/cameras/{id}/frame", authedCam, s.handleFrame)
-		g.Get("/cameras/{id}/segments", authedCam, s.handleSegmentsList)
+		g.Get("/cameras/{id}/segments", access{scopes: []string{ScopeSegmentsRead}, camera: camScopeParam}, s.handleSegmentsList)
 		g.Get("/cameras/{id}/coverage", authedCam, s.handleCoverage)
 		g.Get("/cameras/{id}/events", authedCam, s.handleCameraEvents)
 		g.Get("/cameras/{id}/hls", authedCam, s.handleHLS)

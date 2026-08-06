@@ -17,6 +17,7 @@ const (
 	ScopeEventsRead     = "events:read"
 	ScopeEventsWrite    = "events:write"
 	ScopeCoverageRead   = "coverage:read"
+	ScopeSegmentsRead   = "segments:read" // raw segment inspection (out of the render path)
 	ScopeMediaRead      = "media:read"
 	ScopeMediaWrite     = "media:write"
 	ScopeMediaLive      = "media:live"
@@ -41,7 +42,8 @@ const (
 var knownScopes = map[string]bool{
 	ScopeCamerasRead: true, ScopeCamerasWrite: true,
 	ScopeEventsRead: true, ScopeEventsWrite: true,
-	ScopeCoverageRead: true,
+	ScopeCoverageRead:  true,
+	ScopeSegmentsRead:  true,
 	ScopeMediaRead:   true, ScopeMediaWrite: true, ScopeMediaLive: true,
 	ScopeStorageRead: true, ScopeStorageWrite: true,
 	ScopeSchedulesRead: true, ScopeSchedulesWrite: true,
