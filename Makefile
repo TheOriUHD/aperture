@@ -58,6 +58,15 @@ lint:
 ## Docker Compose stack
 up:
 	cd deploy && docker compose up -d --build
+	$(MAKE) prune
+
+# Reclaim what each --build leaves behind (~2 GiB/deploy: a superseded image
+# layer + build cache). Dangling images only, so base images (golang/node) and
+# the running image are kept; `-` ignores errors so a prune hiccup never fails
+# a deploy. Run automatically by `up`; also safe to run standalone any time.
+prune:
+	-docker builder prune -f
+	-docker image prune -f
 
 down:
 	cd deploy && docker compose down
