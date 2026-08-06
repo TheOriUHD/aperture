@@ -81,6 +81,7 @@ func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	setETag(w, cameraView(c))
 	writeJSON(w, http.StatusOK, cameraView(c))
 }
 
@@ -167,6 +168,9 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if !s.precondition(w, r, etagOf(cameraView(c))) {
+		return
+	}
 	var req cameraReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -246,6 +250,7 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 		s.rec.RestartCamera(c.ID)
 	}
 	s.logAudit(r, "camera.update", c.Name, "mode="+c.RecordMode)
+	setETag(w, cameraView(c))
 	writeJSON(w, http.StatusOK, cameraView(c))
 }
 
@@ -254,6 +259,9 @@ func (s *Server) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
 	c, err := s.st.GetCamera(id)
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if !s.precondition(w, r, etagOf(cameraView(c))) {
 		return
 	}
 	// Reclaim the camera's on-disk footage and thumbnails BEFORE deleting the
@@ -273,6 +281,9 @@ func (s *Server) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
 
 // syncStreams reconciles go2rtc with the current cameras in the background.
 func (s *Server) syncStreams() {
+	if s.sm == nil {
+		return // streaming disabled (or under test) — nothing to reconcile
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()

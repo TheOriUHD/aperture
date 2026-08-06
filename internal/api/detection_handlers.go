@@ -9,11 +9,16 @@ import (
 
 // handleGetDetection returns the current object-detection config.
 func (s *Server) handleGetDetection(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.detect.LoadConfig())
+	v := s.detect.LoadConfig()
+	setETag(w, v)
+	writeJSON(w, http.StatusOK, v)
 }
 
 // handleSetDetection validates and persists the detection config.
 func (s *Server) handleSetDetection(w http.ResponseWriter, r *http.Request) {
+	if !s.precondition(w, r, etagOf(s.detect.LoadConfig())) {
+		return
+	}
 	var c detect.Config
 	if err := decodeJSON(r, &c); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

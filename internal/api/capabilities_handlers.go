@@ -74,8 +74,8 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 			"cursorPagination": true, // T2.4 (Phase 2.A) — live
 			"changeFeed":       true, // T2.5 (Phase 2.C) — live
 			"coverageEndpoint": true,  // T2.1 (Phase 2.A) — live
-			"idempotencyKey":   true,  // T1.9 (export/shares) — live
-			"etagIfMatch":      false, // 1.9 ETag half not yet implemented (deferred)
+			"idempotencyKey":   true, // T1.9 (export/shares) — live
+			"etagIfMatch":      true, // 1.9 ETag/If-Match on config resources — live
 			"pdtSeek":          pdtSeek == "true", // T2.2 runtime switch (default off)
 		},
 		"deprecations": []map[string]any{

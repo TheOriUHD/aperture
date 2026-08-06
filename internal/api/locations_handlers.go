@@ -264,6 +264,9 @@ func (s *Server) handleUpdateLocation(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if !s.precondition(w, r, etagOf(loc)) {
+		return
+	}
 	var req locationUpdateReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -316,6 +319,9 @@ func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 	loc, err := s.st.GetStorageLocation(id)
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if !s.precondition(w, r, etagOf(loc)) {
 		return
 	}
 	force := r.URL.Query().Get("force") == "true"

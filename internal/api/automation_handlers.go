@@ -39,6 +39,14 @@ func (s *Server) handleCreateAutomation(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleUpdateAutomation(w http.ResponseWriter, r *http.Request) {
+	cur, err := s.st.GetAutomation(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.precondition(w, r, etagOf(cur)) {
+		return
+	}
 	var a store.Automation
 	if err := decodeJSON(r, &a); err != nil || strings.TrimSpace(a.Name) == "" {
 		writeError(w, http.StatusBadRequest, "name required")
@@ -55,6 +63,14 @@ func (s *Server) handleUpdateAutomation(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleDeleteAutomation(w http.ResponseWriter, r *http.Request) {
+	cur, err := s.st.GetAutomation(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.precondition(w, r, etagOf(cur)) {
+		return
+	}
 	if err := s.st.DeleteAutomation(chi.URLParam(r, "id")); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not delete")
 		return

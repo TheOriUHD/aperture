@@ -8,13 +8,8 @@ import (
 	"github.com/TheOriUHD/aperture/internal/store"
 )
 
-func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	scheds, err := s.st.ListSchedules(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
+func (s *Server) scheduleView(id string) []map[string]any {
+	scheds, _ := s.st.ListSchedules(id)
 	out := make([]map[string]any, 0, len(scheds))
 	for _, sc := range scheds {
 		out = append(out, map[string]any{
@@ -23,13 +18,22 @@ func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
 			"endMin":   sc.EndMin,
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out
+}
+
+func (s *Server) handleGetSchedule(w http.ResponseWriter, r *http.Request) {
+	v := s.scheduleView(chi.URLParam(r, "id"))
+	setETag(w, v)
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *Server) handleSetSchedule(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if _, err := s.st.GetCamera(id); err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if !s.precondition(w, r, etagOf(s.scheduleView(id))) {
 		return
 	}
 	var req struct {

@@ -18,11 +18,16 @@ import (
 // handleGetSite returns the geographic profile. Readable by any authenticated
 // user (the overlay and timeline shading need units/timezone/coordinates).
 func (s *Server) handleGetSite(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, site.Load(s.st))
+	v := site.Load(s.st)
+	setETag(w, v)
+	writeJSON(w, http.StatusOK, v)
 }
 
 // handleSetSite persists the geographic profile (admin) and repolls weather.
 func (s *Server) handleSetSite(w http.ResponseWriter, r *http.Request) {
+	if !s.precondition(w, r, etagOf(site.Load(s.st))) {
+		return
+	}
 	var req site.Site
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

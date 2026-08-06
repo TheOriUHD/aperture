@@ -121,6 +121,14 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
+	cur, err := s.st.GetWebhook(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.precondition(w, r, etagOf(cur)) {
+		return
+	}
 	wh, err := s.decodeWebhook(r)
 	if err != nil || wh.Name == "" {
 		writeError(w, http.StatusBadRequest, "invalid webhook")
@@ -136,6 +144,14 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
+	cur, err := s.st.GetWebhook(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !s.precondition(w, r, etagOf(cur)) {
+		return
+	}
 	if err := s.st.DeleteWebhook(chi.URLParam(r, "id")); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not delete")
 		return

@@ -27,11 +27,24 @@ func (s *Server) handleGetZones(w http.ResponseWriter, r *http.Request) {
 		raw = `{"cols":0,"rows":0,"ignore":[]}`
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", etagOf(raw))
 	_, _ = w.Write([]byte(raw))
 }
 
 func (s *Server) handleSetZones(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	cur, err := s.st.GetCamera(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	curZones := cur.MotionZonesJSON
+	if curZones == "" {
+		curZones = `{"cols":0,"rows":0,"ignore":[]}`
+	}
+	if !s.precondition(w, r, etagOf(curZones)) {
+		return
+	}
 	var req motionMaskReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

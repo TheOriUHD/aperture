@@ -100,6 +100,9 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if !s.precondition(w, r, etagOf(u)) {
+		return
+	}
 	var req userReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -142,10 +145,15 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "you cannot delete your own account")
 		return
 	}
-	email := id
-	if u, err := s.st.GetUserByID(id); err == nil {
-		email = u.Email
+	cur, err := s.st.GetUserByID(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
 	}
+	if !s.precondition(w, r, etagOf(cur)) {
+		return
+	}
+	email := cur.Email
 	if err := s.st.DeleteUser(id); err != nil {
 		writeStoreError(w, err)
 		return

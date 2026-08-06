@@ -114,13 +114,19 @@ func (s *Server) spotlightsEnabled() bool {
 	return v != "0" && v != "false"
 }
 
-func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+func (s *Server) settingsView() map[string]any {
+	return map[string]any{
 		"siteName":           s.siteName(),
 		"overviewTempSensor": s.overviewTemp(),
 		"spotlightsEnabled":  s.spotlightsEnabled(),
 		"recordQuality":      s.recordQuality(),
-	})
+	}
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	v := s.settingsView()
+	setETag(w, v)
+	writeJSON(w, http.StatusOK, v)
 }
 
 // recordQuality is the global recording-stream preference: "high" (main stream,
@@ -138,6 +144,9 @@ func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 		OverviewTempSensor *string `json:"overviewTempSensor"` // optional; "" = geo weather
 		SpotlightsEnabled  *bool   `json:"spotlightsEnabled"`  // optional; show the Spotlights card
 		RecordQuality      *string `json:"recordQuality"`      // optional; high | low
+	}
+	if !s.precondition(w, r, etagOf(s.settingsView())) {
+		return
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

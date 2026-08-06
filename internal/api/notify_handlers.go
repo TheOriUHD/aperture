@@ -118,6 +118,9 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if !s.precondition(w, r, etagOf(ch)) {
+		return
+	}
 	if !s.isOwnerOrAdmin(r, ch.UserID) {
 		writeError(w, http.StatusForbidden, "access denied")
 		return
@@ -145,6 +148,9 @@ func (s *Server) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 	ch, err := s.st.GetChannel(chi.URLParam(r, "id"))
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if !s.precondition(w, r, etagOf(ch)) {
 		return
 	}
 	if !s.isOwnerOrAdmin(r, ch.UserID) {
@@ -230,6 +236,9 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if !s.precondition(w, r, etagOf(rule)) {
+		return
+	}
 	if !s.isOwnerOrAdmin(r, rule.UserID) {
 		writeError(w, http.StatusForbidden, "access denied")
 		return
@@ -254,6 +263,9 @@ func (s *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 	rule, err := s.st.GetRule(chi.URLParam(r, "id"))
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if !s.precondition(w, r, etagOf(rule)) {
 		return
 	}
 	if !s.isOwnerOrAdmin(r, rule.UserID) {
