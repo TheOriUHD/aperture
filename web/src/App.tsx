@@ -4,6 +4,7 @@ import { useAuth } from "./lib/auth";
 import { usePrefs } from "./lib/prefs";
 import { AppShell } from "./components/AppShell";
 import { DeviceNotifications } from "./components/DeviceNotifications";
+import { ChangeFeedListener } from "./components/ChangeFeedListener";
 import { Login } from "./screens/Login";
 import { Setup } from "./screens/Setup";
 import { FirstRun } from "./screens/FirstRun";
@@ -37,6 +38,7 @@ export default function App() {
   return (
     <AppShell>
       <DeviceNotifications />
+      <ChangeFeedListener />
       <Suspense
         fallback={
           <div className="flex-1 grid place-items-center">
