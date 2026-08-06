@@ -183,6 +183,7 @@ func (s *Server) routes() http.Handler {
 		g.Get("/cameras/{id}/snapshot.jpg", authedCam, s.handleSnapshot)
 		g.Get("/cameras/{id}/frame", authedCam, s.handleFrame)
 		g.Get("/cameras/{id}/segments", authedCam, s.handleSegmentsList)
+		g.Get("/cameras/{id}/coverage", authedCam, s.handleCoverage)
 		g.Get("/cameras/{id}/events", authedCam, s.handleCameraEvents)
 		g.Get("/cameras/{id}/hls", authedCam, s.handleHLS)
 		g.Get("/cameras/{id}/seg/{seg}", authedCam, s.handleSegmentFile)
