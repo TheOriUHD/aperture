@@ -192,6 +192,8 @@ func (s *Server) routes() http.Handler {
 		g.Get("/cameras/{id}/frame", authedCam, s.handleFrame)
 		g.Get("/cameras/{id}/segments", access{scopes: []string{ScopeSegmentsRead}, camera: camScopeParam}, s.handleSegmentsList)
 		g.Get("/cameras/{id}/coverage", authedCam, s.handleCoverage)
+			g.Post("/cameras/{id}/lease", access{scopes: []string{ScopeMediaRead}, camera: camScopeParam}, s.handleCreateLease)       // T2.8
+			g.Delete("/cameras/{id}/lease/{leaseId}", access{scopes: []string{ScopeMediaRead}, camera: camScopeParam}, s.handleReleaseLease)
 		g.Get("/cameras/{id}/events", authedCam, s.handleCameraEvents)
 		g.Get("/cameras/{id}/hls", authedCam, s.handleHLS)
 		g.Get("/cameras/{id}/seg/{seg}", authedCam, s.handleSegmentFile)

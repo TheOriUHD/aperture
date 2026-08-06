@@ -128,6 +128,11 @@ func (m *Manager) worker(ctx context.Context) {
 	}
 }
 
+// exportLeaseTTL bounds how long a render's segment lease shields footage, so a
+// hung job can't hold footage on a near-full disk. Matches the janitor's
+// in-memory export-protection age; the job normally releases its lease sooner.
+const exportLeaseTTL = 2 * time.Hour
+
 func (m *Manager) process(ctx context.Context, id string) {
 	job, err := m.st.GetExport(id)
 	if err != nil {
@@ -144,6 +149,25 @@ func (m *Manager) process(ctx context.Context, id string) {
 		fail("no camera selected")
 		return
 	}
+
+	// Take a durable segment lease per camera for the job window (T2.8) so
+	// retention can't prune footage out from under the render — even across a
+	// restart, unlike the janitor's in-memory export snapshot. Bounded to
+	// exportLeaseTTL so a hung render can't shield footage indefinitely; released
+	// when the job finishes.
+	leaseExpiry := time.Now().Add(exportLeaseTTL).UnixMilli()
+	var leases []string
+	for _, cid := range cams {
+		if l, err := m.st.CreateLease(cid, job.FromTS, job.ToTS, leaseExpiry, "export:"+id); err == nil {
+			leases = append(leases, l.ID)
+		}
+	}
+	defer func() {
+		for _, lid := range leases {
+			_ = m.st.ReleaseLease(lid)
+		}
+	}()
+
 	names := map[string]string{}
 	for _, cid := range cams {
 		if c, err := m.st.GetCamera(cid); err == nil {

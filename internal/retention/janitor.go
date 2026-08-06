@@ -35,9 +35,13 @@ type Janitor struct {
 
 	// activeExports is snapshotted at the start of each enforce() pass; segments
 	// overlapping a queued/running export are skipped so a render is never pruned
-	// out from under itself. Interim guard until the segment-lease table (T2.8)
-	// replaces the inert `locked` flag with a real, expiring lease.
+	// out from under itself. Retained as a fast in-memory belt alongside the
+	// durable segment-lease table (T2.8), which is the general mechanism.
 	activeExports []*store.ExportJob
+
+	// leasesActive is set once per pass: true when any unexpired segment lease
+	// exists, so delete() consults the lease table only when it could matter.
+	leasesActive bool
 }
 
 // New constructs a Janitor.
@@ -72,12 +76,16 @@ func (j *Janitor) enforce() {
 	// Snapshot in-flight exports once per pass so no prune path deletes footage a
 	// render is about to read. A job that starts mid-pass is caught next tick.
 	j.activeExports = j.freshExports()
+	now := time.Now().UnixMilli()
+	// Sweep expired leases, then note whether any live one remains so delete()
+	// can skip the per-segment lease lookup entirely when there are none.
+	_ = j.st.PurgeExpiredLeases(now)
+	j.leasesActive, _ = j.st.HasActiveLeases(now)
 	cams, err := j.st.ListCameras()
 	if err != nil {
 		j.log.Error("retention: list cameras", "err", err)
 		return
 	}
-	now := time.Now().UnixMilli()
 	for _, cam := range cams {
 		// Motion-mode: keep only footage that overlaps an event (with pre/post-roll).
 		if cam.RecordMode == store.ModeMotion {
@@ -401,6 +409,14 @@ func (j *Janitor) enforceLocationFreeSpace(loc *store.StorageLocation) {
 func (j *Janitor) delete(s *store.Segment) bool {
 	if j.exportLocked(s) {
 		return false
+	}
+	// A held, unexpired lease overlapping this segment protects it (T2.8). Only
+	// consulted when a lease exists at all (leasesActive), so the common no-lease
+	// path adds no query.
+	if j.leasesActive {
+		if held, err := j.st.LeaseOverlaps(s.CameraID, s.StartTS, s.EndTS, time.Now().UnixMilli()); err == nil && held {
+			return false
+		}
 	}
 	// Local segments hold an absolute path; network segments hold a backend-
 	// relative path routed through the storage registry.
