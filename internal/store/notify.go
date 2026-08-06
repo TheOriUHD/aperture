@@ -100,7 +100,10 @@ type NotifyRule struct {
 }
 
 func (c RuleConditions) marshal() string {
-	if c.TimeOfDay == "" && !c.OnlyPrecip {
+	// Persist when ANY condition is set. The Objects check was missing, so a rule
+	// whose only condition was object labels (e.g. "person") silently lost it on
+	// save (3.4) — the engine reads Conditions.Objects, so it must round-trip.
+	if c.TimeOfDay == "" && !c.OnlyPrecip && len(c.Objects) == 0 {
 		return ""
 	}
 	b, _ := json.Marshal(c)

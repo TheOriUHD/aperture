@@ -34,6 +34,7 @@ func (s *Server) handleCreateAutomation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.logAudit(r, "automation.create", a.Name, "")
+	s.emitAutomation()
 	writeJSON(w, http.StatusOK, a)
 }
 
@@ -49,6 +50,7 @@ func (s *Server) handleUpdateAutomation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.logAudit(r, "automation.update", a.Name, "")
+	s.emitAutomation()
 	writeJSON(w, http.StatusOK, a)
 }
 
@@ -57,6 +59,7 @@ func (s *Server) handleDeleteAutomation(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "could not delete")
 		return
 	}
+	s.emitAutomation()
 	w.WriteHeader(http.StatusNoContent)
 }
 

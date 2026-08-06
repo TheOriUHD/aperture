@@ -31,6 +31,14 @@ func (s *Server) emitStorage() {
 	}
 }
 
+// emitAutomation publishes an automation.updated change-feed message after an
+// automation/rule/channel change.
+func (s *Server) emitAutomation() {
+	if s.notify != nil {
+		s.notify.PublishFeed(notify.FeedMessage{Type: "automation.updated", TS: time.Now().UnixMilli()})
+	}
+}
+
 // handleFeed is the v1 change feed (T2.5): a Server-Sent-Events stream of
 // {id,type,ts,camera,data} envelopes. On (re)connect it (1) replays durable
 // messages the client missed — events with seq > Last-Event-ID, straight from
