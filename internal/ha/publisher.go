@@ -53,6 +53,7 @@ type Publisher struct {
 	current   Settings
 	siteName  func() string
 	reconcile func() // re-sync recorder + detector after an inbound record-mode change
+	onArmed   func(bool) // change-feed alarm.state hook (Item 3)
 
 	stateMu   sync.Mutex      // guards motion/recording — touched by the ticker AND the paho OnConnect goroutine
 	motion    map[string]bool // last published motion state per camera
@@ -65,6 +66,10 @@ type Publisher struct {
 // SetReconcile wires the callback that applies a record-mode change immediately
 // (recorder + detector) when Home Assistant sends a command.
 func (p *Publisher) SetReconcile(fn func()) { p.reconcile = fn }
+
+// SetOnArmed registers a callback invoked when HA toggles the armed flag, so the
+// change feed emits alarm.state for HA-driven arms (not only API ones).
+func (p *Publisher) SetOnArmed(fn func(bool)) { p.onArmed = fn }
 
 // New constructs a Publisher. siteName returns the configured site name.
 func New(cfg *config.Config, st *store.Store, sm snapshotter, siteName func() string, log *slog.Logger) *Publisher {

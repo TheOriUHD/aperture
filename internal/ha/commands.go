@@ -65,6 +65,9 @@ func (p *Publisher) setArmed(armed bool) {
 	_ = p.st.SetSetting("armed", boolStr(armed))
 	p.log.Info("ha: armed set from HA", "armed", armed)
 	p.pub(stateTopicBase+"/system/armed", true, onOff(armed))
+	if p.onArmed != nil {
+		p.onArmed(armed) // change feed alarm.state (Item 3)
+	}
 }
 
 func (p *Publisher) triggerSnapshot(cameraID string) {

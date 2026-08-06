@@ -63,6 +63,26 @@ func TestExportProgressEmitter(t *testing.T) {
 	}
 }
 
+// TestAlarmStateEmitter covers OnAlarmState (shared by API/HA/HomeKit arms).
+func TestAlarmStateEmitter(t *testing.T) {
+	e := &Engine{}
+	_, ch := e.SubscribeFeed(FeedFilter{Types: map[string]bool{"alarm.state": true}}, nil)
+	e.OnAlarmState(false)
+	select {
+	case f := <-ch:
+		var m map[string]any
+		_ = json.Unmarshal(f.Data, &m)
+		if m["type"] != "alarm.state" {
+			t.Errorf("type = %v, want alarm.state", m["type"])
+		}
+		if d, _ := m["data"].(map[string]any); d["armed"] != false {
+			t.Errorf("armed = %v, want false", d["armed"])
+		}
+	default:
+		t.Fatal("expected an alarm.state frame")
+	}
+}
+
 // TestEventClosedDurable covers event.closed carrying the event's seq (durable),
 // so a resuming client sees it via Last-Event-ID replay.
 func TestEventClosedDurable(t *testing.T) {

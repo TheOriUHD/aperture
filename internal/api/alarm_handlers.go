@@ -1,11 +1,6 @@
 package api
 
-import (
-	"net/http"
-	"time"
-
-	"github.com/TheOriUHD/aperture/internal/notify"
-)
+import "net/http"
 
 // Alarm (armed) state (3.4). Previously togglable only from Home Assistant and
 // HomeKit; v1 exposes in-app control at GET/PUT /alarm (alarm:arm). "armed" is
@@ -37,10 +32,7 @@ func (s *Server) handleSetAlarm(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logAudit(r, "alarm.arm", val, "armed state changed via API")
 	if s.notify != nil {
-		s.notify.PublishFeed(notify.FeedMessage{
-			Type: "alarm.state", TS: time.Now().UnixMilli(),
-			Data: map[string]any{"armed": *req.Armed},
-		})
+		s.notify.OnAlarmState(*req.Armed)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"armed": *req.Armed})
 }

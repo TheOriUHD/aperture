@@ -59,7 +59,8 @@ type Detector struct {
 
 	evMu    sync.Mutex
 	events  map[string]*activeEvent
-	onEvent func(*store.Event)
+	onEvent      func(*store.Event)
+	onEventClose func(string) // notified (event id) when an audio event finalizes
 }
 
 // New constructs an audio Detector.
@@ -75,6 +76,11 @@ func New(cfg *config.Config, st *store.Store, sm snapshotter, log *slog.Logger) 
 // SetOnEvent registers a callback invoked (async) when a new audio event starts
 // — the same hook motion uses, so notify/automation react to audio too.
 func (d *Detector) SetOnEvent(fn func(*store.Event)) { d.onEvent = fn }
+
+// SetOnEventClose registers a callback invoked (async) with the event id when an
+// audio event finalizes — emits the change feed's event.closed (parity with
+// motion). No structural change: the audio detector already uses this pattern.
+func (d *Detector) SetOnEventClose(fn func(string)) { d.onEventClose = fn }
 
 // Run starts detection and the reconcile + finalize loops until ctx is done.
 func (d *Detector) Run(ctx context.Context) {
@@ -246,6 +252,8 @@ func (d *Detector) finalizeStale() {
 		end := ev.lastTick + postrollMs
 		if err := d.st.FinalizeEvent(ev.id, end, ev.maxLevel, nil); err != nil {
 			d.log.Error("audio: finalize event", "err", err)
+		} else if d.onEventClose != nil {
+			go d.onEventClose(ev.id)
 		}
 	}
 }

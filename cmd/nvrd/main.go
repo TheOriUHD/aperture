@@ -243,6 +243,7 @@ func main() {
 	// Home Assistant inbound control (record-mode Select / Arm switch) applies
 	// record-mode changes through the same reconcile path.
 	haPub.SetReconcile(reconcile)
+	haPub.SetOnArmed(notifyEng.OnAlarmState) // alarm.state on HA-driven arms (Item 3)
 	// Local automation engine: events → matching automations → actions (notify,
 	// webhook, MQTT publish, set record mode).
 	automateEng := automate.New(st, notifyEng, haPub, reconcile, cfg.PublicURL, log)
@@ -252,6 +253,7 @@ func main() {
 	if cfg.HomeKitEnabled {
 		if b, err := homekit.New(cfg, st, log); err == nil {
 			hkBridge = b
+			hkBridge.SetOnArmed(notifyEng.OnAlarmState) // alarm.state on HomeKit arms (Item 3)
 			go hkBridge.Run(bgCtx)
 		} else {
 			log.Error("homekit: init failed", "err", err)
@@ -280,8 +282,7 @@ func main() {
 		webhookDisp.OnEvent(ev)
 		automateEng.OnEvent(ev)
 	})
-	// (audio.Detector has no close hook yet; audio events emit event.created but
-	// not event.closed — a minor asymmetry, video is the common case.)
+	audioDet.SetOnEventClose(notifyEng.OnEventClose) // audio event.closed (Item 3)
 
 	// Environmental context: poll weather into a time-series for "past weather
 	// at the playhead". No-ops until a site location is configured.

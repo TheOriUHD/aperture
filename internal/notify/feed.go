@@ -191,6 +191,15 @@ func (e *Engine) OnExportProgress(id string, progress float64) {
 	})
 }
 
+// OnAlarmState emits alarm.state when the armed flag is toggled from any surface
+// (the API, Home Assistant, or HomeKit), so subscribers see arm/disarm live.
+func (e *Engine) OnAlarmState(armed bool) {
+	e.PublishFeed(FeedMessage{
+		Type: "alarm.state", TS: time.Now().UnixMilli(),
+		Data: map[string]any{"armed": armed},
+	})
+}
+
 // OnCameraState emits an ephemeral camera.state on an online/offline transition.
 func (e *Engine) OnCameraState(cameraID string, online bool) {
 	state := "offline"

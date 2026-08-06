@@ -50,7 +50,12 @@ type Bridge struct {
 	mu        sync.Mutex
 	armed     bool
 	motionGen map[string]int64 // latest motion generation per camera (sliding clear-timer)
+	onArmed   func(bool)       // change-feed alarm.state hook (Item 3)
 }
+
+// SetOnArmed registers a callback invoked when the HomeKit Home app toggles the
+// alarm, so the change feed emits alarm.state for HomeKit-driven arms.
+func (b *Bridge) SetOnArmed(fn func(bool)) { b.onArmed = fn }
 
 // New builds the bridge and its accessories from the current camera list.
 // It does not start listening — call Run for that. Zero enabled cameras is
@@ -222,6 +227,11 @@ func (b *Bridge) setArmed(armed bool, source string) {
 		b.log.Error("homekit persist armed failed", "err", err, "armed", armed)
 	}
 	b.applyArmedToCharacteristics()
+	if b.onArmed != nil {
+		b.onArmed(armed) // change feed alarm.state (Item 3). Only the Home-app
+		// toggle reaches setArmed; the resync loop updates b.armed inline, so no
+		// double-emit for HA-driven changes.
+	}
 	b.log.Info("homekit armed state changed", "armed", armed, "source", source)
 }
 

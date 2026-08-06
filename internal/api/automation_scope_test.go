@@ -33,6 +33,27 @@ func TestAutomationScopes(t *testing.T) {
 	}
 }
 
+// TestRuleEmitsAutomationUpdated covers Item 3: rule (and channel) edits emit
+// automation.updated, not only automation CRUD.
+func TestRuleEmitsAutomationUpdated(t *testing.T) {
+	s := newTestServer(t)
+	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
+	mustDo(t, s.st.CreateUser(admin))
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+
+	_, ch := s.notify.SubscribeFeed(notify.FeedFilter{Types: map[string]bool{"automation.updated": true}}, nil)
+	rec := s.reqBody("POST", "/api/v1/notify/rules", adminC,
+		strings.NewReader(`{"name":"R","cameras":[],"eventTypes":[],"channels":[]}`))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create rule: got %d, want 201 (%s)", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-ch:
+	default:
+		t.Fatal("rule create did not emit automation.updated")
+	}
+}
+
 // TestAlarmEndpoint covers GET/PUT /alarm and the alarm.state emitter.
 func TestAlarmEndpoint(t *testing.T) {
 	s := newTestServer(t)

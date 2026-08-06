@@ -110,6 +110,7 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logAudit(r, "notify.channel.create", name, req.Type)
+	s.emitAutomation()
 	writeJSON(w, http.StatusCreated, channelView(ch))
 }
 
@@ -142,6 +143,7 @@ func (s *Server) handleUpdateChannel(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.emitAutomation()
 	writeJSON(w, http.StatusOK, channelView(ch))
 }
 
@@ -159,6 +161,7 @@ func (s *Server) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.st.DeleteChannel(ch.ID)
+	s.emitAutomation()
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
@@ -229,6 +232,7 @@ func (s *Server) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logAudit(r, "notify.rule.create", req.Name, "")
+	s.emitAutomation()
 	writeJSON(w, http.StatusCreated, rule)
 }
 
@@ -258,6 +262,7 @@ func (s *Server) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	s.emitAutomation()
 	writeJSON(w, http.StatusOK, rule)
 }
 
@@ -275,6 +280,7 @@ func (s *Server) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.st.DeleteRule(rule.ID)
+	s.emitAutomation()
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
