@@ -63,6 +63,50 @@ func TestIfMatchPolicy(t *testing.T) {
 	}
 }
 
+// TestIfMatchSessionEnforcedWhenSent pins the behavior 5.2 turns on in the web
+// app. The web is a cookie-session client; once it replays the ETag it captured
+// from a GET as If-Match on config writes, a matching tag must still succeed (no
+// regression) and a stale tag must be rejected (the new optimistic-concurrency
+// protection). TestIfMatchPolicy only covers a session that OMITS If-Match, so
+// this is the missing half — mirroring the exact client round-trip: read the tag
+// from the GET response header, replay it, then find it stale after the write.
+func TestIfMatchSessionEnforcedWhenSent(t *testing.T) {
+	s := newTestServer(t)
+	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
+	mustDo(t, s.st.CreateUser(admin))
+	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "Orig"}))
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+
+	put := func(ifMatch string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("PUT", "/api/v1/cameras/cam1", strings.NewReader(`{"name":"Renamed"}`))
+		adminC.apply(r)
+		r.Header.Set("If-Match", ifMatch)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, r)
+		return rec
+	}
+
+	// The client captures the ETag from the GET response header (setETag).
+	etag := s.reqAs("GET", "/api/v1/cameras/cam1", adminC).Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("GET did not expose an ETag header for the client to capture")
+	}
+	// Session + matching If-Match → 200 (the write must not break), and the reply
+	// carries the next ETag the client will replay.
+	rec := put(etag)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("session matching If-Match: got %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if next := rec.Header().Get("ETag"); next == "" || next == etag {
+		t.Fatalf("write should echo a fresh ETag for the next write (was %q, now %q)", etag, next)
+	}
+	// Session + the now-consumed (stale) If-Match → 412: a concurrent editor's
+	// change is caught instead of being silently clobbered.
+	if rec := put(etag); rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("session stale If-Match: got %d, want 412", rec.Code)
+	}
+}
+
 // TestIfMatchStar covers If-Match: * (matches any existing resource).
 func TestIfMatchStar(t *testing.T) {
 	s := newTestServer(t)

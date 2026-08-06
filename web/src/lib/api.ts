@@ -18,13 +18,40 @@ export function v1Path(path: string): string {
     : path;
 }
 
+// ETag cache for optimistic concurrency (1.9 / 5.2). The server stamps a strong
+// ETag on config-resource GETs (site, settings, detection, per-camera zones and
+// schedule, a single camera). We remember it per path and replay it as If-Match
+// on the next write to that SAME path, so a config save that raced another
+// editor's change is rejected with 412 ("it changed since you read it") instead
+// of silently clobbering it. The server treats If-Match as optional for the web's
+// cookie sessions, so this is purely additive: a path we hold no ETag for sends
+// none and keeps last-writer-wins. A write's reply refreshes the tag (the camera
+// PUT echoes a fresh ETag); a write with no ETag in the reply drops the cached one
+// so we never replay a validator we know is now stale — the next GET repopulates.
+const etagCache = new Map<string, string>();
+const etagKey = (path: string) => v1Path(path).split("?")[0];
+const isWrite = (m: string) => m === "PUT" || m === "POST" || m === "PATCH" || m === "DELETE";
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const key = etagKey(path);
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (isWrite(method)) {
+    const tag = etagCache.get(key);
+    if (tag) headers["If-Match"] = tag;
+  }
   const res = await fetch(v1Path(path), {
     method,
     credentials: "same-origin",
-    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  const et = res.headers.get("ETag");
+  if (et) {
+    etagCache.set(key, et);
+  } else if (isWrite(method) && res.ok) {
+    etagCache.delete(key); // resource changed but reply didn't echo a tag → refetch will repopulate
+  }
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
