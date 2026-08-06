@@ -32,13 +32,27 @@ const (
 	multipartBodyLimit = 256 << 20 // 256 MiB (backup restore / import)
 )
 
+// readBodyTimeout bounds how long a small (non-multipart) request body may take
+// to arrive, so a slow-drip client can't hold a connection indefinitely —
+// MaxBytesReader caps a body's size but not its time. 30s is enormous for a
+// ≤1 MiB JSON body (≈34 KiB/s) yet cuts off a slowloris body. This is the
+// missing-ReadTimeout mitigation without a GLOBAL read deadline (which would
+// kill slow large uploads — plan C-4); it is applied per-request only where it
+// is safe (see limitBody).
+const readBodyTimeout = 30 * time.Second
+
 // limitBody caps the request body. Multipart uploads get the large cap; anything
 // else the JSON cap. A Content-Length past the cap is refused immediately; a
 // chunked/undeclared body is bounded by MaxBytesReader as the handler reads it.
+// For non-multipart bodies it also sets a per-request READ deadline so a slow
+// body can't hold a slot forever; GET/SSE/WebSocket (no body) and multipart
+// uploads (backup restore — legitimately large and slow) are exempt, so
+// streaming and uploads are untouched.
 func (s *Server) limitBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cap := int64(jsonBodyLimit)
-		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		multipart := strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/")
+		if multipart {
 			cap = multipartBodyLimit
 		}
 		if r.ContentLength > cap {
@@ -47,6 +61,12 @@ func (s *Server) limitBody(next http.Handler) http.Handler {
 		}
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, cap)
+			// Only bound methods that carry a body, and only non-multipart. On a
+			// bare httptest recorder there is no connection, so SetReadDeadline is
+			// unsupported and the error is ignored (a no-op in unit tests).
+			if !multipart && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch) {
+				_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(readBodyTimeout))
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

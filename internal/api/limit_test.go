@@ -63,6 +63,20 @@ func TestBodyLimit413(t *testing.T) {
 	}
 }
 
+// TestReadBodyTimeoutNoRegression covers Item 5: the per-request read deadline
+// on non-multipart bodies is best-effort (no-op on a recorder, no connection)
+// and must not break the normal request path.
+func TestReadBodyTimeoutNoRegression(t *testing.T) {
+	s := newTestServer(t)
+	small := bytes.NewReader([]byte(`{"email":"x","password":"y"}`))
+	r := httptest.NewRequest("POST", "/api/v1/auth/login", small)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, r)
+	if rec.Code == http.StatusRequestEntityTooLarge || rec.Code >= 500 {
+		t.Fatalf("normal POST broke under the read-deadline middleware: got %d", rec.Code)
+	}
+}
+
 // TestRateLimitPerClass covers T2.6: a token exhausting its bucket gets 429
 // while a session (separate bucket) is unaffected.
 func TestRateLimitPerClass(t *testing.T) {
