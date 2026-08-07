@@ -175,6 +175,17 @@ func (s *Server) routes() http.Handler {
 		r.Use(s.csrfGuard)
 		g := s.apiGroup(r)
 
+		// An unmatched path under the API prefix returns the JSON error envelope
+		// (code "not_found") instead of falling through to the parent mux's SPA
+		// handler, which serves 200 text/html. Third-party SDKs parse the body as
+		// JSON, so HTML for a typo'd path is a confusing decode error and breaks the
+		// OpenAPI promise that errors are JSON with a machine-readable code; a JSON
+		// 404 is unambiguous. Set on both the /api and /api/v1 subrouters (this
+		// closure runs for each). Genuine non-API app routes never reach here, so
+		// they keep the SPA fallthrough. chi.Walk skips NotFound handlers, so this
+		// carries no Access descriptor and the fail-closed boot guard is unaffected.
+		r.NotFound(s.apiNotFound)
+
 		// Public — no authentication.
 		g.Get("/system/health", pub, s.handleHealth)
 		g.Get("/system/version", pub, s.handleVersion)

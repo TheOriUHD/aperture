@@ -61,3 +61,12 @@ func (s *Server) spaHandler() http.HandlerFunc {
 		_, _ = w.Write(b)
 	}
 }
+
+// apiNotFound is the NotFound handler for the /api and /api/v1 subrouters — the
+// API-surface counterpart to spaHandler. An unmatched path under the API prefix
+// gets the standard JSON error envelope (code "not_found"), not the SPA's 200
+// text/html, so an SDK/extension that decodes every body as JSON sees a clean,
+// machine-readable 404 for a typo'd path instead of a confusing HTML-parse error.
+func (s *Server) apiNotFound(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusNotFound, "no such API endpoint: "+r.Method+" "+r.URL.Path)
+}
