@@ -230,7 +230,7 @@ func main() {
 		if !strings.HasPrefix(bearer, store.APITokenPrefix) {
 			return nil
 		}
-		uid, scopes, grants, ok := st.ResolveAPIToken(bearer)
+		uid, scopes, grants, extID, ok := st.ResolveAPIToken(bearer)
 		if !ok {
 			return nil
 		}
@@ -238,7 +238,7 @@ func main() {
 		if err != nil || u.Disabled {
 			return nil
 		}
-		return &auth.SessionClaims{UserID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role, Class: auth.ClassToken, Scopes: scopes, CameraGrants: grants}
+		return &auth.SessionClaims{UserID: u.ID, Email: u.Email, Name: u.Name, Role: u.Role, Class: auth.ClassToken, Scopes: scopes, CameraGrants: grants, ExtID: extID}
 	})
 	// Applying a record-mode change (from an automation or HA command) means
 	// re-syncing both the recorder and the motion detector immediately.

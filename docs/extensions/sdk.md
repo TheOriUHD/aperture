@@ -50,6 +50,10 @@ Not every method exists on both transports. This table is the whole surface:
 | `alarm.arm(armed)`              | —                           | ✓                         |
 | `on(type, handler, opts?)`      | —                           | ✓                         |
 | `http.fetch(input, init?)`      | —                           | ✓                         |
+| `storage.get(key)`              | ✓                           | ✓                         |
+| `storage.set(key, value)`       | ✓                           | ✓                         |
+| `storage.delete(key)`           | ✓                           | ✓                         |
+| `storage.keys()`                | ✓                           | ✓                         |
 | `resize(height)`                | ✓                           | —                         |
 
 ### Common methods (both transports)
@@ -82,6 +86,21 @@ const evs = await window.aperture.events.list("limit=20");
 
 // Backend: an object of string/number params
 const evs = await aperture.events.list({ limit: 20 });
+```
+
+### Storage (both transports)
+
+**`storage.get(key)` / `storage.set(key, value)` / `storage.delete(key)` / `storage.keys()`**
+— private per-extension key/value storage, enabled by the `storage` permission.
+Values are **strings** (JSON-encode structured data yourself). The namespace is
+**this extension's alone** — no other extension can read it — and it is **destroyed
+when the extension is uninstalled**. It is shared across the app (not per-user) and
+bounded by a per-extension quota. `get` resolves to `null` for a missing key.
+
+```ts
+// Store a secret once (e.g. from the panel's settings form), read it in the backend.
+await aperture.storage.set("ha_token", "llt_xxx");
+const token = await aperture.storage.get("ha_token"); // string | null
 ```
 
 ### Backend-only methods

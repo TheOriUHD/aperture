@@ -26,6 +26,7 @@ function env(k: string): string {
 }
 const API_BASE = env("APERTURE_API"); // e.g. http://localhost:8080
 const TOKEN = env("APERTURE_TOKEN"); // apt_… (this extension's scoped token)
+const EXT_ID = env("APERTURE_EXT_ID"); // this extension's id — its private KV namespace
 
 /** A non-2xx API response. `status` is the HTTP code, `body` the parsed error JSON. */
 export class ApertureError extends Error {
@@ -68,6 +69,11 @@ export interface FeedMessage {
 function v1(path: string): string {
   if (!path.startsWith("/")) path = "/" + path;
   return path.startsWith("/api/") ? path : "/api/v1" + path;
+}
+
+const enc = encodeURIComponent;
+function kvPath(key: string): string {
+  return `/ext/${enc(EXT_ID)}/kv/${enc(key)}`;
 }
 
 function parse(text: string): unknown {
@@ -191,6 +197,25 @@ export const aperture = {
   },
   alarm: {
     arm: (armed: boolean) => request<{ armed: boolean }>("PUT", "/alarm", { armed }),
+  },
+
+  /** Private per-extension key/value storage (the `storage` permission). Namespaced
+   * to THIS extension — no other extension can read it — and destroyed when the
+   * extension is uninstalled. Values are strings; JSON-encode structured data
+   * yourself. Bounded by a per-extension quota. */
+  storage: {
+    get: async (key: string): Promise<string | null> => {
+      try {
+        const r = await request<{ key: string; value: string }>("GET", kvPath(key));
+        return r.value;
+      } catch (e) {
+        if (e instanceof ApertureError && e.status === 404) return null; // absent key
+        throw e;
+      }
+    },
+    set: (key: string, value: string) => request<void>("PUT", kvPath(key), { value }),
+    delete: (key: string) => request<void>("DELETE", kvPath(key)),
+    keys: () => request<{ keys: string[] }>("GET", `/ext/${enc(EXT_ID)}/kv`).then((r) => r.keys),
   },
 
   /** Subscribe to change-feed events by type. Returns an unsubscribe function. */

@@ -102,6 +102,12 @@ const extSDKBootstrap = `<script>(function(){
     request:req,
     cameras:{list:function(){return req('GET','/cameras');},get:function(id){return req('GET','/cameras/'+id);}},
     events:{list:function(q){return req('GET','/events'+(q?('?'+q):''));}},
+    storage:{
+      get:function(k){return call('storage.get',{key:k});},
+      set:function(k,v){return call('storage.set',{key:k,value:v});},
+      delete:function(k){return call('storage.delete',{key:k});},
+      keys:function(){return call('storage.keys',{});}
+    },
     resize:function(h){parent.postMessage({__apReq:true,type:'ui.resize',payload:{height:h}},'*');}
   };
   try{var ro=new ResizeObserver(function(){window.aperture.resize(document.documentElement.scrollHeight);});ro.observe(document.documentElement);}catch(e){}

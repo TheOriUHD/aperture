@@ -41,7 +41,7 @@ func BuildSpec(id, entryAbs, extDir, sdkModulePath, importMapPath, apiBase, toke
 		// replaced wholesale by Spec.Env below (supervisor: cmd.Env = spec.Env), so
 		// this exposes only the extension's own token and the public API base — no
 		// host environment leaks through.
-		"--allow-env=APERTURE_TOKEN,APERTURE_API",
+		"--allow-env=APERTURE_TOKEN,APERTURE_API,APERTURE_EXT_ID",
 		"--allow-read=" + readPaths,
 		"--allow-write=" + extDir,
 		"--import-map=" + importMapPath,
@@ -63,6 +63,7 @@ func BuildSpec(id, entryAbs, extDir, sdkModulePath, importMapPath, apiBase, toke
 		Env: []string{
 			"APERTURE_TOKEN=" + token,
 			"APERTURE_API=" + apiBase,
+			"APERTURE_EXT_ID=" + id, // so the SDK can address its own private KV namespace
 			"HOME=" + extDir,
 			"DENO_DIR=" + filepath.Join(extDir, ".deno"),
 			"NO_COLOR=1",

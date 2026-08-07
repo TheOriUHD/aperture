@@ -77,7 +77,9 @@ your data there.** Grant `network` only to extensions and hosts you trust.
 `storage: true` reserves a private, quota'd key-value namespace for the extension,
 isolated from other extensions and from Aperture's global settings. It grants no
 API scope and no shared access — just a small private place for the extension's own
-configuration.
+configuration. Reach it through `aperture.storage.get/set/delete/keys` on **both**
+transports (see the SDK reference); the namespace is destroyed when the extension is
+uninstalled.
 
 ## Never grantable
 

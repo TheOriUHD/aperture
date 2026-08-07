@@ -28,6 +28,15 @@ export interface UiAperture {
     /** `query` is a raw query string without the leading "?" (e.g. "limit=20"). */
     list<T = unknown>(query?: string): Promise<T>;
   };
+  /** Private per-extension key/value storage (the `storage` permission). Namespaced
+   * to this extension and shared across the app; destroyed on uninstall. Values are
+   * strings — JSON-encode structured data yourself. */
+  storage: {
+    get(key: string): Promise<string | null>;
+    set(key: string, value: string): Promise<void>;
+    delete(key: string): Promise<void>;
+    keys(): Promise<string[]>;
+  };
   /** Ask the host to resize this panel's iframe to `height` px. The runtime already
    * calls this on content resize via a ResizeObserver; call it explicitly only to
    * override. */

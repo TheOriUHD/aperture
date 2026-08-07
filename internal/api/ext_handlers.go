@@ -253,8 +253,10 @@ func (s *Server) handleExtUninstall(w http.ResponseWriter, r *http.Request) {
 		s.extSup.Remove(id)
 	}
 	_ = s.st.DeleteExtensionTokens(id)
+	_ = s.st.ExtKVDeleteAll(id) // destroy its private KV (lifecycle: uninstall wipes storage)
 	_ = s.st.DeleteExtension(id)
-	_ = os.RemoveAll(s.extDir(id)) // destroys its files + stored data
+	_ = os.RemoveAll(s.extDir(id))       // its files
+	_ = os.RemoveAll(s.extPrevDir(id))   // and any pre-update snapshot
 	w.WriteHeader(http.StatusNoContent)
 }
 

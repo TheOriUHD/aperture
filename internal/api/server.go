@@ -222,6 +222,13 @@ func (s *Server) routes() http.Handler {
 		g.Get("/ext/{id}/files", adminSessionOnly, s.handleExtFiles)
 		g.Get("/ext/{id}/files/*", adminSessionOnly, s.handleExtFileRead)
 		g.Put("/ext/{id}/files/*", adminSessionOnly, s.handleExtFileWrite)
+		// Per-extension private KV (the `storage` permission). authed: reachable by
+		// a backend's own token and by a UI panel via the host bridge; the handler
+		// namespaces by ext_id and blocks cross-extension token access.
+		g.Get("/ext/{id}/kv", authed, s.handleExtKVList)
+		g.Get("/ext/{id}/kv/{key}", authed, s.handleExtKVGet)
+		g.Put("/ext/{id}/kv/{key}", authed, s.handleExtKVSet)
+		g.Delete("/ext/{id}/kv/{key}", authed, s.handleExtKVDelete)
 		g.Post("/setup", pub, s.handleSetup)
 		g.Post("/auth/login", pub, s.handleLogin)
 		g.Post("/auth/login/2fa", pub, s.handleLogin2FA)

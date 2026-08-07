@@ -34,6 +34,9 @@ func TestBuildSpecDenyByDefault(t *testing.T) {
 	if !strings.Contains(env, "APERTURE_TOKEN=apt_tok") || !strings.Contains(env, "APERTURE_API=http://localhost:8080") {
 		t.Errorf("env missing token/api: %v", sp.Env)
 	}
+	if !strings.Contains(env, "APERTURE_EXT_ID=com.x") {
+		t.Errorf("env missing ext id (needed for the private KV namespace): %v", sp.Env)
+	}
 	// No network permission → --deny-net (still reaches the API host though).
 	sp2 := BuildSpec("com.y", "/e/m.ts", "/e", "/opt/sdk/mod.ts", "/e/.im.json", "", "t", 1, Derived{})
 	if !strings.Contains(strings.Join(sp2.DenoFlags, " "), "--deny-net") {

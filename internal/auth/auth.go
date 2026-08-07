@@ -75,6 +75,7 @@ type SessionClaims struct {
 	Class        string   `json:"-"` // ClassSession | ClassCLI | ClassToken
 	Scopes       []string `json:"-"` // token scopes; empty for session/cli means all scopes
 	CameraGrants []string `json:"-"` // token per-camera allowlist; empty means the owner's full ACL
+	ExtID        string   `json:"-"` // extension id for an extension-minted token; "" otherwise (T2 ext_kv)
 	jwt.RegisteredClaims
 }
 

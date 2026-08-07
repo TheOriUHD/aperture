@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"strings"
 	"time"
@@ -122,16 +123,17 @@ func (s *Store) DeleteAPIToken(id, userID string) error {
 // ResolveAPIToken returns the owning user id plus the token's scopes and camera
 // grants for a valid, unexpired token, and records its use. ok is false for
 // unknown or expired tokens.
-func (s *Store) ResolveAPIToken(plain string) (userID string, scopes, cameraGrants []string, ok bool) {
+func (s *Store) ResolveAPIToken(plain string) (userID string, scopes, cameraGrants []string, extID string, ok bool) {
 	h := hashToken(plain)
 	var uid, sc, cg string
+	var ext sql.NullString
 	var exp int64
-	if err := s.db.QueryRow(`SELECT user_id, scopes, camera_grants, expires_at FROM api_tokens WHERE token_hash = ?`, h).Scan(&uid, &sc, &cg, &exp); err != nil {
-		return "", nil, nil, false
+	if err := s.db.QueryRow(`SELECT user_id, scopes, camera_grants, ext_id, expires_at FROM api_tokens WHERE token_hash = ?`, h).Scan(&uid, &sc, &cg, &ext, &exp); err != nil {
+		return "", nil, nil, "", false
 	}
 	if exp != 0 && time.Now().UnixMilli() > exp {
-		return "", nil, nil, false
+		return "", nil, nil, "", false
 	}
 	_, _ = s.db.Exec(`UPDATE api_tokens SET last_used = ? WHERE token_hash = ?`, time.Now().UnixMilli(), h)
-	return uid, csvSplit(sc), csvSplit(cg), true
+	return uid, csvSplit(sc), csvSplit(cg), ext.String, true
 }

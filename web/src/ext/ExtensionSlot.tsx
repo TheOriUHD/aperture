@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { panelsForSlot, type ExtPanel } from "./panels";
 import { useExtPanels } from "./useExtPanels";
 
@@ -40,18 +40,45 @@ export function ExtensionPanel({ panel, cameraId }: { panel: ExtPanel; cameraId?
         setHeight(Math.max(80, Math.min(h, 4000)));
         return;
       }
-      if (m.type === "api.request") {
-        const p = m.payload || {};
-        try {
-          const result = await api.post(`/api/ext/${panel.extId}/broker`, {
-            method: p.method,
-            path: p.path,
-            body: p.body,
-          });
-          iframe.contentWindow?.postMessage({ __ap: true, id: m.id, result }, "*");
-        } catch (err) {
-          iframe.contentWindow?.postMessage({ __ap: true, id: m.id, error: (err as Error).message }, "*");
+      const reply = (result: unknown) =>
+        iframe.contentWindow?.postMessage({ __ap: true, id: m.id, result }, "*");
+      const fail = (err: unknown) =>
+        iframe.contentWindow?.postMessage({ __ap: true, id: m.id, error: (err as Error).message }, "*");
+
+      // All host-relayed calls carry the panel's TRUSTED extId — never one the
+      // sandboxed panel supplies — so a panel can only ever reach its own broker
+      // authority and its own private storage namespace.
+      const p = m.payload || {};
+      const kv = `/api/ext/${panel.extId}/kv`;
+      const key = () => encodeURIComponent(String(p.key ?? ""));
+      try {
+        switch (m.type) {
+          case "api.request":
+            reply(await api.post(`/api/ext/${panel.extId}/broker`, { method: p.method, path: p.path, body: p.body }));
+            break;
+          case "storage.get":
+            try {
+              const r = await api.get<{ value: string }>(`${kv}/${key()}`);
+              reply(r.value);
+            } catch (err) {
+              if (err instanceof ApiError && err.status === 404) reply(null); // absent key
+              else throw err;
+            }
+            break;
+          case "storage.set":
+            await api.put(`${kv}/${key()}`, { value: String(p.value ?? "") });
+            reply(null);
+            break;
+          case "storage.delete":
+            await api.del(`${kv}/${key()}`);
+            reply(null);
+            break;
+          case "storage.keys":
+            reply((await api.get<{ keys: string[] }>(kv)).keys);
+            break;
         }
+      } catch (err) {
+        fail(err);
       }
     };
     window.addEventListener("message", onMessage);
