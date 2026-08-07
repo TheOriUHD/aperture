@@ -78,3 +78,36 @@ func TestAPIUnmatchedPathReturnsJSONNotFound(t *testing.T) {
 		t.Errorf("app route /dashboard: did not serve the SPA index.html: %q", rec.Body.String())
 	}
 }
+
+// TestAPIMethodNotAllowedReturnsJSON pins the 405 half of the contract: a wrong
+// method on an EXISTING API path returns the JSON error envelope with code
+// "method_not_allowed", not chi's default empty-body 405.
+func TestAPIMethodNotAllowedReturnsJSON(t *testing.T) {
+	s := newTestServer(t)
+	// GET /system/health exists (public); POST does not — a method mismatch, not a
+	// missing path. Checked on both mounts.
+	for _, p := range []string{"/api/v1/system/health", "/api/system/health"} {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest("POST", p, nil))
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("POST %s: status = %d, want 405", p, rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+			t.Errorf("POST %s: content-type = %q, want application/json", p, ct)
+		}
+		var body struct {
+			Code  string `json:"code"`
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Errorf("POST %s: body is not JSON (%q): %v", p, rec.Body.String(), err)
+			continue
+		}
+		if body.Code != "method_not_allowed" {
+			t.Errorf("POST %s: code = %q, want method_not_allowed", p, body.Code)
+		}
+		if body.Error == "" {
+			t.Errorf("POST %s: expected a human error message", p)
+		}
+	}
+}

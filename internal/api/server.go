@@ -185,6 +185,9 @@ func (s *Server) routes() http.Handler {
 		// they keep the SPA fallthrough. chi.Walk skips NotFound handlers, so this
 		// carries no Access descriptor and the fail-closed boot guard is unaffected.
 		r.NotFound(s.apiNotFound)
+		// A wrong method on an existing API path returns the same JSON envelope
+		// (code "method_not_allowed"), not chi's default empty-body 405.
+		r.MethodNotAllowed(s.apiMethodNotAllowed)
 
 		// Public — no authentication.
 		g.Get("/system/health", pub, s.handleHealth)

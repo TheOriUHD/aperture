@@ -42,6 +42,8 @@ func codeForStatus(status int) string {
 		return "forbidden"
 	case http.StatusNotFound:
 		return "not_found"
+	case http.StatusMethodNotAllowed:
+		return "method_not_allowed"
 	case http.StatusConflict:
 		return "conflict"
 	case http.StatusPreconditionFailed:

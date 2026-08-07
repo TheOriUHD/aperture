@@ -104,7 +104,7 @@ func (s *Server) generateOpenAPI() map[string]any {
 					"required": []string{"error"},
 					"properties": map[string]any{
 						"error":   map[string]any{"type": "string", "description": "Human-readable message."},
-						"code":    map[string]any{"type": "string", "description": "Machine-readable code: validation, unauthenticated, forbidden, forbidden.scope, forbidden.camera, not_found, conflict, precondition_required, precondition_failed, idempotency_conflict, rate_limited, payload_too_large, unavailable, internal."},
+						"code":    map[string]any{"type": "string", "description": "Machine-readable code: validation, unauthenticated, forbidden, forbidden.scope, forbidden.camera, not_found, method_not_allowed, conflict, precondition_required, precondition_failed, idempotency_conflict, rate_limited, payload_too_large, unavailable, internal."},
 						"details": map[string]any{"type": "object"},
 					},
 				},

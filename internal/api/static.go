@@ -70,3 +70,13 @@ func (s *Server) spaHandler() http.HandlerFunc {
 func (s *Server) apiNotFound(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, "no such API endpoint: "+r.Method+" "+r.URL.Path)
 }
+
+// apiMethodNotAllowed is the MethodNotAllowed handler for the /api and /api/v1
+// subrouters. A wrong method on an existing API path returns the SAME JSON error
+// envelope as everything else (code "method_not_allowed") instead of chi's default
+// empty-body 405 — so the OpenAPI promise that errors are JSON with a machine
+// -readable code holds for 405 exactly as it does for 404, and an SDK decoding
+// every response body gets a shape it can read rather than nothing.
+func (s *Server) apiMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusMethodNotAllowed, "method not allowed: "+r.Method+" "+r.URL.Path)
+}
