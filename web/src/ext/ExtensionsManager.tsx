@@ -1,9 +1,10 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Puzzle, Plus } from "lucide-react";
+import { Puzzle, Plus, AlertTriangle } from "lucide-react";
 import { ApiError } from "../lib/api";
 import { EmptyState } from "../components/ui/EmptyState";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 import { Skeleton } from "../components/ui/Skeleton";
 import { ExtRow } from "./ExtRow";
 import { Marketplace } from "./Marketplace";
@@ -155,15 +156,16 @@ export function ExtensionsManager() {
       ) : (
         <div className="space-y-2">
           {exts.map((ext) => (
-            <ExtRow
-              key={ext.id}
-              ext={ext}
-              actions={actions}
-              update={updates[ext.id]}
-              onUpdate={onUpdate}
-              onEdit={setEditing}
-              onUninstall={setUninstall}
-            />
+            <ErrorBoundary key={ext.id} fallback={() => <ExtRowError ext={ext} />}>
+              <ExtRow
+                ext={ext}
+                actions={actions}
+                update={updates[ext.id]}
+                onUpdate={onUpdate}
+                onEdit={setEditing}
+                onUninstall={setUninstall}
+              />
+            </ErrorBoundary>
           ))}
         </div>
       )}
@@ -216,6 +218,20 @@ export function ExtensionsManager() {
           <ExtFileEditor extId={editing.id} extName={editing.name} onClose={() => setEditing(null)} />
         </Suspense>
       )}
+    </div>
+  );
+}
+
+// ExtRowError is the per-row error-boundary fallback: one malformed extension shows
+// an inline card instead of taking down the whole manager.
+function ExtRowError({ ext }: { ext: ExtItem }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-xl border border-rec/30 bg-rec/10 px-3.5 py-3 text-sm">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rec" />
+      <div className="min-w-0">
+        <p className="text-fg">“{ext.name || ext.id}” couldn't be displayed.</p>
+        <p className="mt-0.5 text-xs text-fg-muted">Its data looks malformed. Other extensions are unaffected.</p>
+      </div>
     </div>
   );
 }

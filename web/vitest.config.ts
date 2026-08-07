@@ -5,7 +5,9 @@ import { defineConfig } from "vitest/config";
 // pinned at the data layer (panelsForSlot), which needs no browser.
 export default defineConfig({
   test: {
+    // Node by default (pure logic); component tests opt into jsdom per-file with a
+    // `// @vitest-environment jsdom` directive.
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
   },
 });

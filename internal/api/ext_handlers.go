@@ -344,7 +344,7 @@ func (s *Server) spawnIfBackend(ex *store.Extension) {
 func (s *Server) extView(ex *store.Extension) map[string]any {
 	v := map[string]any{
 		"id": ex.ID, "name": ex.Name, "version": ex.Version, "source": ex.Source,
-		"enabled": ex.Enabled, "scopes": ex.Scopes, "cameraGrants": ex.CameraGrants,
+		"enabled": ex.Enabled, "scopes": orEmpty(ex.Scopes), "cameraGrants": orEmpty(ex.CameraGrants),
 		"installedAt": ex.InstalledAt, "updatedAt": ex.UpdatedAt,
 		"pinned": ex.Pinned, "modified": ex.Modified,
 		"hasBackend": false, "hasUI": false, "canPin": false,
@@ -362,7 +362,7 @@ func (s *Server) extView(ex *store.Extension) map[string]any {
 			v["canPin"] = d.HasNavPanel // only a full-page view earns rail space
 			v["consent"] = d.ConsentLines
 			v["requestsCameras"] = d.RequestsCameras
-			v["requestedCameras"] = d.CameraGrants // the manifest ceiling ([] = all)
+			v["requestedCameras"] = orEmpty(d.CameraGrants) // the manifest ceiling ([] = all)
 			if d.Icon != "" {
 				v["icon"] = "/ext/" + ex.ID + "/" + d.Icon // served as <img>, CSP'd
 			}
@@ -399,6 +399,16 @@ func randID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// orEmpty coerces a nil slice to an empty one so JSON array fields serialize as []
+// rather than null — a nil Go slice otherwise marshals to null, and clients that
+// map/measure the array then choke on it.
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func updateURL(m *ext.Manifest) string {

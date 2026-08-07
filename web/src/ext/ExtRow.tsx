@@ -186,21 +186,25 @@ export function ExtRow({
 // request is the ceiling; the user narrows within it. Saving re-mints the token (no
 // re-consent — camera scope is the user's decision, not a new permission).
 function CameraEdit({ ext, actions }: { ext: ExtItem; actions: Actions }) {
-  const { choices } = useCameraChoices(ext.requestsCameras, ext.requestedCameras);
-  const requestAll = ext.requestsCameras && ext.requestedCameras.length === 0;
-  const grantsKey = ext.cameraGrants.join(",");
-  const [selected, setSelected] = useState<Set<string>>(() => initialSelection(choices, ext.cameraGrants));
+  // The API returns null for an all-cameras request/grant (a nil Go slice); treat it
+  // as the empty array it means.
+  const grants = ext.cameraGrants ?? [];
+  const requested = ext.requestedCameras ?? [];
+  const { choices } = useCameraChoices(ext.requestsCameras, requested);
+  const requestAll = ext.requestsCameras && requested.length === 0;
+  const grantsKey = grants.join(",");
+  const [selected, setSelected] = useState<Set<string>>(() => initialSelection(choices, grants));
   useEffect(() => {
-    setSelected(initialSelection(choices, ext.cameraGrants));
+    setSelected(initialSelection(choices, grants));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [choices.length, ext.id, grantsKey]);
 
   const toSend = grantsToSend(selected, choices, requestAll);
-  const currentIsAll = ext.cameraGrants.length === 0;
+  const currentIsAll = grants.length === 0;
   const dirty =
     toSend === null
       ? !currentIsAll
-      : currentIsAll || [...toSend].sort().join(",") !== [...ext.cameraGrants].sort().join(",");
+      : currentIsAll || [...toSend].sort().join(",") !== [...grants].sort().join(",");
   const canSave = selected.size > 0 && dirty;
 
   return (

@@ -10,15 +10,16 @@ export interface CamChoice {
 
 // The cameras the user may pick from: their own cameras, bounded by the manifest
 // request. A specific request is a ceiling; an empty request means "all cameras".
-export function useCameraChoices(requestsCameras: boolean, requestedCameras: string[]) {
+export function useCameraChoices(requestsCameras: boolean, requestedCameras: string[] | null | undefined) {
   const { data: cams = [], isLoading } = useCameras();
-  const requestAll = requestsCameras && requestedCameras.length === 0;
-  const key = requestedCameras.join(",");
+  const requested = requestedCameras ?? []; // the API returns null for an all-cameras request
+  const requestAll = requestsCameras && requested.length === 0;
+  const key = requested.join(",");
   const choices = useMemo<CamChoice[]>(() => {
     if (!requestsCameras) return [];
     const list = cams.map((c) => ({ id: c.id, name: c.name || c.id }));
     if (requestAll) return list;
-    const req = new Set(requestedCameras);
+    const req = new Set(requested);
     return list.filter((c) => req.has(c.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cams, requestsCameras, requestAll, key]);
