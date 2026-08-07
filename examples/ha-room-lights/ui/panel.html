@@ -11,19 +11,22 @@
     Aperture's dark theme (docs/extensions/panels.md) and the body is transparent so it
     reads as part of the camera-detail card.
 
-    What this demonstrates — a well-made panel that does REAL device control: it reacts
-    to the camera on screen (window.aperture.cameraId), looks that camera up in a
-    camera→light mapping the user configured in settings, reads the light's current
-    state and capabilities from Home Assistant, and offers on/off plus — only where the
-    bulb supports them — brightness, colour, and warm–cool temperature. It starts the
-    controls where the light actually is, debounces drags into one request, and shows
-    outbound failures as a plain sentence with the raw error behind "Details".
+    What this demonstrates — a considered two-layer control with ONE source of truth.
+    A Home Assistant light has one current state and is in exactly one colour mode at a
+    time, so the UI derives everything from the light's reported state, never from local
+    UI state:
+      • Layer 1 is just the on/off toggle and a single colour dot showing what the light
+        is actually at right now — its rendered colour dimmed by its brightness. The dot
+        is the status readout AND the button that opens layer 2.
+      • Layer 2 is one surface: a colour side, a white (temperature) side, and
+        brightness. Because a colour and a temperature are mutually exclusive in HA,
+        exactly one side is marked active (from attributes.color_mode); setting a colour
+        deselects white and vice versa — no two competing "current" values.
+    Every change (and every toggle) re-reads the light and reflects what it truly reports.
+    Only the sides the bulb supports are shown, and an on/off-only bulb gets no layer 2.
 
-    Notably it needs NO new SDK or host capability beyond what the earlier version used:
-    reading supported_color_modes and setting rgb_color / brightness_pct /
-    color_temp_kelvin are just more fields on the same window.aperture.net.fetch GET and
-    POST, with the ha_token secret injected server-side. The extension surface already
-    covers this kind of real work.
+    It needs NO SDK or host capability beyond net.fetch + settings (with the ha_token
+    secret injected server-side) — rich, correct device control on the existing surface.
   -->
   <style>
     :root {
@@ -38,15 +41,20 @@
     .head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
     .glyph { flex: none; width: 34px; height: 34px; display: grid; place-items: center;
              border-radius: 9px; background: #16202b; color: var(--fg-faint);
-             border: 1px solid var(--line-strong); transition: background .15s, color .15s; }
-    .glyph.on { background: rgba(230,180,90,.16); color: var(--amber); }
+             border: 1px solid var(--line-strong); }
     .title { margin: 0; font-size: 13px; font-weight: 600; }
     .subtitle { margin: 1px 0 0; font-size: 11px; color: var(--fg-muted); }
 
+    /* Layer 1 — the toggle and the one colour dot. Nothing else. */
     .control { display: flex; align-items: center; justify-content: space-between; gap: 12px;
                padding: 12px 14px; border-radius: var(--radius);
                background: var(--surface); border: 1px solid var(--line); }
-    .state { font-size: 13px; } .state b { color: var(--fg); } .state .muted { color: var(--fg-muted); }
+    .dot { flex: none; width: 30px; height: 30px; border-radius: 50%; padding: 0;
+           border: 1px solid var(--line-strong); background: transparent; cursor: pointer;
+           transition: box-shadow .15s; }
+    .dot.static { cursor: default; }
+    .dot:not(.static):hover { box-shadow: 0 0 0 4px rgba(255,255,255,.05); }
+    .dot[aria-expanded="true"] { box-shadow: 0 0 0 3px rgba(230,180,90,.42); }
     .toggle { appearance: none; border: 0; cursor: pointer; position: relative;
               width: 52px; height: 30px; border-radius: 999px; background: var(--line-strong);
               transition: background .18s; flex: none; }
@@ -56,25 +64,32 @@
     .toggle[aria-checked="true"]::after { transform: translateX(22px); }
     .toggle[disabled] { opacity: .5; cursor: default; }
 
-    /* Adaptive controls — shown only when the light is on and supports each one. */
-    .controls { margin-top: 10px; display: grid; gap: 11px;
-                padding: 12px 14px; border-radius: var(--radius);
-                background: var(--surface); border: 1px solid var(--line); }
-    .ctl { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 10px; }
-    .ctl > label { font-size: 11px; color: var(--fg-muted); }
-    input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 6px;
-                        border-radius: 999px; background: var(--line-strong); cursor: pointer; }
-    input#bri { background: linear-gradient(90deg, #5a4a2c, var(--amber)); }
-    input#temp { background: linear-gradient(90deg, #ffb46b, #dfe9ff); }
+    /* Layer 2 — one surface. Colour + white are two sides of the same choice, with
+       exactly one active; brightness sits with them. */
+    .sheet { margin-top: 8px; display: grid; gap: 12px; padding: 12px 14px;
+             border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); }
+    .row { display: flex; align-items: center; gap: 10px; transition: opacity .15s; }
+    .row.inactive { opacity: .5; }
+    .pip { flex: none; width: 12px; height: 12px; border-radius: 50%;
+           border: 1.5px solid var(--line-strong); visibility: hidden; }
+    .pip.show { visibility: visible; }
+    .pip.on { visibility: visible; border-color: var(--amber); background: var(--amber);
+              box-shadow: 0 0 0 3px rgba(230,180,90,.16); }
+    .lbl { flex: none; width: 52px; font-size: 12px; color: var(--fg-muted); }
+    .grow { flex: 1; }
+    input[type=range] { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 999px;
+                        background: var(--line-strong); cursor: pointer; }
+    #bri { background: linear-gradient(90deg, #5a4a2c, var(--amber)); }
+    #temp { background: linear-gradient(90deg, #ffb46b, #dfe9ff); }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px;
       border-radius: 50%; background: #fff; border: 2px solid rgba(0,0,0,.28); box-shadow: 0 1px 2px rgba(0,0,0,.45); }
     input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%;
       background: #fff; border: 2px solid rgba(0,0,0,.28); }
-    .swatch { justify-self: start; }
-    input[type=color] { width: 46px; height: 26px; padding: 0; border: 1px solid var(--line-strong);
+    input[type=color] { flex: none; width: 46px; height: 26px; padding: 0; border: 1px solid var(--line-strong);
                         border-radius: 7px; background: none; cursor: pointer; }
     input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
     input[type=color]::-webkit-color-swatch { border: none; border-radius: 5px; }
+    .divider { border-top: 1px solid var(--line); }
 
     .note { margin: 10px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--fg-faint); }
     .note.error { color: var(--danger); }
@@ -86,7 +101,7 @@
 </head>
 <body>
   <div class="head">
-    <div class="glyph" id="glyph" aria-hidden="true">
+    <div class="glyph" aria-hidden="true">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M9 18h6M10 21h4M12 2a6 6 0 0 0-4 10.5c.7.7 1 1.2 1 2.5h6c0-1.3.3-1.8 1-2.5A6 6 0 0 0 12 2Z"/>
       </svg>
@@ -98,22 +113,26 @@
   </div>
 
   <div class="control" id="control" hidden>
-    <span class="state" id="state"><span class="muted">Checking…</span></span>
+    <button class="dot static" id="dot" aria-label="Adjust light" aria-expanded="false"></button>
     <button class="toggle" id="toggle" role="switch" aria-checked="false" aria-label="Toggle light" disabled></button>
   </div>
 
-  <div class="controls" id="controls" hidden>
-    <div class="ctl" id="briRow" hidden>
-      <label for="bri">Brightness</label>
-      <input type="range" id="bri" min="1" max="100" value="100" aria-label="Brightness">
+  <div class="sheet" id="sheet" hidden>
+    <div class="row" id="colRow" hidden>
+      <span class="pip" id="colPip"></span>
+      <span class="lbl">Colour</span>
+      <span class="grow"></span>
+      <input type="color" id="col" value="#ffd9a0" aria-label="Colour">
     </div>
-    <div class="ctl" id="colRow" hidden>
-      <label for="col">Colour</label>
-      <input type="color" id="col" class="swatch" value="#ffd9a0" aria-label="Colour">
+    <div class="row" id="tempRow" hidden>
+      <span class="pip" id="tempPip"></span>
+      <span class="lbl">White</span>
+      <input type="range" id="temp" class="grow" min="2000" max="6500" value="4000" aria-label="White temperature">
     </div>
-    <div class="ctl" id="tempRow" hidden>
-      <label for="temp">Warm · Cool</label>
-      <input type="range" id="temp" min="2000" max="6500" value="4000" aria-label="Colour temperature">
+    <div class="row divider" id="briRow" hidden style="padding-top:12px">
+      <span class="pip"></span>
+      <span class="lbl">Brightness</span>
+      <input type="range" id="bri" class="grow" min="1" max="100" value="100" aria-label="Brightness">
     </div>
   </div>
 
@@ -125,32 +144,24 @@
       var ap = window.aperture;
       var $ = function (id) { return document.getElementById(id); };
       var els = {
-        subtitle: $('subtitle'), control: $('control'), state: $('state'), toggle: $('toggle'), glyph: $('glyph'),
-        controls: $('controls'), briRow: $('briRow'), bri: $('bri'), colRow: $('colRow'), col: $('col'),
-        tempRow: $('tempRow'), temp: $('temp'), note: $('note'), details: $('details'), detailText: $('detailText')
+        subtitle: $('subtitle'), control: $('control'), dot: $('dot'), toggle: $('toggle'), sheet: $('sheet'),
+        colRow: $('colRow'), colPip: $('colPip'), col: $('col'), tempRow: $('tempRow'), tempPip: $('tempPip'),
+        temp: $('temp'), briRow: $('briRow'), bri: $('bri'), note: $('note'), details: $('details'), detailText: $('detailText')
       };
       var cameraId = ap && ap.cameraId;
-      var haUrl = null, entity = null, isOn = false, busy = false;
-      var caps = { brightness: false, color: false, colorTemp: false };
+      var haUrl = null, entity = null, isOn = false, busy = false, open = false, hasSheet = false;
       var pending = {}, timer = null;
+      var DEFAULT_RGB = [255, 214, 160];
+      var COLOR_MODES = ['hs', 'xy', 'rgb', 'rgbw', 'rgbww'];
 
       function resize() { if (ap && ap.resize) ap.resize(document.documentElement.scrollHeight); }
       function say(text, isError, detail) {
         els.note.textContent = text || ''; els.note.className = 'note' + (isError ? ' error' : '');
         els.details.hidden = !detail; if (detail) els.detailText.textContent = detail; resize();
       }
-      function setOn(on) {
-        isOn = on; els.toggle.setAttribute('aria-checked', on ? 'true' : 'false');
-        els.glyph.className = 'glyph' + (on ? ' on' : '');
-        els.state.innerHTML = on ? '<b>On</b>' : '<span class="muted">Off</span>';
-        els.controls.hidden = !on;
-        if (!on && timer) { clearTimeout(timer); timer = null; pending = {}; } // don't let a queued drag turn it back on
-        resize();
-      }
+      function rgbToHex(a) { return '#' + a.slice(0, 3).map(function (n) { return ('0' + (Number(n) & 255).toString(16)).slice(-2); }).join(''); }
+      function hexToRgb(h) { return [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)]; }
 
-      // A Home Assistant call through the host: the token is injected server-side from
-      // the {{secret:ha_token}} placeholder. Returns the upstream response, or null after
-      // surfacing a legible message for the shared failure cases.
       function ha(method, path, body) {
         return ap.net.fetch(haUrl + path, {
           method: method, headers: { Authorization: 'Bearer {{secret:ha_token}}', 'Content-Type': 'application/json' }, body: body
@@ -162,67 +173,100 @@
         }).catch(function (e) { say((e && e.message) || 'Could not reach Home Assistant.', true); return null; });
       }
 
-      function rgbToHex(a) {
-        return '#' + a.slice(0, 3).map(function (n) { return ('0' + (Number(n) & 255).toString(16)).slice(-2); }).join('');
-      }
-      function hexToRgb(h) { return [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)]; }
-
-      // Decide which controls the bulb supports, size the temperature range, and start
-      // each control where the light actually is.
+      // The one source of truth: reflect exactly what the light reports — the dot, the
+      // active side, and every control value all derive from this.
       function applyState(state, attrs) {
         var modes = attrs.supported_color_modes || [];
-        var colorModes = ['hs', 'xy', 'rgb', 'rgbw', 'rgbww'];
-        caps.brightness = modes.some(function (m) { return m !== 'onoff'; });
-        caps.color = modes.some(function (m) { return colorModes.indexOf(m) >= 0; });
-        // One hue control: a full picker supersedes a warm–cool slider, so a
-        // colour-temp-only bulb gets warm–cool and a colour bulb gets the picker.
-        caps.colorTemp = modes.indexOf('color_temp') >= 0 && !caps.color;
+        var capBri = modes.some(function (m) { return m !== 'onoff'; });
+        var capColor = modes.some(function (m) { return COLOR_MODES.indexOf(m) >= 0; });
+        var capTemp = modes.indexOf('color_temp') >= 0;
+        hasSheet = capBri || capColor || capTemp;
 
-        els.briRow.hidden = !caps.brightness;
-        els.colRow.hidden = !caps.color;
-        els.tempRow.hidden = !caps.colorTemp;
+        isOn = state === 'on';
+        var rgb = attrs.rgb_color && attrs.rgb_color.length >= 3 ? attrs.rgb_color : DEFAULT_RGB;
+        var bri = attrs.brightness != null ? attrs.brightness / 255 : (isOn ? 1 : 0);
+        var mode = attrs.color_mode || null;
+        var colorActive = COLOR_MODES.indexOf(mode) >= 0;
+        var whiteActive = mode === 'color_temp';
 
-        if (caps.colorTemp) {
+        // Layer 1: the dot is the light's rendered colour dimmed by its brightness, or an
+        // empty ring when off.
+        if (isOn) {
+          var f = Math.max(0.16, bri);
+          els.dot.style.background = 'rgb(' + Math.round(rgb[0] * f) + ',' + Math.round(rgb[1] * f) + ',' + Math.round(rgb[2] * f) + ')';
+        } else {
+          els.dot.style.background = 'transparent';
+        }
+        els.dot.classList.toggle('static', !hasSheet); // a control only when there's a layer 2
+        els.toggle.setAttribute('aria-checked', isOn ? 'true' : 'false');
+
+        // Layer 2 rows: only the sides the bulb supports.
+        els.colRow.hidden = !capColor;
+        els.tempRow.hidden = !capTemp;
+        els.briRow.hidden = !capBri;
+        els.briRow.classList.toggle('divider', capColor || capTemp); // divider only if something sits above
+
+        if (capTemp) {
           var minK = attrs.min_color_temp_kelvin || (attrs.max_mireds ? Math.round(1e6 / attrs.max_mireds) : 2000);
           var maxK = attrs.max_color_temp_kelvin || (attrs.min_mireds ? Math.round(1e6 / attrs.min_mireds) : 6500);
           els.temp.min = minK; els.temp.max = maxK;
         }
-        if (caps.brightness && attrs.brightness != null) els.bri.value = Math.max(1, Math.round(attrs.brightness / 255 * 100));
-        if (caps.color && attrs.rgb_color) els.col.value = rgbToHex(attrs.rgb_color);
-        if (caps.colorTemp) {
-          var k = attrs.color_temp_kelvin || (attrs.color_temp ? Math.round(1e6 / attrs.color_temp) : null);
-          if (k) els.temp.value = k;
-        }
-        setOn(state === 'on');
+        if (capColor) els.col.value = rgbToHex(rgb);
+        if (capTemp) { var k = attrs.color_temp_kelvin || (attrs.color_temp ? Math.round(1e6 / attrs.color_temp) : null); if (k) els.temp.value = k; }
+        if (capBri && attrs.brightness != null) els.bri.value = Math.max(1, Math.round(bri * 100));
+
+        // Exactly one active side (only meaningful when the bulb has both). Off / no mode
+        // → neither is marked, so we never show a false "current".
+        var bothSides = capColor && capTemp;
+        var hasActive = colorActive || whiteActive;
+        els.colPip.classList.toggle('show', bothSides);
+        els.tempPip.classList.toggle('show', bothSides);
+        els.colPip.classList.toggle('on', bothSides && colorActive);
+        els.tempPip.classList.toggle('on', bothSides && whiteActive);
+        els.colRow.classList.toggle('inactive', bothSides && hasActive && !colorActive);
+        els.tempRow.classList.toggle('inactive', bothSides && hasActive && !whiteActive);
+
+        if (!hasSheet) open = false;
+        els.dot.setAttribute('aria-expanded', open ? 'true' : 'false');
+        els.sheet.hidden = !(open && hasSheet);
+        resize();
       }
 
       function refresh() {
         return ha('GET', '/api/states/' + encodeURIComponent(entity)).then(function (r) {
           if (!r || !r.body) return;
           try { var s = JSON.parse(r.body); applyState(s.state, s.attributes || {}); say('Controls ' + entity + '.'); }
-          catch (e) { setOn(false); }
+          catch (e) { /* keep the last good state */ }
           els.toggle.disabled = false;
         });
       }
 
-      // Coalesce rapid drags into one turn_on request.
+      // Coalesce rapid drags into one turn_on, then re-read the truth.
       function flush() {
         timer = null;
         var body = JSON.stringify(Object.assign({ entity_id: entity }, pending)); pending = {};
-        ha('POST', '/api/services/light/turn_on', body).then(function (r) { if (r) setOn(true); });
+        ha('POST', '/api/services/light/turn_on', body).then(function (r) { if (r) return refresh(); });
       }
       function push(params) { Object.assign(pending, params); if (timer) clearTimeout(timer); timer = setTimeout(flush, 250); }
 
-      els.bri.addEventListener('input', function () { push({ brightness_pct: Number(els.bri.value) }); });
       els.col.addEventListener('input', function () { push({ rgb_color: hexToRgb(els.col.value) }); });
       els.temp.addEventListener('input', function () { push({ color_temp_kelvin: Number(els.temp.value) }); });
+      els.bri.addEventListener('input', function () { push({ brightness_pct: Number(els.bri.value) }); });
+
+      els.dot.addEventListener('click', function () {
+        if (!hasSheet) return;
+        open = !open;
+        els.dot.setAttribute('aria-expanded', open ? 'true' : 'false');
+        els.sheet.hidden = !open; resize();
+      });
 
       els.toggle.addEventListener('click', function () {
         if (busy || els.toggle.disabled) return;
         busy = true; els.toggle.disabled = true;
         var next = !isOn;
+        if (!next && timer) { clearTimeout(timer); timer = null; pending = {}; }
         ha('POST', '/api/services/light/' + (next ? 'turn_on' : 'turn_off'), JSON.stringify({ entity_id: entity }))
-          .then(function (r) { if (r) { if (next) return refresh(); setOn(false); } })
+          .then(function (r) { if (r) return refresh(); })
           .then(function () { busy = false; els.toggle.disabled = false; });
       });
 
@@ -230,15 +274,12 @@
         if (!cameraId) { els.subtitle.textContent = 'Open a camera to control its light.'; resize(); return; }
         try { var cam = await ap.cameras.get(cameraId); els.subtitle.textContent = (cam && cam.name) || cameraId; }
         catch (e) { els.subtitle.textContent = cameraId; }
-
         haUrl = await ap.settings.get('ha_url');
         var mapping = (await ap.settings.get('lights')) || [];
         var row = mapping.filter(function (m) { return m.camera === cameraId; })[0];
         entity = row && row.entity;
-
         if (!haUrl) { say('Set your Home Assistant URL in this extension’s settings to begin.', true); return; }
         if (!entity) { say('No light is mapped to this camera yet. Add a Camera → light row in the extension’s settings.', true); return; }
-
         els.control.hidden = false;
         await refresh();
       })();
