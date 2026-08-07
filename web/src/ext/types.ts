@@ -36,7 +36,7 @@ export interface ExtItem {
 }
 
 // One field of an extension's settings schema (mirrors ext.SettingField).
-export type SettingType = "text" | "secret" | "number" | "boolean" | "select";
+export type SettingType = "text" | "secret" | "number" | "boolean" | "select" | "url" | "camera" | "group";
 export interface SettingField {
   key: string;
   label: string;
@@ -46,12 +46,17 @@ export interface SettingField {
   required?: boolean;
   default?: unknown;
   options?: { value: string; label: string }[];
+  fields?: SettingField[]; // group: the per-row subfields (scalars + camera)
 }
 
+// One row of a group setting: subfield key → value.
+export type GroupRow = Record<string, string>;
+
 // GET /ext/{id}/settings — schema + current NON-secret values + which secrets are set.
+// A value is a string for a scalar, or an array of rows for a group.
 export interface SettingsView {
   schema: SettingField[];
-  values: Record<string, string>;
+  values: Record<string, string | GroupRow[]>;
   secretSet: Record<string, boolean>;
 }
 

@@ -42,20 +42,31 @@ export interface UiAperture {
     keys(): Promise<string[]>;
   };
   /** The extension's own settings (the manifest `settings` schema), configured by an
-   * admin on the extension's row. `get` returns a NON-secret value (or null); secret
-   * values are never exposed to a panel — authenticate to a declared host with a
-   * {{secret:key}} placeholder in `net.fetch` instead. */
+   * admin on the extension's row. `get` returns a NON-secret value — a string for a
+   * scalar, or an array of row objects for a `group` (e.g. a camera→entity mapping),
+   * or null if unset. Secret values are never exposed to a panel — authenticate to a
+   * declared host with a {{secret:key}} placeholder in `net.fetch` instead. */
   settings: {
-    get(key: string): Promise<string | null>;
-    all(): Promise<Record<string, string>>;
+    get<T = string | Record<string, string>[]>(key: string): Promise<T | null>;
+    all(): Promise<Record<string, string | Record<string, string>[]>>;
   };
   /** Host-mediated outbound request (the `network` permission). The host performs it
-   * server-side to a DECLARED host only. A header value or the body may contain a
-   * `{{secret:key}}` placeholder, expanded from the extension's own secret settings
-   * server-side — so a secret token authenticates the call without ever entering the
-   * panel. Resolves to the upstream `{ status, body }`. */
+   * server-side to a host the extension is allowed to reach — a static manifest host,
+   * or the current value of a url setting (`{{setting:key}}`). A header value or the
+   * body may contain a `{{secret:key}}` placeholder, expanded from the extension's own
+   * secret settings server-side, so a token authenticates the call without ever
+   * entering the panel.
+   *
+   * Resolves to `{ status, ok, body }` on an upstream response. On a connection failure
+   * it resolves (does not reject) with `{ status: 0, ok: false, error, detail }` — a
+   * plain sentence in `error` (show this), the raw error in `detail` (available, not
+   * front and centre). It rejects only on a client-side problem (host not allowed, the
+   * url setting unconfigured, an undeclared secret). */
   net: {
-    fetch(url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; body: string }>;
+    fetch(
+      url: string,
+      init?: { method?: string; headers?: Record<string, string>; body?: string },
+    ): Promise<{ status: number; ok: boolean; body?: string; error?: string; detail?: string }>;
   };
   /** Ask the host to resize this panel's iframe to `height` px. The runtime already
    * calls this on content resize via a ResizeObserver; call it explicitly only to

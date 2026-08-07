@@ -12,10 +12,19 @@ vi.mock("../lib/api", () => ({
       if (path.endsWith("/settings"))
         return {
           schema: [
-            { key: "url", label: "URL", type: "text", required: true },
+            { key: "url", label: "Home Assistant URL", type: "url", required: true },
             { key: "token", label: "Token", type: "secret", required: true },
+            {
+              key: "mapping",
+              label: "Camera lights",
+              type: "group",
+              fields: [
+                { key: "camera", label: "Camera", type: "camera", required: true },
+                { key: "entity", label: "Entity", type: "text", required: true },
+              ],
+            },
           ],
-          values: { url: "https://ha.local" },
+          values: { url: "https://ha.local", mapping: [{ camera: "a", entity: "light.hall" }] },
           secretSet: { token: true },
         };
       return [];
@@ -128,6 +137,15 @@ describe("ExtRow render", () => {
     expect(await screen.findByDisplayValue("https://ha.local")).toBeTruthy();
     const masked = await screen.findByPlaceholderText(/set \(leave blank to keep\)/);
     expect((masked as HTMLInputElement).type).toBe("password");
+  });
+
+  it("renders a repeatable group with its existing rows and an Add control", async () => {
+    renderRow(makeExt({ hasSettings: true }));
+    expand();
+    // The group label, the existing row's entity value, and the add affordance.
+    expect(await screen.findByText("Camera lights")).toBeTruthy();
+    expect(await screen.findByDisplayValue("light.hall")).toBeTruthy();
+    expect(await screen.findByText("Add")).toBeTruthy();
   });
 
   // The safety net: even an unforeseen render throw in one row shows the fallback
