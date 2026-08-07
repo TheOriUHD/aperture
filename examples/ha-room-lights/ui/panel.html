@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Room Lights</title>
+  <!-- Self-contained per the extension CSP: inline style + script only, no
+       external resources, no network of its own. The host injects window.aperture
+       into <head> before this document's body script runs. -->
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; padding: 12px; font: 14px/1.5 system-ui, sans-serif; }
+    h1 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+    p { margin: 0 0 8px; }
+    ul { margin: 0; padding: 0; list-style: none; }
+    li {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 4px; padding: 6px 8px; border-radius: 6px;
+      background: rgba(127, 127, 127, 0.12);
+    }
+    .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; }
+    .muted { opacity: 0.7; }
+    .error { color: #e74c3c; }
+  </style>
+</head>
+<body>
+  <h1>Room Lights</h1>
+  <p class="muted" id="intro">Cameras this panel can act on:</p>
+  <ul id="cams"></ul>
+  <p class="muted" id="empty" hidden>No cameras available to you here.</p>
+
+  <script>
+    // Every window.aperture call is relayed to the server broker under YOUR
+    // identity ∩ the extension's authority, so this list is only the cameras you
+    // may see — it can be fewer than the extension was granted.
+    (async function () {
+      var list = document.getElementById('cams');
+      var empty = document.getElementById('empty');
+      var intro = document.getElementById('intro');
+      try {
+        var cams = await window.aperture.cameras.list();
+        if (!Array.isArray(cams) || cams.length === 0) {
+          empty.hidden = false;
+        } else {
+          cams.forEach(function (c) {
+            var li = document.createElement('li');
+            var dot = document.createElement('span');
+            dot.className = 'dot';
+            var name = document.createElement('span');
+            name.textContent = c.name || c.id;
+            li.appendChild(dot);
+            li.appendChild(name);
+            list.appendChild(li);
+          });
+        }
+      } catch (err) {
+        intro.textContent = 'Could not load cameras: ' + ((err && err.message) || err);
+        intro.className = 'error';
+      }
+      // The host auto-resizes via ResizeObserver; nudge it once after first paint.
+      if (window.aperture && window.aperture.resize) {
+        window.aperture.resize(document.documentElement.scrollHeight);
+      }
+    })();
+  </script>
+</body>
+</html>

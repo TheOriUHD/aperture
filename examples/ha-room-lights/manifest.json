@@ -1,0 +1,25 @@
+{
+  "manifest": 1,
+  "id": "com.example.ha-room-lights",
+  "name": "Home Assistant Room Lights",
+  "version": "1.2.0",
+  "author": "Jane Doe",
+  "description": "Adds a camera-view panel and turns on the room's Home Assistant lights while you watch.",
+  "minApiVersion": "v1",
+  "permissions": {
+    "data": { "cameras": "read", "events": "read" },
+    "cameras": ["hallway", "front-door"],
+    "network": ["https://homeassistant.local:8123"],
+    "storage": true
+  },
+  "ui": {
+    "panels": [
+      { "slot": "camera-detail", "entry": "ui/panel.html", "title": "Room Lights" }
+    ]
+  },
+  "backend": {
+    "entry": "backend/main.ts",
+    "denoVersion": "2"
+  },
+  "update": { "url": "https://example.com/ha-room-lights/manifest.json" }
+}
