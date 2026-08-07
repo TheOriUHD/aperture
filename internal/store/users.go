@@ -77,6 +77,16 @@ func (s *Store) GetUserByID(id string) (*User, error) {
          FROM users WHERE id = ?`, id))
 }
 
+// FirstAdminID returns the earliest-created admin's id. Used to own an extension
+// (and its scoped token) when the installer is the synthetic CLI superuser, which
+// has no users row of its own — so a token minted for "cli" would violate the
+// api_tokens.user_id foreign key and the backend would never spawn.
+func (s *Store) FirstAdminID() (string, error) {
+	var id string
+	err := s.db.QueryRow(`SELECT id FROM users WHERE role = ? ORDER BY created_at ASC LIMIT 1`, RoleAdmin).Scan(&id)
+	return id, err
+}
+
 // ListUsers returns all accounts ordered by creation time.
 func (s *Store) ListUsers() ([]*User, error) {
 	rows, err := s.db.Query(

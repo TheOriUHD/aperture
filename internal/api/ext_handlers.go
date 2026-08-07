@@ -155,11 +155,22 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 	_ = os.Chmod(dest, 0o700)
 
 	caller := auth.FromContext(r.Context())
+	// An extension (and its scoped token) is owned by a REAL user. The synthetic CLI
+	// superuser has no users row, so owning the token with "cli" would fail the
+	// api_tokens.user_id FK and the backend would never spawn (a silent
+	// backend-doesn't-start failure). When installed via the CLI, fall back to the
+	// first admin; the extension inherits admin authority, matching the CLI's intent.
+	installedBy := caller.UserID
+	if caller.Class == auth.ClassCLI {
+		if adminID, e := s.st.FirstAdminID(); e == nil && adminID != "" {
+			installedBy = adminID
+		}
+	}
 	ex := &store.Extension{
 		ID: m.ID, Name: m.Name, Version: m.Version, Source: source,
 		UpdateURL: updateURL(m), ManifestJSON: string(raw),
 		Scopes: d.Scopes, CameraGrants: d.CameraGrants,
-		Enabled: true, ExtUID: uid, InstalledBy: caller.UserID,
+		Enabled: true, ExtUID: uid, InstalledBy: installedBy,
 	}
 	if err := s.st.CreateExtension(ex); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not record extension")
