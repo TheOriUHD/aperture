@@ -4,16 +4,94 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/TheOriUHD/aperture/internal/store"
 )
 
+// writeJSON encodes v as the response body. Every response passes through here, so
+// this is where the API's array contract is enforced: a nil Go slice otherwise
+// marshals to JSON `null`, but the OpenAPI spec promises an array — and a
+// third-party client that trusts the spec crashes on `null.map(...)` (exactly how
+// the extension manager went grey). emptyNilSlices coerces nil slices to [] at any
+// depth, so every array field — in every existing and future endpoint — serializes
+// as [], with no per-call-site orEmpty.
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	if v != nil {
-		_ = json.NewEncoder(w).Encode(v)
+		_ = json.NewEncoder(w).Encode(emptyNilSlices(v))
+	}
+}
+
+// emptyNilSlices returns v with every nil slice (in structs, maps, slices, arrays,
+// pointers, and interface values, recursively) replaced by a non-nil empty slice.
+// nil→empty is semantically identical in Go, so mutating reference types shared with
+// the copy is harmless. Panic-safe: any reflection surprise falls back to v as-is,
+// so normalization can never break a response.
+func emptyNilSlices(v any) (out any) {
+	defer func() {
+		if recover() != nil {
+			out = v
+		}
+	}()
+	if v == nil {
+		return nil
+	}
+	rv := reflect.ValueOf(v)
+	cp := reflect.New(rv.Type()).Elem()
+	cp.Set(rv)
+	coerceNilSlices(cp)
+	return cp.Interface()
+}
+
+func coerceNilSlices(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Pointer:
+		if !v.IsNil() {
+			coerceNilSlices(v.Elem())
+		}
+	case reflect.Interface:
+		if v.IsNil() {
+			return
+		}
+		inner := reflect.New(v.Elem().Type()).Elem()
+		inner.Set(v.Elem())
+		coerceNilSlices(inner)
+		if v.CanSet() {
+			v.Set(inner)
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if f := v.Field(i); f.CanSet() {
+				coerceNilSlices(f)
+			}
+		}
+	case reflect.Slice:
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			return // []byte marshals as a base64 string, not an array — leave it
+		}
+		if v.IsNil() {
+			if v.CanSet() {
+				v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+			}
+			return
+		}
+		for i := 0; i < v.Len(); i++ {
+			coerceNilSlices(v.Index(i))
+		}
+	case reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			coerceNilSlices(v.Index(i))
+		}
+	case reflect.Map:
+		for _, k := range v.MapKeys() {
+			ev := reflect.New(v.Type().Elem()).Elem()
+			ev.Set(v.MapIndex(k))
+			coerceNilSlices(ev)
+			v.SetMapIndex(k, ev)
+		}
 	}
 }
 

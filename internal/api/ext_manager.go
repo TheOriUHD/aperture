@@ -635,8 +635,8 @@ func stageConsentView(stagingID string, m *ext.Manifest, d ext.Derived, source s
 	return map[string]any{
 		"stagingId": stagingID, "id": m.ID, "name": m.Name, "version": m.Version,
 		"author": m.Author, "description": m.Description, "source": source,
-		"hasBackend": d.HasBackend, "hasUI": d.HasUI, "consent": orEmpty(d.ConsentLines),
-		"requestsCameras": d.RequestsCameras, "requestedCameras": orEmpty(d.CameraGrants), // ceiling; [] = all
+		"hasBackend": d.HasBackend, "hasUI": d.HasUI, "consent": d.ConsentLines,
+		"requestsCameras": d.RequestsCameras, "requestedCameras": d.CameraGrants, // ceiling; [] = all (nil→[] in writeJSON)
 	}
 }
 
