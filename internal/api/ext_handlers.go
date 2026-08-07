@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -87,42 +88,23 @@ func (s *Server) handleExtInstall(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusForbidden, "forbidden", "third-party extensions are not enabled")
 		return
 	}
-	f, fh, err := r.FormFile("bundle")
+	f, _, err := r.FormFile("bundle")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "a bundle file is required (multipart field 'bundle')")
 		return
 	}
 	defer f.Close()
-
-	stagingID := randID()
-	dir := s.stagingDir(stagingID)
-	if err := unzipTo(f, fh.Size, dir); err != nil {
-		_ = os.RemoveAll(dir)
-		writeErrorCode(w, http.StatusBadRequest, "validation", "bad bundle: "+err.Error())
+	b, err := io.ReadAll(io.LimitReader(f, maxBundleBytes+1))
+	if err != nil || int64(len(b)) > maxBundleBytes {
+		writeErrorCode(w, http.StatusBadRequest, "validation", "bundle is unreadable or exceeds the size limit")
 		return
 	}
-	m, d, _, err := loadStagedManifest(dir)
+	view, err := s.stageBundleBytes(b, "sideload")
 	if err != nil {
-		_ = os.RemoveAll(dir)
 		writeErrorCode(w, http.StatusBadRequest, "validation", err.Error())
 		return
 	}
-	if bad := scanBundleImports(dir); len(bad) > 0 {
-		_ = os.RemoveAll(dir)
-		writeErrorCode(w, http.StatusBadRequest, "validation", "remote imports are not allowed: "+strings.Join(bad, ", "))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"stagingId": stagingID,
-		"id":        m.ID,
-		"name":      m.Name,
-		"version":   m.Version,
-		"author":    m.Author,
-		"source":    "sideload",
-		"hasBackend": d.HasBackend,
-		"hasUI":      d.HasUI,
-		"consent":    d.ConsentLines,
-	})
+	writeJSON(w, http.StatusOK, view)
 }
 
 // handleExtConfirm commits a staged bundle: moves it into place, allocates a uid,
@@ -151,9 +133,11 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, e := s.st.GetExtension(m.ID); e == nil {
 		_ = os.RemoveAll(dir)
+		s.clearStageSource(req.StagingID)
 		writeErrorCode(w, http.StatusConflict, "conflict", "extension "+m.ID+" is already installed")
 		return
 	}
+	source := s.readStageSource(req.StagingID)
 
 	uid := s.allocExtUID()
 	dest := s.extDir(m.ID)
@@ -172,7 +156,7 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 
 	caller := auth.FromContext(r.Context())
 	ex := &store.Extension{
-		ID: m.ID, Name: m.Name, Version: m.Version, Source: "sideload",
+		ID: m.ID, Name: m.Name, Version: m.Version, Source: source,
 		UpdateURL: updateURL(m), ManifestJSON: string(raw),
 		Scopes: d.Scopes, CameraGrants: d.CameraGrants,
 		Enabled: true, ExtUID: uid, InstalledBy: caller.UserID,
@@ -181,6 +165,7 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not record extension")
 		return
 	}
+	s.clearStageSource(req.StagingID)
 	s.freezeV1()
 	s.spawnIfBackend(ex)
 	writeJSON(w, http.StatusCreated, s.extView(ex))
@@ -328,7 +313,25 @@ func (s *Server) extView(ex *store.Extension) map[string]any {
 	v := map[string]any{
 		"id": ex.ID, "name": ex.Name, "version": ex.Version, "source": ex.Source,
 		"enabled": ex.Enabled, "scopes": ex.Scopes, "cameraGrants": ex.CameraGrants,
-		"installedAt": ex.InstalledAt,
+		"installedAt": ex.InstalledAt, "updatedAt": ex.UpdatedAt,
+		"pinned": ex.Pinned, "modified": ex.Modified,
+		"hasBackend": false, "hasUI": false, "canPin": false,
+		"consent": []string{}, "updatable": ex.UpdateURL != "",
+	}
+	// Parse the stored manifest for the human-facing bits the manager renders
+	// (author, plain-language permissions, whether it can be pinned, its icon).
+	if m, err := ext.Parse([]byte(ex.ManifestJSON)); err == nil {
+		v["author"] = m.Author
+		v["description"] = m.Description
+		if d, derr := m.Validate(); derr == nil {
+			v["hasBackend"] = d.HasBackend
+			v["hasUI"] = d.HasUI
+			v["canPin"] = d.HasNavPanel // only a full-page view earns rail space
+			v["consent"] = d.ConsentLines
+			if d.Icon != "" {
+				v["icon"] = "/ext/" + ex.ID + "/" + d.Icon // served as <img>, CSP'd
+			}
+		}
 	}
 	if s.extSup != nil {
 		st, reason := s.extSup.Status(ex.ID)
@@ -379,6 +382,19 @@ func loadStagedManifest(dir string) (*ext.Manifest, ext.Derived, []byte, error) 
 	d, err := m.Validate()
 	if err != nil {
 		return nil, ext.Derived{}, nil, err
+	}
+	// If the bundle declares a nav-rail icon, the file must exist and be a genuine
+	// small PNG — checked here (where the bytes are on disk) so every install path
+	// (upload, url, store, update) rejects a hostile "icon.png" before it can be
+	// pinned and rendered in host chrome.
+	if d.Icon != "" {
+		b, rerr := os.ReadFile(filepath.Join(dir, filepath.FromSlash(d.Icon)))
+		if rerr != nil {
+			return nil, ext.Derived{}, nil, errors.New("icon file " + d.Icon + " is missing from the bundle")
+		}
+		if verr := ext.ValidateIcon(b); verr != nil {
+			return nil, ext.Derived{}, nil, fmt.Errorf("icon: %w", verr)
+		}
 	}
 	return m, d, raw, nil
 }

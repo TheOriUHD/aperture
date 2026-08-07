@@ -31,6 +31,12 @@ type Manifest struct {
 	UI            *UISpec      `json:"ui,omitempty"`
 	Backend       *BackendSpec `json:"backend,omitempty"`
 	Update        *UpdateSpec  `json:"update,omitempty"`
+	// Icon is an OPTIONAL bundle-relative path (under ui/, a .png) used as the
+	// nav-rail icon when the user pins the extension (T2.1). It is served as an
+	// <img> from /ext/{id}/* under the extension CSP and validated to be a small
+	// PNG at install — never inlined into host DOM — so a hostile bundle cannot run
+	// script in the user's session via the rail. Absent = a default host icon.
+	Icon string `json:"icon,omitempty"`
 }
 
 // Permissions is the closed taxonomy of everything an extension may do. Anything
@@ -76,6 +82,8 @@ type Derived struct {
 	ConsentLines []string // plain-language lines for the consent screen
 	HasBackend   bool
 	HasUI        bool
+	HasNavPanel  bool   // declares a full-page nav-panel view → eligible to be pinned (T2.1)
+	Icon         string // validated bundle-relative icon path (under ui/, .png), or ""
 }
 
 const ManifestVersion = 1
@@ -168,7 +176,24 @@ func (m *Manifest) Validate() (Derived, error) {
 			if err := safeEntry(p.Entry); err != nil {
 				return d, fmt.Errorf("ui.panels[%d].entry: %w", i, err)
 			}
+			if p.Slot == "nav-panel" {
+				d.HasNavPanel = true
+			}
 		}
+	}
+
+	// Optional nav-rail icon: a small PNG inside ui/ (so the existing enabled-only,
+	// CSP'd asset route serves it) — the host renders it as an <img>, never inlined.
+	// The path is validated here; the bytes (real PNG, bounded dimensions) are
+	// validated at install where the file is available.
+	if m.Icon != "" {
+		if err := safeEntry(m.Icon); err != nil {
+			return d, fmt.Errorf("icon: %w", err)
+		}
+		if !strings.HasPrefix(m.Icon, "ui/") || !strings.HasSuffix(strings.ToLower(m.Icon), ".png") {
+			return d, fmt.Errorf("icon %q must be a .png inside ui/ (e.g. ui/icon.png)", m.Icon)
+		}
+		d.Icon = m.Icon
 	}
 	if d.HasBackend {
 		if err := safeEntry(m.Backend.Entry); err != nil {

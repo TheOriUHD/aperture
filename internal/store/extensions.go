@@ -22,19 +22,22 @@ type Extension struct {
 	InstalledBy  string   `json:"installedBy"`
 	InstalledAt  int64    `json:"installedAt"`
 	UpdatedAt    int64    `json:"updatedAt"`
+	Pinned       bool     `json:"pinned"`   // user granted a nav-rail entry (T2.1)
+	Modified     bool     `json:"modified"` // edited in the in-app editor (T2.3)
 }
 
-const extensionCols = `id, name, version, source, update_url, manifest_json, scopes, camera_grants, enabled, ext_uid, installed_by, installed_at, updated_at`
+const extensionCols = `id, name, version, source, update_url, manifest_json, scopes, camera_grants, enabled, ext_uid, installed_by, installed_at, updated_at, pinned, modified`
 
 func scanExtension(row rowScanner) (*Extension, error) {
 	var e Extension
 	var scopes, grants string
-	var enabled int
+	var enabled, pinned, modified int
 	if err := row.Scan(&e.ID, &e.Name, &e.Version, &e.Source, &e.UpdateURL, &e.ManifestJSON,
-		&scopes, &grants, &enabled, &e.ExtUID, &e.InstalledBy, &e.InstalledAt, &e.UpdatedAt); err != nil {
+		&scopes, &grants, &enabled, &e.ExtUID, &e.InstalledBy, &e.InstalledAt, &e.UpdatedAt, &pinned, &modified); err != nil {
 		return nil, err
 	}
-	e.Scopes, e.CameraGrants, e.Enabled = csvSplit(scopes), csvSplit(grants), enabled != 0
+	e.Scopes, e.CameraGrants = csvSplit(scopes), csvSplit(grants)
+	e.Enabled, e.Pinned, e.Modified = enabled != 0, pinned != 0, modified != 0
 	return &e, nil
 }
 
@@ -48,9 +51,10 @@ func (s *Store) CreateExtension(e *Extension) error {
 	e.UpdatedAt = now
 	_, err := s.db.Exec(
 		`INSERT INTO extensions (`+extensionCols+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.Name, e.Version, e.Source, e.UpdateURL, e.ManifestJSON,
-		csvJoin(e.Scopes), csvJoin(e.CameraGrants), boolInt(e.Enabled), e.ExtUID, e.InstalledBy, e.InstalledAt, e.UpdatedAt)
+		csvJoin(e.Scopes), csvJoin(e.CameraGrants), boolInt(e.Enabled), e.ExtUID, e.InstalledBy, e.InstalledAt, e.UpdatedAt,
+		boolInt(e.Pinned), boolInt(e.Modified))
 	return err
 }
 
@@ -79,6 +83,20 @@ func (s *Store) ListExtensions() ([]*Extension, error) {
 func (s *Store) SetExtensionEnabled(id string, enabled bool) error {
 	return affected(s.db.Exec(`UPDATE extensions SET enabled = ?, updated_at = ? WHERE id = ?`,
 		boolInt(enabled), time.Now().UnixMilli(), id))
+}
+
+// SetExtensionPinned flips the user's nav-rail grant (T2.1). Pinning is a UI
+// decision, independent of what the manifest declares.
+func (s *Store) SetExtensionPinned(id string, pinned bool) error {
+	return affected(s.db.Exec(`UPDATE extensions SET pinned = ?, updated_at = ? WHERE id = ?`,
+		boolInt(pinned), time.Now().UnixMilli(), id))
+}
+
+// SetExtensionModified records whether the on-disk files diverge from the installed
+// bundle (set true when edited in-app, cleared on a clean update/reinstall) (T2.3).
+func (s *Store) SetExtensionModified(id string, modified bool) error {
+	return affected(s.db.Exec(`UPDATE extensions SET modified = ?, updated_at = ? WHERE id = ?`,
+		boolInt(modified), time.Now().UnixMilli(), id))
 }
 
 // UpdateExtension replaces the mutable fields on a re-install or update, keeping

@@ -207,6 +207,21 @@ func (s *Server) routes() http.Handler {
 		g.Post("/ext/{id}/enable", adminSessionOnly, s.handleExtEnable)
 		g.Post("/ext/{id}/disable", adminSessionOnly, s.handleExtDisable)
 		g.Delete("/ext/{id}", adminSessionOnly, s.handleExtUninstall)
+		// Manager (Pass 2): rail pins, logs, install-from-URL + curated store,
+		// deliberate updates with revert, and the in-app file editor.
+		g.Get("/ext/nav", authed, s.handleExtNav) // any user: pinned rail entries
+		g.Get("/ext/store", adminSessionOnly, s.handleExtStore)
+		g.Post("/ext/store/install", adminSessionOnly, s.handleExtStoreInstall)
+		g.Post("/ext/install/url", adminSessionOnly, s.handleExtInstallURL)
+		g.Get("/ext/{id}/logs", adminSessionOnly, s.handleExtLogs)
+		g.Post("/ext/{id}/pin", adminSessionOnly, s.handleExtPin)
+		g.Delete("/ext/{id}/pin", adminSessionOnly, s.handleExtUnpin)
+		g.Get("/ext/{id}/update", adminSessionOnly, s.handleExtUpdateCheck)
+		g.Post("/ext/{id}/update", adminSessionOnly, s.handleExtUpdateApply)
+		g.Post("/ext/{id}/revert", adminSessionOnly, s.handleExtRevert)
+		g.Get("/ext/{id}/files", adminSessionOnly, s.handleExtFiles)
+		g.Get("/ext/{id}/files/*", adminSessionOnly, s.handleExtFileRead)
+		g.Put("/ext/{id}/files/*", adminSessionOnly, s.handleExtFileWrite)
 		g.Post("/setup", pub, s.handleSetup)
 		g.Post("/auth/login", pub, s.handleLogin)
 		g.Post("/auth/login/2fa", pub, s.handleLogin2FA)
