@@ -307,6 +307,17 @@ func (s *Server) spawnIfBackend(ex *store.Extension) {
 		s.log.Error("write extension import map", "id", ex.ID, "err", err)
 		return
 	}
+	// The import map is host-written (as root) on every spawn, AFTER the install-time
+	// chownR — so hand it to the extension's own uid, or the non-root child hits
+	// "Permission denied (os error 13)" reading it and crash-loops. Every other
+	// host-written file inside the extension dir is already chowned to this uid: the
+	// bundle at install/update (chownR) and edited files (handleExtFileWrite); this
+	// closes the one that was missed.
+	if ex.ExtUID > 0 {
+		if err := os.Chown(imPath, ex.ExtUID, ex.ExtUID); err != nil {
+			s.log.Error("chown extension import map", "id", ex.ID, "err", err)
+		}
+	}
 	spec := ext.BuildSpec(ex.ID, filepath.Join(dir, m.Backend.Entry), dir, s.sdkModule, imPath, s.apiBase, tok, ex.ExtUID, d)
 	s.extSup.Start(spec)
 }
