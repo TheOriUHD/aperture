@@ -30,11 +30,11 @@ const settingsItem: NavItem = { to: "/settings", tkey: "nav.settings", label: "S
 // Desktop: a vertical icon rail on the left. Hidden on mobile.
 export function NavRail() {
   const { t } = useTranslation();
-  // Pinned extensions each earn their own rail entry + full page. Pinning is
-  // user-granted in the manager (never manifest-asserted), so with none pinned the
-  // rail is byte-identical to before. They sit in the bottom group, just above
-  // Settings — the app keeps no "Notifications" rail item, so this is the natural
-  // home for user-elevated destinations.
+  // Pinned extensions each earn their own rail entry + full page (user-granted;
+  // with none pinned the rail is byte-identical to before). They sit DIRECTLY after
+  // the bell — the Alarms/Notifications item, the last of the primary items — and
+  // before Settings, which stays bottom-anchored. That is the "between Notifications
+  // and Settings" placement pinning calls for. Mobile (BottomNav) is unaffected.
   const { data: pinned = [] } = useExtNav();
   return (
     <nav className="hidden lg:flex flex-col items-center gap-1.5 w-[54px] shrink-0 bg-ink-850 border-r border-line py-3">
@@ -49,10 +49,10 @@ export function NavRail() {
       {items.map((item) => (
         <RailLink key={item.to} to={item.to} icon={item.icon} label={t(item.tkey, item.label)} />
       ))}
-      <div className="mt-auto flex flex-col items-center gap-1.5">
-        {pinned.map((ext) => (
-          <ExtRailLink key={ext.id} ext={ext} />
-        ))}
+      {pinned.map((ext) => (
+        <ExtRailLink key={ext.id} ext={ext} />
+      ))}
+      <div className="mt-auto">
         <RailLink to={settingsItem.to} icon={settingsItem.icon} label={t(settingsItem.tkey, settingsItem.label)} />
       </div>
     </nav>
