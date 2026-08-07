@@ -98,8 +98,12 @@ func (c *CameraReq) UnmarshalJSON(b []byte) error {
 }
 
 // SettingField is one field of an extension's settings form. Type is one of
-// text|secret|number|boolean|select. A secret field is write-only: its stored
-// value is never returned to a client, only whether one is set.
+// text|secret|number|boolean|select|url|camera|group.
+//   - secret: write-only — its stored value is never returned to a client.
+//   - url:    a URL, validated on save; can back a {{setting:key}} network host.
+//   - camera: a picker of the extension's granted cameras (stores a camera id).
+//   - group:  a repeatable list; each row is the fields in Fields (scalars/camera
+//             only — no nested groups or secrets). Stored as a JSON array.
 type SettingField struct {
 	Key         string          `json:"key"`
 	Label       string          `json:"label"`
@@ -109,6 +113,7 @@ type SettingField struct {
 	Required    bool            `json:"required,omitempty"`
 	Default     json.RawMessage `json:"default,omitempty"`
 	Options     []SettingOption `json:"options,omitempty"` // select only
+	Fields      []SettingField  `json:"fields,omitempty"`  // group only: the per-row subfields
 }
 
 type SettingOption struct {
@@ -117,7 +122,16 @@ type SettingOption struct {
 }
 
 // settingTypes is the closed set of field types the form + validation understand.
-var settingTypes = map[string]bool{"text": true, "secret": true, "number": true, "boolean": true, "select": true}
+var settingTypes = map[string]bool{
+	"text": true, "secret": true, "number": true, "boolean": true, "select": true,
+	"url": true, "camera": true, "group": true,
+}
+
+// groupSubTypes are the field types allowed INSIDE a group row: scalars + camera, but
+// never a nested group or a secret (per-row secret redaction is out of scope).
+var groupSubTypes = map[string]bool{
+	"text": true, "number": true, "boolean": true, "select": true, "url": true, "camera": true,
+}
 
 type UISpec struct {
 	Panels []Panel `json:"panels"`
@@ -146,7 +160,8 @@ type UpdateSpec struct {
 type Derived struct {
 	Scopes       []string // API scopes for the extension's token / broker claim
 	CameraGrants []string // camera ids (empty when "all" or no request)
-	NetHosts     []string // host[:port] for Deno --allow-net + host-mediated fetch
+	NetHosts     []string // STATIC host[:port] declared literally in the manifest
+	NetSettings  []string // keys of url settings that resolve to a host at request/spawn time
 	ConsentLines []string // plain-language lines for the consent screen
 	HasBackend      bool
 	HasUI           bool
@@ -329,63 +344,103 @@ func (m *Manifest) Validate() (Derived, error) {
 		d.CameraConsent = cameraConsentLine(d.Scopes)
 	}
 
-	// Network (outbound). Allowed for a backend (Deno --allow-net) AND for a UI panel
-	// (the host-mediated /ext/{id}/fetch egress) — both bounded to these hosts.
-	for _, raw := range m.Permissions.Network {
-		host, err := netHost(raw)
-		if err != nil {
-			return d, fmt.Errorf("permissions.network: %w", err)
-		}
-		d.NetHosts = append(d.NetHosts, host)
-	}
-
-	// Settings schema. Declaring settings implies storage (settings live in the
-	// extension's private ext_kv namespace); secret fields are recorded so their
-	// values are never returned to a client.
+	// Settings schema is resolved BEFORE network, because a network host may be a
+	// reference to a url setting. Declaring settings implies storage (they live in the
+	// extension's private ext_kv namespace); secret fields are recorded so their values
+	// are never returned to a client.
 	if err := validateSettings(m.Settings); err != nil {
 		return d, err
 	}
 	d.Settings = m.Settings
+	settingType := map[string]string{}
 	for _, f := range m.Settings {
+		settingType[f.Key] = f.Type
 		if f.Type == "secret" {
 			d.SecretKeys = append(d.SecretKeys, f.Key)
 		}
 	}
 	d.HasStorage = m.Permissions.Storage || len(m.Settings) > 0
 
+	// Network (outbound). Each entry is either a STATIC host, or a {{setting:key}}
+	// reference resolved at request/spawn time from a url-typed setting — so the
+	// allow-list follows the URL the USER configured, not one the author hard-coded.
+	// Both a backend (Deno --allow-net) and a UI panel (host-mediated /ext/{id}/fetch)
+	// are bounded to the resolved set.
+	for _, raw := range m.Permissions.Network {
+		if key, ok := settingRef(raw); ok {
+			if settingType[key] != "url" {
+				return d, fmt.Errorf("permissions.network: {{setting:%s}} must reference a declared url setting", key)
+			}
+			d.NetSettings = append(d.NetSettings, key)
+			continue
+		}
+		host, err := netHost(raw)
+		if err != nil {
+			return d, fmt.Errorf("permissions.network: %w (or use {{setting:key}} to take the host from a url setting)", err)
+		}
+		d.NetHosts = append(d.NetHosts, host)
+	}
+
 	d.ConsentLines = consentLines(m, d)
 	return d, nil
 }
 
-// validateSettings checks a settings schema: unique, well-formed keys; a known
-// type; select fields carry options.
-func validateSettings(fields []SettingField) error {
+// reSettingRef matches a whole-string {{setting:key}} network entry.
+var reSettingRef = regexp.MustCompile(`^\{\{\s*setting:([a-z0-9._-]+)\s*\}\}$`)
+
+func settingRef(raw string) (string, bool) {
+	if mm := reSettingRef.FindStringSubmatch(strings.TrimSpace(raw)); mm != nil {
+		return mm[1], true
+	}
+	return "", false
+}
+
+// validateSettings checks a settings schema: unique well-formed keys, known types,
+// select options, and group subfields (scalars + camera only, one level deep).
+func validateSettings(fields []SettingField) error { return validateFieldList(fields, false) }
+
+// validateFieldList validates a list of fields. inGroup restricts the allowed types
+// to scalars + camera (no nested groups, no per-row secrets).
+func validateFieldList(fields []SettingField, inGroup bool) error {
+	where := "settings"
+	allowed := settingTypes
+	if inGroup {
+		where, allowed = "group field", groupSubTypes
+	}
 	seen := map[string]bool{}
 	for i, f := range fields {
 		if strings.TrimSpace(f.Key) == "" {
-			return fmt.Errorf("settings[%d].key is required", i)
+			return fmt.Errorf("%s[%d].key is required", where, i)
 		}
 		if !reSettingKey.MatchString(f.Key) {
-			return fmt.Errorf("settings[%d].key %q must be [a-z0-9._-]", i, f.Key)
+			return fmt.Errorf("%s[%d].key %q must be [a-z0-9._-]", where, i, f.Key)
 		}
 		if seen[f.Key] {
-			return fmt.Errorf("settings: duplicate key %q", f.Key)
+			return fmt.Errorf("%s: duplicate key %q", where, f.Key)
 		}
 		seen[f.Key] = true
 		if strings.TrimSpace(f.Label) == "" {
-			return fmt.Errorf("settings[%d].label is required", i)
+			return fmt.Errorf("%s[%d] (%s).label is required", where, i, f.Key)
 		}
-		if !settingTypes[f.Type] {
-			return fmt.Errorf("settings[%d] (%s): unknown type %q", i, f.Key, f.Type)
+		if !allowed[f.Type] {
+			return fmt.Errorf("%s[%d] (%s): unsupported type %q", where, i, f.Key, f.Type)
 		}
 		if f.Type == "select" {
 			if len(f.Options) == 0 {
-				return fmt.Errorf("settings[%d] (%s): a select field needs options", i, f.Key)
+				return fmt.Errorf("%s[%d] (%s): a select field needs options", where, i, f.Key)
 			}
 			for j, o := range f.Options {
 				if strings.TrimSpace(o.Value) == "" {
-					return fmt.Errorf("settings[%d].options[%d].value is required", i, j)
+					return fmt.Errorf("%s[%d].options[%d].value is required", where, i, j)
 				}
+			}
+		}
+		if f.Type == "group" {
+			if len(f.Fields) == 0 {
+				return fmt.Errorf("settings[%d] (%s): a group needs fields", i, f.Key)
+			}
+			if err := validateFieldList(f.Fields, true); err != nil {
+				return err
 			}
 		}
 	}
@@ -458,6 +513,11 @@ func consentLines(m *Manifest, d Derived) []string {
 	}
 	for _, h := range d.NetHosts {
 		lines = append(lines, fmt.Sprintf("Connect over the internet to %s — it can send your data there", h))
+	}
+	if len(d.NetSettings) > 0 {
+		// The host is whatever the user types into the extension's settings, so name
+		// the choice, not a server the user never picked.
+		lines = append(lines, "Connect to a server you configure in its settings — it can send your data there")
 	}
 	if d.HasStorage {
 		if len(d.Settings) > 0 {

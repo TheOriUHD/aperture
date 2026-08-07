@@ -45,8 +45,19 @@ func TestShippedExampleResolves(t *testing.T) {
 	if !wantSecret {
 		t.Fatalf("the HA token must be a secret setting; secret keys = %v", d.SecretKeys)
 	}
-	if len(d.NetHosts) != 1 || d.NetHosts[0] != "homeassistant.local:8123" {
-		t.Fatalf("network host = %v, want [homeassistant.local:8123]", d.NetHosts)
+	// The network host now comes from the user's ha_url setting, not a hard-coded host.
+	if len(d.NetHosts) != 0 || len(d.NetSettings) != 1 || d.NetSettings[0] != "ha_url" {
+		t.Fatalf("network should resolve from the ha_url setting; hosts=%v settings=%v", d.NetHosts, d.NetSettings)
+	}
+	// It carries the camera→light mapping as a group of camera + entity.
+	var group *SettingField
+	for i := range d.Settings {
+		if d.Settings[i].Type == "group" {
+			group = &d.Settings[i]
+		}
+	}
+	if group == nil || len(group.Fields) != 2 {
+		t.Fatalf("the example must declare a camera→light group of 2 fields; settings=%+v", d.Settings)
 	}
 }
 

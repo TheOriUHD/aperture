@@ -84,6 +84,75 @@ func TestExtFetch(t *testing.T) {
 	}
 }
 
+// TestExtFetchNetworkFromSetting proves the allow-list follows the URL the USER
+// configured (via {{setting:key}}), not a host the author hard-coded: unset → a clear
+// "not configured" refusal; set → the configured host is reachable.
+func TestExtFetchNetworkFromSetting(t *testing.T) {
+	var hit bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = true; w.WriteHeader(200) }))
+	defer target.Close()
+
+	s := newTestServer(t)
+	admin := &store.User{ID: "admin", Email: "a@x", Name: "Admin", Role: store.RoleAdmin}
+	mustDo(t, s.st.CreateUser(admin))
+	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+
+	manifest := `{"manifest":1,"id":"com.dyn","name":"D","version":"1.0.0",
+	  "ui":{"panels":[{"slot":"camera-detail","entry":"ui/p.html"}]},
+	  "permissions":{"network":["{{setting:api_url}}"]},
+	  "settings":[{"key":"api_url","label":"API URL","type":"url","required":true}]}`
+	mustDo(t, s.st.CreateExtension(&store.Extension{ID: "com.dyn", Name: "D", Version: "1.0.0", Source: "sideload", Enabled: true, ManifestJSON: manifest, InstalledBy: admin.ID}))
+
+	// Unconfigured: egress to the (not-yet-declared) host is refused with a legible,
+	// actionable message — not a flat "host not granted".
+	rec := s.reqBody("POST", "/api/v1/ext/com.dyn/fetch", adminSess, strings.NewReader(`{"url":"`+target.URL+`/x","method":"GET"}`))
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "configure it in this extension's settings") && !strings.Contains(rec.Body.String(), "not set") {
+		t.Fatalf("unconfigured egress = %d (%s), want 400 not_configured", rec.Code, rec.Body)
+	}
+
+	// Configure the URL → the allow-list now follows it and the host is reachable.
+	mustDo(t, s.st.ExtKVSet("com.dyn", "api_url", target.URL))
+	if rec := s.reqBody("POST", "/api/v1/ext/com.dyn/fetch", adminSess, strings.NewReader(`{"url":"`+target.URL+`/x","method":"GET"}`)); rec.Code != 200 || !hit {
+		t.Fatalf("configured egress = %d hit=%v, want 200 and upstream hit (%s)", rec.Code, hit, rec.Body)
+	}
+}
+
+// TestExtFetchLegibleError checks a connection failure surfaces a plain sentence
+// naming the host, with the raw error kept as a detail (not front and centre).
+func TestExtFetchLegibleError(t *testing.T) {
+	s := newTestServer(t)
+	admin := &store.User{ID: "admin", Email: "a@x", Name: "Admin", Role: store.RoleAdmin}
+	mustDo(t, s.st.CreateUser(admin))
+	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+
+	// A static host that will refuse (nothing listens on 127.0.0.1:1).
+	manifest := `{"manifest":1,"id":"com.err","name":"E","version":"1.0.0","ui":{"panels":[{"slot":"camera-detail","entry":"ui/p.html"}]},"permissions":{"network":["http://127.0.0.1:1"]}}`
+	mustDo(t, s.st.CreateExtension(&store.Extension{ID: "com.err", Name: "E", Version: "1.0.0", Source: "sideload", Enabled: true, ManifestJSON: manifest, InstalledBy: admin.ID}))
+
+	rec := s.reqBody("POST", "/api/v1/ext/com.err/fetch", adminSess, strings.NewReader(`{"url":"http://127.0.0.1:1/x","method":"GET"}`))
+	if rec.Code != 200 {
+		t.Fatalf("connection failure should resolve with a status-0 body, got %d (%s)", rec.Code, rec.Body)
+	}
+	var resp struct {
+		Status int    `json:"status"`
+		OK     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Detail string `json:"detail"`
+	}
+	mustDo(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	if resp.Status != 0 || resp.OK {
+		t.Fatalf("want status 0 / ok false, got %+v", resp)
+	}
+	if !strings.Contains(resp.Error, "127.0.0.1:1") {
+		t.Fatalf("friendly error should name the host: %q", resp.Error)
+	}
+	if resp.Detail == "" || resp.Detail == resp.Error {
+		t.Fatalf("raw detail should be present and distinct from the friendly message: %q", resp.Detail)
+	}
+}
+
 // TestExtFetchSecretsAreNamespaceScoped is the security assertion for {{secret:key}}:
 // the substitution resolves ONLY against the calling extension's own declared secrets
 // and its own ext_kv namespace. An extension can neither name another extension's

@@ -342,6 +342,12 @@ func (s *Server) spawnIfBackend(ex *store.Extension) {
 			s.log.Error("chown extension import map", "id", ex.ID, "err", err)
 		}
 	}
+	// A url-setting network host is resolved to its current value at spawn, so the
+	// backend's Deno --allow-net follows what the user configured; changing the setting
+	// restarts the backend (settings PUT), which re-resolves it here.
+	if hosts, _ := s.resolveExtHosts(ex.ID, d); len(hosts) > 0 {
+		d.NetHosts = hosts
+	}
 	spec := ext.BuildSpec(ex.ID, filepath.Join(dir, m.Backend.Entry), dir, s.sdkModule, imPath, s.apiBase, tok, ex.ExtUID, d)
 	s.extSup.Start(spec)
 }

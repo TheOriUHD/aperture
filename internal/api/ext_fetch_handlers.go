@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -70,7 +72,7 @@ func (s *Server) handleExtFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, verr := m.Validate()
-	if verr != nil || len(d.NetHosts) == 0 {
+	if verr != nil || (len(d.NetHosts) == 0 && len(d.NetSettings) == 0) {
 		writeErrorCode(w, http.StatusForbidden, "forbidden", "this extension did not request network access")
 		return
 	}
@@ -93,9 +95,16 @@ func (s *Server) handleExtFetch(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "validation", "url must be an absolute http(s) URL")
 		return
 	}
-	if !hostAllowed(u.Host, d.NetHosts) {
-		writeErrorCode(w, http.StatusForbidden, "forbidden",
-			"host "+u.Host+" was not granted to this extension (allowed: "+strings.Join(d.NetHosts, ", ")+")")
+	// The allow-list is the static manifest hosts PLUS the current host of every url
+	// setting the manifest referenced — so it follows the URL the user configured.
+	allowed, unconfigured := s.resolveExtHosts(id, d)
+	if !hostAllowed(u.Host, allowed) {
+		if unconfigured {
+			writeErrorCode(w, http.StatusBadRequest, "not_configured",
+				"the server address is not set (or is not a valid URL) — configure it in this extension's settings")
+			return
+		}
+		writeErrorCode(w, http.StatusForbidden, "forbidden", "host "+u.Host+" is not one this extension may reach")
 		return
 	}
 	if !extFetchLimiter.allow() {
@@ -140,15 +149,65 @@ func (s *Server) handleExtFetch(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(out)
 	if err != nil {
-		writeErrorCode(w, http.StatusBadGateway, "upstream_error", "outbound request failed: "+err.Error())
+		// A connection failure is a legible result, not a server fault: resolve with
+		// status 0 + a plain sentence the panel can show, keeping the raw error as a
+		// detail the panel can reveal but not lead with.
+		friendly, detail := classifyEgressError(err, u.Host)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": 0, "ok": false, "error": friendly, "detail": detail,
+		})
 		return
 	}
 	defer resp.Body.Close()
 	rb, _ := io.ReadAll(io.LimitReader(resp.Body, extFetchMaxRespBody))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": resp.StatusCode,
+		"ok":     resp.StatusCode >= 200 && resp.StatusCode < 300,
 		"body":   string(rb),
 	})
+}
+
+// resolveExtHosts is the effective egress allow-list: the static manifest hosts plus
+// the current host of each url-setting the manifest referenced. It reports whether
+// any referenced setting is unset or malformed, so a miss can be explained as a
+// configuration gap ("set the address in settings") rather than a flat refusal.
+func (s *Server) resolveExtHosts(id string, d ext.Derived) (allowed []string, unconfigured bool) {
+	allowed = append(allowed, d.NetHosts...)
+	for _, key := range d.NetSettings {
+		v, found, _ := s.st.ExtKVGet(id, key)
+		v = strings.TrimSpace(v)
+		if !found || v == "" {
+			unconfigured = true
+			continue
+		}
+		if u, err := url.Parse(v); err == nil && u.Host != "" {
+			allowed = append(allowed, u.Host)
+		} else {
+			unconfigured = true
+		}
+	}
+	return allowed, unconfigured
+}
+
+// classifyEgressError maps a Go outbound error to a plain sentence naming the host and
+// what to check, returning (friendly, rawDetail). The most common self-hoster trap —
+// a .local/mDNS name that does not resolve inside the container — gets a specific hint.
+func classifyEgressError(err error, host string) (string, string) {
+	detail := err.Error()
+	low := strings.ToLower(detail)
+	var dns *net.DNSError
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) || strings.Contains(low, "timeout") || strings.Contains(low, "deadline exceeded"):
+		return host + " did not respond in time. Check the address and that the server is reachable from Aperture.", detail
+	case errors.As(err, &dns) || strings.Contains(low, "no such host") || strings.Contains(low, "server misbehaving"):
+		return "Could not find " + host + ". A .local/mDNS name does not resolve inside the container — use a LAN IP or a real DNS name.", detail
+	case strings.Contains(low, "connection refused"):
+		return host + " refused the connection. Check the server is running and the port is correct.", detail
+	case strings.Contains(low, "x509") || strings.Contains(low, "tls") || strings.Contains(low, "certificate"):
+		return "Could not establish a secure connection to " + host + ". Check its certificate, or use http:// for a local server.", detail
+	default:
+		return "Could not reach " + host + ".", detail
+	}
 }
 
 // expandSecrets replaces {{secret:key}} in s with the extension's stored secret

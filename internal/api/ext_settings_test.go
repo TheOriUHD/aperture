@@ -102,3 +102,61 @@ func TestExtSettings(t *testing.T) {
 		t.Fatalf("viewer settings GET = %d and must not leak the secret (%s)", vr.Code, vr.Body)
 	}
 }
+
+const groupManifest = `{"manifest":1,"id":"com.grp","name":"G","version":"1.0.0","backend":{"entry":"m.ts"},
+  "permissions":{"cameras":["cam1","cam2"]},
+  "settings":[
+    {"key":"ha_url","label":"URL","type":"url","required":true},
+    {"key":"mapping","label":"Lights","type":"group","fields":[
+      {"key":"camera","label":"Camera","type":"camera","required":true},
+      {"key":"entity","label":"Entity","type":"text","required":true}
+    ]}
+  ]}`
+
+// TestExtSettingsGroupsAndTypes covers the structured config the thin scalar schema
+// couldn't express: a url (validated), and a repeatable group whose rows carry a
+// camera picker + an entity — persisted as a JSON array and read back as one.
+func TestExtSettingsGroupsAndTypes(t *testing.T) {
+	s := newTestServer(t)
+	admin := &store.User{ID: "admin", Email: "a@x", Name: "Admin", Role: store.RoleAdmin}
+	mustDo(t, s.st.CreateUser(admin))
+	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
+	mustDo(t, s.st.CreateExtension(&store.Extension{ID: "com.grp", Name: "G", Version: "1.0.0", Source: "sideload", Enabled: true, ManifestJSON: groupManifest, CameraGrants: []string{"cam1", "cam2"}, InstalledBy: admin.ID}))
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+
+	// Save a url + a two-row camera→entity mapping.
+	body := `{"values":{"ha_url":"https://ha.local:8123","mapping":[{"camera":"cam1","entity":"light.a"},{"camera":"cam2","entity":"light.b"}]}}`
+	if rec := s.reqBody("PUT", "/api/v1/ext/com.grp/settings", adminSess, strings.NewReader(body)); rec.Code != 200 {
+		t.Fatalf("group PUT = %d (%s)", rec.Code, rec.Body)
+	}
+	// Stored as a JSON array; read back as structured rows.
+	rec := s.reqAs("GET", "/api/v1/ext/com.grp/settings", adminSess)
+	var got struct {
+		Values struct {
+			HaURL   string              `json:"ha_url"`
+			Mapping []map[string]string `json:"mapping"`
+		} `json:"values"`
+	}
+	mustDo(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	if got.Values.HaURL != "https://ha.local:8123" {
+		t.Fatalf("url value wrong: %q", got.Values.HaURL)
+	}
+	if len(got.Values.Mapping) != 2 || got.Values.Mapping[0]["camera"] != "cam1" || got.Values.Mapping[1]["entity"] != "light.b" {
+		t.Fatalf("group not persisted as rows: %+v", got.Values.Mapping)
+	}
+	// The backend reads the same group back as its stored JSON (via its token).
+	if v, _, _ := s.st.ExtKVGet("com.grp", "mapping"); !strings.Contains(v, `"entity":"light.a"`) {
+		t.Fatalf("group not stored as JSON in ext_kv: %q", v)
+	}
+
+	// Rejections: a malformed URL, a camera outside the grant, a required subfield empty.
+	for name, b := range map[string]string{
+		"bad url":            `{"values":{"ha_url":"not a url","mapping":[]}}`,
+		"camera not granted": `{"values":{"ha_url":"https://x.y","mapping":[{"camera":"cam9","entity":"light.z"}]}}`,
+		"missing entity":     `{"values":{"ha_url":"https://x.y","mapping":[{"camera":"cam1","entity":""}]}}`,
+	} {
+		if rec := s.reqBody("PUT", "/api/v1/ext/com.grp/settings", adminSess, strings.NewReader(b)); rec.Code != 400 {
+			t.Errorf("%s: got %d, want 400 (%s)", name, rec.Code, rec.Body)
+		}
+	}
+}

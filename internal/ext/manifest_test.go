@@ -190,6 +190,76 @@ func TestSettingsImplyStorageAndSecrets(t *testing.T) {
 	}
 }
 
+func TestNetworkFromSetting(t *testing.T) {
+	src := `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},
+	  "permissions":{"network":["{{setting:ha_url}}","https://static.example:9000"]},
+	  "settings":[{"key":"ha_url","label":"URL","type":"url","required":true}]}`
+	m, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := m.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(d.NetSettings, []string{"ha_url"}) {
+		t.Fatalf("netSettings = %v, want [ha_url]", d.NetSettings)
+	}
+	if !reflect.DeepEqual(d.NetHosts, []string{"static.example:9000"}) {
+		t.Fatalf("netHosts = %v, want [static.example:9000] (static entries still work)", d.NetHosts)
+	}
+	// Consent names the CHOICE, not a host the user never picked.
+	joined := strings.Join(d.ConsentLines, "\n")
+	if !strings.Contains(joined, "a server you configure in its settings") {
+		t.Fatalf("consent should describe the configurable host: %v", d.ConsentLines)
+	}
+
+	// A ref to a NON-url setting (or a missing one) is rejected.
+	for name, s := range map[string]string{
+		"ref to non-url setting": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"network":["{{setting:x}}"]},"settings":[{"key":"x","label":"X","type":"text"}]}`,
+		"ref to missing setting": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"network":["{{setting:nope}}"]}}`,
+	} {
+		mm, _ := Parse([]byte(s))
+		if _, err := mm.Validate(); err == nil {
+			t.Errorf("%s: expected rejection", name)
+		}
+	}
+}
+
+func TestSettingsGroupsAndCamera(t *testing.T) {
+	src := `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},
+	  "permissions":{"cameras":"all"},
+	  "settings":[
+	    {"key":"mapping","label":"Camera → light","type":"group","fields":[
+	      {"key":"camera","label":"Camera","type":"camera","required":true},
+	      {"key":"entity","label":"Entity","type":"text","required":true}
+	    ]}
+	  ]}`
+	m, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := m.Validate()
+	if err != nil {
+		t.Fatalf("a group of camera+text must validate: %v", err)
+	}
+	if len(d.Settings) != 1 || d.Settings[0].Type != "group" || len(d.Settings[0].Fields) != 2 {
+		t.Fatalf("group schema not carried through: %+v", d.Settings)
+	}
+
+	// Bad groups: no fields, a nested group, a secret inside a group.
+	for name, s := range map[string]string{
+		"group without fields": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"g","label":"G","type":"group"}]}`,
+		"nested group":         `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"g","label":"G","type":"group","fields":[{"key":"h","label":"H","type":"group","fields":[{"key":"x","label":"X","type":"text"}]}]}]}`,
+		"secret inside group":  `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"g","label":"G","type":"group","fields":[{"key":"s","label":"S","type":"secret"}]}]}`,
+	} {
+		mm, _ := Parse([]byte(s))
+		if _, err := mm.Validate(); err == nil {
+			t.Errorf("%s: expected rejection", name)
+		}
+	}
+}
+
 func TestCheckNoRemoteImports(t *testing.T) {
 	bad := "import { x } from \"https://evil.example/mod.ts\";\nimport { aperture } from \"@aperture/sdk\";"
 	got := CheckNoRemoteImports(bad)
