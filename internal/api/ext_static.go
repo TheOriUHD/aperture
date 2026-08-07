@@ -57,5 +57,52 @@ func (s *Server) handleExtAsset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", extCSP)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
+	// Inject the SDK runtime into an HTML entry so `window.aperture` is available
+	// inline (it posts to the host, which relays to the broker — the panel never
+	// fetches Aperture directly). Non-HTML assets are served untouched.
+	if strings.HasSuffix(strings.ToLower(full), ".html") {
+		b, err := os.ReadFile(full)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(injectSDK(string(b)))
+		return
+	}
 	http.ServeFile(w, r, full)
 }
+
+func injectSDK(html string) []byte {
+	low := strings.ToLower(html)
+	if i := strings.Index(low, "</head>"); i >= 0 {
+		return []byte(html[:i] + extSDKBootstrap + html[i:])
+	}
+	if i := strings.Index(low, "<body>"); i >= 0 {
+		return []byte(html[:i+6] + extSDKBootstrap + html[i+6:])
+	}
+	return []byte(extSDKBootstrap + html)
+}
+
+// extSDKBootstrap is the @aperture/sdk runtime for a UI panel (T1.7, iframe side).
+// It exposes window.aperture, whose calls postMessage to the host; the host relays
+// them to /api/v1/ext/{id}/broker under the caller∩extension authority and posts
+// the reply back. The panel thus reaches the API only through the sanctioned,
+// scope-checked path — a direct fetch would be blocked by the sandbox + CSP.
+const extSDKBootstrap = `<script>(function(){
+  var pending={},seq=0;
+  window.addEventListener('message',function(e){
+    var m=e.data||{}; if(!m.__ap||!(m.id in pending))return;
+    var p=pending[m.id]; delete pending[m.id];
+    if(m.error)p.reject(new Error(m.error));else p.resolve(m.result);
+  });
+  function call(t,p){return new Promise(function(res,rej){var id=++seq;pending[id]={resolve:res,reject:rej};parent.postMessage({__apReq:true,id:id,type:t,payload:p},'*');});}
+  function req(method,path,body){return call('api.request',{method:method,path:path,body:body});}
+  window.aperture={
+    request:req,
+    cameras:{list:function(){return req('GET','/cameras');},get:function(id){return req('GET','/cameras/'+id);}},
+    events:{list:function(q){return req('GET','/events'+(q?('?'+q):''));}},
+    resize:function(h){parent.postMessage({__apReq:true,type:'ui.resize',payload:{height:h}},'*');}
+  };
+  try{var ro=new ResizeObserver(function(){window.aperture.resize(document.documentElement.scrollHeight);});ro.observe(document.documentElement);}catch(e){}
+})();</script>`

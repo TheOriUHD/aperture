@@ -34,7 +34,14 @@ func BuildSpec(id, entryAbs, extDir, sdkModulePath, importMapPath, apiBase, toke
 	readPaths := strings.Join([]string{extDir, filepath.Dir(sdkModulePath), importMapPath}, ",")
 	flags := []string{
 		"--no-prompt",
-		"--deny-run", "--deny-ffi", "--deny-env", "--deny-sys", "--deny-import",
+		"--deny-run", "--deny-ffi", "--deny-sys", "--deny-import",
+		// Env is allow-listed to exactly the two vars the SDK reads for its token
+		// and base URL — NOT --deny-env, or the SDK's Deno.env.get() throws
+		// NotCapable and no backend extension can authenticate. The child's env is
+		// replaced wholesale by Spec.Env below (supervisor: cmd.Env = spec.Env), so
+		// this exposes only the extension's own token and the public API base — no
+		// host environment leaks through.
+		"--allow-env=APERTURE_TOKEN,APERTURE_API",
 		"--allow-read=" + readPaths,
 		"--allow-write=" + extDir,
 		"--import-map=" + importMapPath,

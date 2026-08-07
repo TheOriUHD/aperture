@@ -33,6 +33,12 @@ RUN apt-get update \
 COPY --from=gobuild /out/nvrd /usr/local/bin/nvrd
 COPY --from=gobuild /out/nvrctl /usr/local/bin/nvrctl
 COPY --from=deno /deno /usr/local/bin/deno
+# The backend SDK (@aperture/sdk) as a read-only local module. The supervisor's
+# generated import map resolves the bare specifier to this path and adds it to the
+# child's --allow-read, so extensions import it under --deny-import (no remote code).
+# APERTURE_EXT_SDK in cmd/nvrd/main.go defaults to exactly this path.
+COPY deploy/aperture-sdk/mod.ts /usr/local/share/aperture-sdk/mod.ts
+RUN chmod 0444 /usr/local/share/aperture-sdk/mod.ts
 # A non-root identity for backend-extension processes (nvrd stays root so it can
 # setuid-drop each child). Added via /etc/passwd directly to avoid depending on
 # useradd in the slim image. Per-extension uids (T1.5) build on this base.

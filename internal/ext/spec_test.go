@@ -12,7 +12,8 @@ func TestBuildSpecDenyByDefault(t *testing.T) {
 
 	f := strings.Join(sp.DenoFlags, " ")
 	for _, must := range []string{
-		"--deny-run", "--deny-ffi", "--deny-env", "--deny-sys", "--deny-import",
+		"--deny-run", "--deny-ffi", "--deny-sys", "--deny-import",
+		"--allow-env=APERTURE_TOKEN,APERTURE_API", // exactly the two the SDK reads; no host env
 		"--allow-read=/data/ext/com.x", "--allow-write=/data/ext/com.x", "--import-map=",
 		"homeassistant.local:8123", // declared host
 		"localhost:8080",           // the API host, injected so the SDK can reach it
@@ -20,6 +21,11 @@ func TestBuildSpecDenyByDefault(t *testing.T) {
 		if !strings.Contains(f, must) {
 			t.Errorf("flags missing %q\n  in: %s", must, f)
 		}
+	}
+	// Env must NOT be denied wholesale (that would break the SDK's token read), but
+	// it must also not be blanket-allowed — only the two SDK vars.
+	if strings.Contains(f, "--deny-env") || strings.Contains(f, "--allow-env ") || strings.HasSuffix(f, "--allow-env") {
+		t.Errorf("env flag should be the scoped allow-list, got: %s", f)
 	}
 	if sp.UID != 65600 || sp.GID != 65600 || sp.MemMB != DefaultMemMB || sp.OOMScoreAdj != DefaultOOMScoreAdj {
 		t.Errorf("identity/limits: %+v", sp)
