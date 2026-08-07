@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import clsx from "clsx";
 import { useScrollLock } from "../../hooks/useScrollLock";
 
-const SIZES = { md: "max-w-md", lg: "max-w-2xl", xl: "max-w-5xl" } as const;
+const SIZES = { md: "max-w-md", lg: "max-w-2xl", xl: "max-w-5xl", "2xl": "max-w-6xl" } as const;
 
 export function Modal({
   open,
