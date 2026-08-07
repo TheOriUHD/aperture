@@ -77,6 +77,13 @@ export interface StageView {
   requestsAll: boolean;
   cameraConsent: string; // honest one-liner shown in the consent camera section
   hasSettings: boolean; // configured after install, from the extension's row
+  // Present when the staged id is ALREADY installed → confirm is an update, not a
+  // first install. currentVersion is what will be replaced; downgrade flags a lower
+  // version (needs explicit confirmation); permissionsChanged flags new permissions.
+  update?: boolean;
+  currentVersion?: string;
+  downgrade?: boolean;
+  permissionsChanged?: boolean;
 }
 
 export interface StoreView {

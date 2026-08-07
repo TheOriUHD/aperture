@@ -68,7 +68,10 @@ export function ExtensionsManager() {
     setStaging(true);
     setStageErr(undefined);
     try {
-      setStaged({ view: await fn(), mode: "install" });
+      const view = await fn();
+      // An id that's already installed → the confirm is an update. No targetId, so
+      // onConfirm routes it through the install-confirm endpoint (which preserves data).
+      setStaged({ view, mode: view.update ? "update" : "install" });
     } catch (e) {
       setStageErr(errMsg(e));
     } finally {
@@ -97,16 +100,19 @@ export function ExtensionsManager() {
     }
   }
 
-  async function onConfirm(cameras: string[] | null | undefined) {
+  async function onConfirm(cameras: string[] | null | undefined, allowDowngrade?: boolean) {
     if (!staged) return;
     setConfirmBusy(true);
     setStageErr(undefined);
     try {
-      if (staged.mode === "install") {
-        await confirmInstall(staged.view.stagingId, cameras);
-        invalidate();
+      if (staged.targetId) {
+        // Row-initiated URL update (has a fixed target extension).
+        await actions.applyUpdate.mutateAsync({ id: staged.targetId, stagingId: staged.view.stagingId, consented: true });
       } else {
-        await actions.applyUpdate.mutateAsync({ id: staged.targetId!, stagingId: staged.view.stagingId, consented: true });
+        // A fresh install, or a sideload upgrade of an already-installed id — the
+        // confirm endpoint handles both (preserving ext_kv + camera grant on upgrade).
+        await confirmInstall(staged.view.stagingId, staged.mode === "install" ? cameras : undefined, allowDowngrade);
+        invalidate();
       }
       setStaged(null); // leave the marketplace open so more can be added
     } catch (e) {

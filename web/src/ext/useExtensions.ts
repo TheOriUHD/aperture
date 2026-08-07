@@ -92,10 +92,12 @@ export function stageUrl(url: string) {
 export function stageStore(id: string) {
   return api.post<StageView>("/api/ext/store/install", { id });
 }
-export function confirmInstall(stagingId: string, cameras?: string[] | null) {
+export function confirmInstall(stagingId: string, cameras?: string[] | null, allowDowngrade?: boolean) {
   // cameras: an explicit id list = grant exactly those; null/undefined = as the
   // manifest requested (all, or its list). The server validates against the ceiling.
-  return api.post<ExtItem>("/api/ext/install/confirm", { stagingId, cameras });
+  // If the id is already installed the server treats this as an UPDATE (preserving
+  // ext_kv + camera grant); allowDowngrade authorizes a lower version.
+  return api.post<ExtItem>("/api/ext/install/confirm", { stagingId, cameras, allowDowngrade });
 }
 
 export function checkUpdate(id: string) {
