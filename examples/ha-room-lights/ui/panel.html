@@ -3,97 +3,184 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Room Lights</title>
+  <title>Room lights</title>
   <!--
-    A panel is a sandboxed, opaque-origin iframe: it CANNOT inherit the host app's
-    stylesheet and cannot load any external resource (the per-panel CSP allows inline
-    <style>/<script> only). So it must bring its own styling. The tokens below mirror
-    Aperture's dark theme (see docs/extensions/panels.md) and the body background is
-    transparent, so the panel reads as part of the surrounding camera-detail card
-    rather than a bare HTML page. Copy this <style> block as a starting point.
+    A panel is a sandboxed, opaque-origin iframe: it cannot inherit the host app's
+    stylesheet or load any external resource (the per-panel CSP allows inline
+    <style>/<script> only), so it brings its own styling. The tokens below mirror
+    Aperture's dark theme (docs/extensions/panels.md) and the body is transparent, so
+    the panel reads as part of the camera-detail card rather than a bare HTML page.
+
+    What this panel demonstrates — the point of a panel: it reacts to the camera on
+    screen (window.aperture.cameraId), reads its configuration from the extension's
+    own settings (window.aperture.settings), and offers a real control — toggling that
+    camera's room light in Home Assistant. The Home Assistant token is a SECRET setting
+    the panel never sees: the call carries a {{secret:ha_token}} placeholder that the
+    host expands server-side (window.aperture.net.fetch), bounded to the one declared
+    host. No camera video or events are read; the only camera data used is the name.
   -->
   <style>
     :root {
       color-scheme: dark;
-      --fg: #eef0f2;         /* primary text            */
-      --fg-muted: #8b9199;   /* secondary text          */
-      --fg-faint: #6c727a;   /* captions / hints        */
-      --surface: #101319;    /* inset row background     */
-      --line: #20242b;       /* borders / dividers       */
-      --brand: #1b9df0;      /* accent                   */
-      --online: #3fce7c;     /* healthy / on             */
-      --danger: #f0494e;     /* errors                   */
-      --radius: 8px;
+      --fg: #eef0f2; --fg-muted: #8b9199; --fg-faint: #6c727a;
+      --surface: #101319; --line: #20242b; --line-strong: #2c3138;
+      --brand: #1b9df0; --online: #3fce7c; --amber: #e6b45a; --danger: #f0494e;
+      --radius: 10px;
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0;
-      padding: 14px;
-      background: transparent;             /* blend into the host card */
-      color: var(--fg);
+      margin: 0; padding: 14px; background: transparent; color: var(--fg);
       font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
+    .head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .glyph {
+      flex: none; width: 34px; height: 34px; display: grid; place-items: center;
+      border-radius: 9px; background: #16202b; color: var(--amber);
+      border: 1px solid var(--line-strong); transition: background .15s, color .15s;
+    }
+    .glyph.on { background: rgba(230,180,90,.16); color: var(--amber); }
+    .glyph.off { color: var(--fg-faint); }
     .title { margin: 0; font-size: 13px; font-weight: 600; }
-    .subtitle { margin: 2px 0 12px; font-size: 11px; color: var(--fg-muted); }
-    .label { font-size: 11px; font-weight: 500; color: var(--fg-muted); margin: 0 0 8px; }
-    .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-    .row {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 10px; border-radius: var(--radius);
+    .subtitle { margin: 1px 0 0; font-size: 11px; color: var(--fg-muted); }
+
+    .control {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 12px 14px; border-radius: var(--radius);
       background: var(--surface); border: 1px solid var(--line);
     }
-    .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--online); }
-    .name { font-size: 13px; color: var(--fg); }
-    .status { margin: 0; font-size: 12px; color: var(--fg-muted); }
-    .status.error { color: var(--danger); }
-    .note { margin: 12px 0 0; font-size: 11px; color: var(--fg-faint); }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--fg-muted); }
+    .state { font-size: 13px; }
+    .state b { color: var(--fg); font-weight: 600; }
+    .state .muted { color: var(--fg-muted); }
+
+    .toggle {
+      appearance: none; border: 0; cursor: pointer; position: relative;
+      width: 52px; height: 30px; border-radius: 999px; background: var(--line-strong);
+      transition: background .18s; flex: none;
+    }
+    .toggle::after {
+      content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px;
+      border-radius: 50%; background: #fff; transition: transform .18s;
+    }
+    .toggle[aria-checked="true"] { background: var(--amber); }
+    .toggle[aria-checked="true"]::after { transform: translateX(22px); }
+    .toggle[disabled] { opacity: .5; cursor: default; }
+
+    .msg { margin: 10px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--fg-faint); }
+    .msg.error { color: var(--danger); }
+    .msg a, code { color: var(--fg-muted); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
-  <h1 class="title">Room Lights</h1>
-  <p class="subtitle">Turns on each room's Home Assistant lights while you watch.</p>
+  <div class="head">
+    <div class="glyph off" id="glyph" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 18h6M10 21h4M12 2a6 6 0 0 0-4 10.5c.7.7 1 1.2 1 2.5h6c0-1.3.3-1.8 1-2.5A6 6 0 0 0 12 2Z"/>
+      </svg>
+    </div>
+    <div>
+      <p class="title">Room lights</p>
+      <p class="subtitle" id="subtitle">Loading…</p>
+    </div>
+  </div>
 
-  <p class="label">Cameras this panel can act on</p>
-  <ul class="list" id="cams"></ul>
-  <p class="status" id="status">Loading cameras…</p>
-  <p class="note" id="note" hidden>
-    This example is granted all your cameras. Scope it by listing ids in
-    <code>permissions.cameras</code> in <code>manifest.json</code>, and set your Home
-    Assistant host in <code>permissions.network</code>.
-  </p>
+  <div class="control hidden" id="control">
+    <span class="state" id="state"><span class="muted">Checking…</span></span>
+    <button class="toggle" id="toggle" role="switch" aria-checked="false" aria-label="Toggle room light" disabled></button>
+  </div>
+
+  <p class="msg" id="msg"></p>
 
   <script>
-    // Every window.aperture call is relayed to the server broker under YOUR identity
-    // ∩ the extension's authority, so this list is only the cameras you may see — it
-    // can be fewer than the extension was granted.
-    (async function () {
-      var list = document.getElementById('cams');
-      var status = document.getElementById('status');
-      var note = document.getElementById('note');
-      try {
-        var cams = await window.aperture.cameras.list();
-        if (!Array.isArray(cams) || cams.length === 0) {
-          status.textContent = 'No cameras are visible to you here.';
-        } else {
-          cams.forEach(function (c) {
-            var li = document.createElement('li'); li.className = 'row';
-            var dot = document.createElement('span'); dot.className = 'dot';
-            var name = document.createElement('span'); name.className = 'name';
-            name.textContent = c.name || c.id;
-            li.appendChild(dot); li.appendChild(name); list.appendChild(li);
-          });
-          status.hidden = true;
-          note.hidden = false;
+    (function () {
+      var ap = window.aperture;
+      var subtitle = document.getElementById('subtitle');
+      var control = document.getElementById('control');
+      var stateEl = document.getElementById('state');
+      var toggle = document.getElementById('toggle');
+      var glyph = document.getElementById('glyph');
+      var msg = document.getElementById('msg');
+
+      var cameraId = ap && ap.cameraId;
+      var haUrl = null, entity = null, isOn = false, busy = false;
+
+      function say(text, isError) { msg.textContent = text || ''; msg.className = 'msg' + (isError ? ' error' : ''); resize(); }
+      function resize() { if (ap && ap.resize) ap.resize(document.documentElement.scrollHeight); }
+      function setOn(on) {
+        isOn = on;
+        toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+        glyph.className = 'glyph ' + (on ? 'on' : 'off');
+        stateEl.innerHTML = on ? '<b>On</b>' : '<span class="muted">Off</span>';
+      }
+
+      // Read the light's current state from Home Assistant. The token is injected
+      // server-side from the {{secret:ha_token}} placeholder — the panel never holds it.
+      function haGet(path) {
+        return ap.net.fetch(haUrl + path, { method: 'GET', headers: { Authorization: 'Bearer {{secret:ha_token}}' } });
+      }
+      function haService(action) {
+        return ap.net.fetch(haUrl + '/api/services/light/' + action, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer {{secret:ha_token}}', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entity_id: entity })
+        });
+      }
+
+      function needsSetup(text) {
+        say(text + ' Open Settings → Extensions → Home Assistant Room Lights to configure it.', true);
+      }
+
+      toggle.addEventListener('click', function () {
+        if (busy || toggle.disabled) return;
+        busy = true; toggle.disabled = true;
+        var next = !isOn;
+        haService(next ? 'turn_on' : 'turn_off').then(function (r) {
+          if (r.status >= 200 && r.status < 300) { setOn(next); say('Turned the light ' + (next ? 'on' : 'off') + '.'); }
+          else if (r.status === 401) needsSetup('Home Assistant rejected the token.');
+          else say('Home Assistant returned status ' + r.status + '.', true);
+        }).catch(function (e) {
+          // Our own egress errors (unconfigured secret, undeclared host) throw here.
+          needsSetup((e && e.message) || 'Could not reach Home Assistant.');
+        }).then(function () { busy = false; toggle.disabled = false; });
+      });
+
+      (async function init() {
+        if (!cameraId) { subtitle.textContent = 'Open a camera to control its lights.'; resize(); return; }
+
+        // A little camera data (its name) to label the control — the only camera access
+        // this extension has (permissions.data.cameras = read).
+        try { var cam = await ap.cameras.get(cameraId); subtitle.textContent = (cam && cam.name) || cameraId; }
+        catch (e) { subtitle.textContent = cameraId; }
+
+        // Non-secret settings drive the target. The secret token is used only via the
+        // placeholder above; settings.get never returns it.
+        haUrl = (await ap.settings.get('ha_url')) || '';
+        var tmpl = (await ap.settings.get('entity_template')) || 'light.{camera}';
+        entity = tmpl.replace('{camera}', cameraId);
+        if (!haUrl) { control.classList.add('hidden'); needsSetup('Home Assistant is not configured yet.'); return; }
+
+        control.classList.remove('hidden');
+        say('Controls ' + entity + ' in Home Assistant.');
+        resize();
+
+        // Reflect the current state (best-effort). A missing token/entity is handled
+        // gracefully so the toggle still works optimistically.
+        try {
+          var r = await haGet('/api/states/' + encodeURIComponent(entity));
+          if (r.status === 401) { needsSetup('Home Assistant rejected the token.'); }
+          else if (r.status >= 200 && r.status < 300) {
+            try { setOn(JSON.parse(r.body).state === 'on'); } catch (e) {}
+            toggle.disabled = false;
+          } else if (r.status === 404) {
+            say('No entity ' + entity + ' in Home Assistant — set the light entity in settings.', true);
+            toggle.disabled = false; // still allow trying
+          } else { toggle.disabled = false; }
+        } catch (e) {
+          needsSetup((e && e.message) || 'Could not reach Home Assistant.');
         }
-      } catch (err) {
-        status.textContent = 'Could not load cameras: ' + ((err && err.message) || err);
-        status.className = 'status error';
-      }
-      // The host auto-resizes via a ResizeObserver; nudge it once after first paint.
-      if (window.aperture && window.aperture.resize) {
-        window.aperture.resize(document.documentElement.scrollHeight);
-      }
+        resize();
+      })();
     })();
   </script>
 </body>

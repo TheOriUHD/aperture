@@ -15,9 +15,9 @@ Permissions are **deny-by-default**: an absent or empty block grants nothing.
 | `data.media: "live"`                     | the `media:live` scope (watch live streams — bandwidth/privacy, off by default) | "Watch your live camera streams"                            |
 | `alarm: "arm"`                           | the `alarm:arm` scope                                                          | "Arm/disarm the alarm"                                      |
 | `system: "read"`                         | the `system:read` scope (health/metrics/status)                               | "Read system health"                                        |
-| `cameras: [ids]`                         | per-camera grants, composed as **owner ∩ grants**                             | "…only for: \<camera names>"                                |
-| `network: [hosts]`                       | **backend only** — the Deno `--allow-net` hosts (plus Aperture's own API host) | "Connect over the internet to \<hosts> — it can send your data there" |
-| `storage: true`                          | a private, quota'd key-value namespace                                         | "Keep its own settings in a private folder"                 |
+| `cameras: "all"` \| `[ids]`              | per-camera grants (opt-in — see below), composed as **owner ∩ grants**        | one honest camera line + a picker at consent                |
+| `network: [hosts]`                       | the Deno `--allow-net` hosts for a backend **and** the host-mediated `net.fetch` hosts for a panel (plus Aperture's own API host) | "Connect over the internet to \<hosts> — it can send your data there" |
+| `storage: true`                          | a private, quota'd key-value namespace (also implied by `settings`)           | "Keep its own settings in a private folder"                 |
 
 The consent screen also always states, verbatim, what the extension **cannot** do:
 "It cannot read your recordings files, your database, or your passwords."
@@ -47,47 +47,71 @@ The consent screen also always states, verbatim, what the extension **cannot** d
 > `storage: true` permission (the extension's own private key-value store). They
 > are unrelated — you may want one, the other, both, or neither.
 
-## Camera grants
+## Camera access is opt-in
 
-`permissions.cameras` lists the camera ids the extension may touch. Effective reach
-is always **the owner's cameras ∩ the grant list**:
+Camera access is the primary privacy control, so it is **explicit**. Most extensions
+never touch a camera feed — a panel that adds a control to the camera view is just UI
+sitting there — and those get **no camera ceremony at all**: no picker, no camera line
+at consent, nothing.
 
-- **Omitted or empty** → requests all of the owner's cameras (for any camera-touching scope).
-- **Listed** → requests only those cameras.
+`permissions.cameras` is how an extension opts in:
 
-The manifest list is a **request, not a setting**: it is the *ceiling*. At install the
-consent screen shows the requested cameras as checkboxes (defaulting to the request),
-and **whoever installs the extension narrows the grant** — a broad request stays safe
-because the installer decides. The granted set (never wider than the request, and
-still `owner ∩ grant` at runtime) is what the token carries, and it is **editable
-afterwards from the extension's row** in the manager (re-minting the token; not a new
-permission, so no re-consent).
+- **Absent** → **no camera access.** The extension gets no camera data and no
+  camera-scoped UI. (An extension that declares a camera-touching `data` scope —
+  `cameras`, `events`, `coverage`, `segments`, `media` — but omits `cameras` is
+  rejected at install: say what you want.)
+- **`"all"`** → every camera, **including any added later** (future-inclusive). This
+  is a deliberate, explicit choice — distinct from ticking every current camera.
+- **`[ids]`** → exactly those cameras, as a *ceiling*.
 
-For a **UI panel** there is a second intersection: the panel is also capped by
-**the viewing user's** own camera ACL. So `aperture.cameras.list()` in a panel
-returns *this viewer ∩ this extension*, which can be fewer cameras than the
-manifest lists — and fewer for a restricted viewer than for an admin. That is
-correct behavior; see [security.md](security.md#per-viewer-authority).
+The request is a **default, not a setting**: at install the admin sees one honest line
+(scaled to what the extension can see — "watch your cameras' live video", "see your
+cameras and their events", or, for a control-only panel, "add its controls to your
+cameras' views") and a picker, and **narrows the grant**. For an `"all"` request the
+picker offers a clear choice between *all cameras (incl. future)* and *only the cameras
+I choose*. The grant is **editable afterwards from the extension's row** (re-minting the
+token; changing camera scope is the admin's decision, not a new permission, so it never
+re-prompts consent).
 
-## Network is backend-only
+**The grant gates UI presence, not just data.** A camera-detail panel granted only
+*Hallway* renders on Hallway and nowhere else; one decision controls both what the
+extension can read and where it appears. An empty grant (an `"all"` request, or a
+pure-UI panel that requested no cameras) renders everywhere. None of this appears in
+day-to-day use — no scope badges, no chips on the camera view; the decision happens at
+install or in the extension's settings, and after that the UI is just the UI.
 
-`permissions.network` is a list of absolute `http(s)` URLs. Only a **backend** may
-declare it — a UI-only panel cannot make outbound requests (its sandbox forbids all
-network of its own). At runtime the declared hosts become the backend's Deno
-`--allow-net` allowlist (Aperture injects its own API host too, so the SDK can
-reach it); every other host throws `NotCapable`.
+For a **UI panel** there is a second intersection: the panel is also capped by **the
+viewing user's** own camera ACL. So `aperture.cameras.list()` in a panel returns *this
+viewer ∩ this extension*, which can be fewer cameras than the manifest lists — and fewer
+for a restricted viewer than for an admin. That is correct; see
+[security.md](security.md#per-viewer-authority).
 
-This is the **only** way a backend reaches the outside world, and **it can send
-your data there.** Grant `network` only to extensions and hosts you trust.
+## Network
 
-## Storage
+`permissions.network` is a list of absolute `http(s)` URLs — the hosts an extension may
+reach. A **backend** reaches them via Deno `--allow-net`; a **UI panel** reaches them via
+host-mediated `aperture.net.fetch`, where the host performs the request server-side,
+bounded to these same declared hosts (Aperture injects its own API host too, so the SDK
+can reach it). Every other host is refused.
+
+This is the only way an extension reaches the outside world, and **it can send your data
+there.** For a panel using `net.fetch`, anyone who can use that panel can trigger a
+request to the declared host — with any secret the extension injects (see below). Grant
+`network` only to extensions and hosts you trust.
+
+## Storage and settings
 
 `storage: true` reserves a private, quota'd key-value namespace for the extension,
-isolated from other extensions and from Aperture's global settings. It grants no
-API scope and no shared access — just a small private place for the extension's own
-configuration. Reach it through `aperture.storage.get/set/delete/keys` on **both**
-transports (see the SDK reference); the namespace is destroyed when the extension is
-uninstalled.
+isolated from other extensions and from Aperture's global settings. Reach it through
+`aperture.storage.get/set/delete/keys` on **both** transports; the namespace is
+destroyed on uninstall.
+
+Declaring a **`settings`** schema (see [settings.md](settings.md)) **implies** `storage`
+— settings live in that same namespace — so you never write both. A field typed
+`secret` is **write-only**: its value is never returned to any client (not even an
+admin), only whether one is set. A panel authenticates to a declared host with a
+`{{secret:key}}` placeholder in `net.fetch`, which the host expands server-side, so the
+plaintext never enters the browser.
 
 ## Never grantable
 

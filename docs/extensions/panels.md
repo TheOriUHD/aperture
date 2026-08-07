@@ -64,6 +64,45 @@ window.aperture.resize(document.documentElement.scrollHeight);
 Design for a **narrow column** (panels are often docked in a sidebar or under a video),
 and let content wrap rather than assuming a wide viewport.
 
+## React to the camera on screen
+
+A `camera-detail` panel is mounted in the context of one camera. The host tells the
+panel which one through `window.aperture.cameraId` (null on a non-camera slot) — use it
+to make the panel about *what the viewer is looking at* rather than a static list:
+
+```js
+const id = window.aperture.cameraId;
+const cam = id ? await window.aperture.cameras.get(id) : null; // needs data.cameras: read
+```
+
+Where the panel appears is governed by the camera grant, not the panel: an extension
+granted only some cameras shows this panel on exactly those (see
+[permissions.md](permissions.md#camera-access-is-opt-in)). You do not filter by camera
+yourself — you just react to the id you are given.
+
+## Offer a real control (settings + host-mediated fetch)
+
+A panel is for *doing something*, not just displaying. Read the extension's own
+configuration from settings, and act on a declared host through `net.fetch` — the host
+performs the request server-side, so a **secret** setting can authenticate it without the
+panel ever seeing the value:
+
+```js
+const base = await window.aperture.settings.get("ha_url");      // non-secret config
+const r = await window.aperture.net.fetch(base + "/api/services/light/turn_on", {
+  method: "POST",
+  headers: { Authorization: "Bearer {{secret:ha_token}}" },      // expanded server-side
+  body: JSON.stringify({ entity_id: "light." + window.aperture.cameraId }),
+});
+// r = { status, body } from the upstream host
+```
+
+`{{secret:key}}` may appear in any header value or the body; it is replaced from the
+extension's own secret settings by the host, bounded to the declared network host. See
+[settings.md](settings.md) and [permissions.md](permissions.md#network). The bundled
+`ha-room-lights` example is exactly this: it reads the current camera, its name, and its
+configured light, and toggles that light in Home Assistant.
+
 ## Keep it self-contained
 
 Everything the panel needs — markup, CSS, JS — lives in the one HTML file (or files you

@@ -33,27 +33,30 @@ only; remove them in a real file.
   "icon": "ui/icon.png",               // optional: a PNG under ui/, <=256x256, shown in the store & manager
   "minApiVersion": "v1",               // refuse install if the server API is older
   "permissions": {                     // EVERYTHING an extension may do; deny-by-default
-    "data": { "cameras": "read", "events": "read" },   // maps to scopes cameras:read, events:read
-    "cameras": ["hallway", "front-door"],              // camera grants (owner ∩ grants); omit = all owner's cameras
-    "network": ["https://homeassistant.local:8123"],   // backend only → Deno --allow-net hosts
-    "storage": true                                    // its own private, namespaced key-value store
+    "data": { "cameras": "read" },                     // maps to the cameras:read scope
+    "cameras": "all",                                  // OPT-IN: "all" (incl. future) or [ids]; omit = no camera access
+    "network": ["https://homeassistant.local:8123"]    // reachable hosts (backend + panel net.fetch)
+    // storage is implied by `settings` below
   },
+  "settings": [                        // the extension's own settings form; implies storage
+    { "key": "ha_url",   "label": "Home Assistant URL", "type": "text",   "required": true, "default": "https://homeassistant.local:8123" },
+    { "key": "ha_token", "label": "Access token",       "type": "secret", "required": true },
+    { "key": "entity_template", "label": "Light entity", "type": "text",  "default": "light.{camera}" }
+  ],
   "ui": {
     "panels": [
-      { "slot": "camera-detail", "entry": "ui/panel.html", "title": "Room Lights" }
+      { "slot": "camera-detail", "entry": "ui/panel.html", "title": "Room lights" }
     ]
-  },
-  "backend": {
-    "entry": "backend/main.ts",
-    "denoVersion": "2"
   },
   "update": { "url": "https://example.com/ha-room-lights/manifest.json" }  // optional self-hosted update source
 }
 ```
 
 The canonical bundle in [`examples/ha-room-lights/`](../../examples/ha-room-lights/)
-is this manifest as strict JSON, without the optional `icon` (it ships no icon
-file).
+is this manifest as strict JSON, without the optional `icon` (it ships no icon file).
+It is UI-only — the panel reads the current camera, its configured light, and toggles
+it in Home Assistant using the `ha_token` **secret** via a `{{secret:ha_token}}`
+placeholder (see [settings.md](settings.md) and [panels.md](panels.md)).
 
 ## Fields
 
@@ -86,9 +89,10 @@ catalogue and consent wording in [permissions.md](permissions.md).
 | `permissions.data`    | object            | Map of `domain → "read"` / `"write"` (`media` also accepts `"live"`). See the domain table in [permissions.md](permissions.md#data-domains). |
 | `permissions.alarm`   | string            | Only `"arm"`.                                                                       |
 | `permissions.system`  | string            | Only `"read"`.                                                                      |
-| `permissions.cameras` | string[]          | Camera-id grants, composed as **owner ∩ grants**. Omitted or empty = all the owner's cameras. |
-| `permissions.network` | string[]          | Absolute `http(s)` URLs. **Backend only** — a UI-only extension may not declare it. |
-| `permissions.storage` | bool              | `true` reserves a private, quota'd key-value namespace for the extension.           |
+| `permissions.cameras` | `"all"` \| string[] | Camera access is **opt-in**: `"all"` (every camera, incl. future) or a list of ids (a ceiling); **omitted = no camera access**. Composed as **owner ∩ grants**. See [permissions.md](permissions.md#camera-access-is-opt-in). |
+| `permissions.network` | string[]          | Absolute `http(s)` URLs — the hosts a backend (Deno `--allow-net`) or a panel (`net.fetch`) may reach. |
+| `permissions.storage` | bool              | `true` reserves a private, quota'd key-value namespace. Also **implied by `settings`**. |
+| `settings`            | object[]          | The extension's own settings schema (implies `storage`). See [settings.md](settings.md). |
 
 ### ui
 
@@ -136,7 +140,11 @@ A manifest must pass all of these at install (each fails with a clear message):
 - Each **`permissions.data`** domain and level must be grantable (see
   [permissions.md](permissions.md)); un-grantable or misspelled permissions are
   rejected.
-- **`permissions.network`** requires a backend and must be absolute `http(s)` URLs.
+- **`permissions.network`** must be absolute `http(s)` URLs.
+- **`permissions.cameras`** must be `"all"` or a list of ids; a camera-touching `data`
+  scope (`cameras`/`events`/`coverage`/`segments`/`media`) without a `cameras` request is
+  rejected — camera access is opt-in and must be explicit.
+- **`settings`** keys must be unique `[a-z0-9._-]`; a `select` field must carry `options`.
 - **Backend source** must not contain remote imports (`http(s)://`, `file:`, or an
   absolute path outside the bundle) — rejected at install, not at runtime. Import
   only the bare `@aperture/sdk` specifier and relative files inside your own bundle

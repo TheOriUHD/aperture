@@ -40,6 +40,7 @@ Not every method exists on both transports. This table is the whole surface:
 
 | Method                          | Panel (`window.aperture`)   | Backend (`@aperture/sdk`) |
 | ------------------------------- | --------------------------- | ------------------------- |
+| `cameraId` (property)           | ✓ (current camera, or null) | —                         |
 | `request(method, path, body?)`  | ✓                           | ✓                         |
 | `cameras.list()`                | ✓                           | ✓                         |
 | `cameras.get(id)`               | ✓                           | ✓                         |
@@ -49,7 +50,9 @@ Not every method exists on both transports. This table is the whole surface:
 | `automations.list()`            | —                           | ✓                         |
 | `alarm.arm(armed)`              | —                           | ✓                         |
 | `on(type, handler, opts?)`      | —                           | ✓                         |
-| `http.fetch(input, init?)`      | —                           | ✓                         |
+| `http.fetch(input, init?)`      | —                           | ✓ (Deno --allow-net)      |
+| `net.fetch(url, init?)`         | ✓ (host-mediated)           | —                         |
+| `settings.get(key)` / `.all()`  | ✓ (non-secret values)       | via `storage.get`         |
 | `storage.get(key)`              | ✓                           | ✓                         |
 | `storage.set(key, value)`       | ✓                           | ✓                         |
 | `storage.delete(key)`           | ✓                           | ✓                         |
@@ -101,6 +104,33 @@ bounded by a per-extension quota. `get` resolves to `null` for a missing key.
 // Store a secret once (e.g. from the panel's settings form), read it in the backend.
 await aperture.storage.set("ha_token", "llt_xxx");
 const token = await aperture.storage.get("ha_token"); // string | null
+```
+
+> A key declared as a **`secret`** setting reads back as `null` from a **panel** (secrets
+> are write-only to clients) but returns its value to the **backend** (server-side). See
+> [settings.md](settings.md).
+
+### Panel-only: current camera, settings, host-mediated fetch
+
+**`aperture.cameraId`** — the camera the panel is mounted for (`camera-detail` slot), or
+`null` elsewhere. React to it rather than listing everything.
+
+**`aperture.settings.get(key)` / `aperture.settings.all()`** — the extension's own
+settings (the manifest `settings` schema). Returns **non-secret** values only.
+
+**`aperture.net.fetch(url, init?)`** — a request the host performs server-side to a host
+declared in `permissions.network`. A header value or the body may contain a
+`{{secret:key}}` placeholder, expanded from the extension's secret settings server-side —
+so a secret authenticates the call without ever entering the panel. Resolves to the
+upstream `{ status, body }`.
+
+```ts
+const base = await window.aperture.settings.get("ha_url");
+const r = await window.aperture.net.fetch(base + "/api/services/light/turn_on", {
+  method: "POST",
+  headers: { Authorization: "Bearer {{secret:ha_token}}" },
+  body: JSON.stringify({ entity_id: "light." + window.aperture.cameraId }),
+});
 ```
 
 ### Backend-only methods

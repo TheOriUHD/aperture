@@ -2,23 +2,45 @@
   "manifest": 1,
   "id": "com.example.ha-room-lights",
   "name": "Home Assistant Room Lights",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "author": "Jane Doe",
-  "description": "Adds a camera-view panel and turns on the room's Home Assistant lights while you watch.",
+  "description": "Adds a light control to the camera view — toggle that camera's room lights in Home Assistant while you watch.",
   "minApiVersion": "v1",
   "permissions": {
-    "data": { "cameras": "read", "events": "read" },
-    "network": ["https://homeassistant.local:8123"],
-    "storage": true
+    "data": { "cameras": "read" },
+    "cameras": "all",
+    "network": ["https://homeassistant.local:8123"]
   },
+  "settings": [
+    {
+      "key": "ha_url",
+      "label": "Home Assistant URL",
+      "type": "text",
+      "required": true,
+      "default": "https://homeassistant.local:8123",
+      "placeholder": "https://homeassistant.local:8123",
+      "help": "Must match the network host this extension was granted (homeassistant.local:8123)."
+    },
+    {
+      "key": "ha_token",
+      "label": "Long-lived access token",
+      "type": "secret",
+      "required": true,
+      "help": "Home Assistant → your profile → Long-lived access tokens. Stored privately and never shown again."
+    },
+    {
+      "key": "entity_template",
+      "label": "Light entity",
+      "type": "text",
+      "default": "light.{camera}",
+      "placeholder": "light.{camera}",
+      "help": "The light to control. {camera} is replaced by the camera id — e.g. light.{camera}, or a fixed entity like light.hallway."
+    }
+  ],
   "ui": {
     "panels": [
-      { "slot": "camera-detail", "entry": "ui/panel.html", "title": "Room Lights" }
+      { "slot": "camera-detail", "entry": "ui/panel.html", "title": "Room lights" }
     ]
-  },
-  "backend": {
-    "entry": "backend/main.ts",
-    "denoVersion": "2"
   },
   "update": { "url": "https://example.com/ha-room-lights/manifest.json" }
 }

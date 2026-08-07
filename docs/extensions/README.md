@@ -81,8 +81,11 @@ uninstalling deletes its files and its stored data.
 - **[permissions.md](permissions.md)** — the permission catalogue: what each grants
   and how it reads on the consent screen.
 - **[sdk.md](sdk.md)** — the `@aperture/sdk` surface for panels and backends.
+- **[settings.md](settings.md)** — declaring an extension's own settings form, with
+  write-only secrets.
 - **[panels.md](panels.md)** — designing UI panels so they read as part of the app
-  (a panel can't inherit the host stylesheet).
+  (a panel can't inherit the host stylesheet), react to the current camera, and offer
+  real controls.
 - **[security.md](security.md)** — the sandbox model in plain language: what it
   stops, what it does not.
 - **[examples/ha-room-lights](../../examples/ha-room-lights/)** — the canonical
