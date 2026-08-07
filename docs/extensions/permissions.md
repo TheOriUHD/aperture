@@ -52,8 +52,16 @@ The consent screen also always states, verbatim, what the extension **cannot** d
 `permissions.cameras` lists the camera ids the extension may touch. Effective reach
 is always **the owner's cameras ∩ the grant list**:
 
-- **Omitted or empty** → all of the owner's cameras (for any camera-touching scope).
-- **Listed** → only those cameras, and only the ones the owner can actually see.
+- **Omitted or empty** → requests all of the owner's cameras (for any camera-touching scope).
+- **Listed** → requests only those cameras.
+
+The manifest list is a **request, not a setting**: it is the *ceiling*. At install the
+consent screen shows the requested cameras as checkboxes (defaulting to the request),
+and **whoever installs the extension narrows the grant** — a broad request stays safe
+because the installer decides. The granted set (never wider than the request, and
+still `owner ∩ grant` at runtime) is what the token carries, and it is **editable
+afterwards from the extension's row** in the manager (re-minting the token; not a new
+permission, so no re-consent).
 
 For a **UI panel** there is a second intersection: the panel is also capped by
 **the viewing user's** own camera ACL. So `aperture.cameras.list()` in a panel

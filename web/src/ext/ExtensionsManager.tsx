@@ -96,13 +96,13 @@ export function ExtensionsManager() {
     }
   }
 
-  async function onConfirm() {
+  async function onConfirm(cameras: string[] | null | undefined) {
     if (!staged) return;
     setConfirmBusy(true);
     setStageErr(undefined);
     try {
       if (staged.mode === "install") {
-        await confirmInstall(staged.view.stagingId);
+        await confirmInstall(staged.view.stagingId, cameras);
         invalidate();
       } else {
         await actions.applyUpdate.mutateAsync({ id: staged.targetId!, stagingId: staged.view.stagingId, consented: true });

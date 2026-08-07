@@ -1,13 +1,14 @@
-import { Puzzle, AlertTriangle, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Puzzle, AlertTriangle, ShieldCheck, Cctv } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
 import { PermissionList } from "./PermissionList";
+import { CameraGrantList, useCameraChoices, grantsToSend, initialSelection } from "./CameraGrants";
 import type { StageView } from "./types";
 
-// The consent decision, as a modal over the manager (a decision moment, not a
-// destination). Identity on top; permissions in plain language, weighted so the
-// consequential grants stand out; the sideload warning is unmissable for non-store
-// installs; the buttons are weighted honestly — Install is primary, Cancel is a
-// plain readable choice, neither styled to nudge.
+// The consent decision, as a modal over the manager. Identity on top; permissions in
+// plain language, weighted so the consequential grants stand out; camera scope is the
+// user's to narrow here (the manifest is a request, not a setting); the sideload
+// warning is unmissable for non-store installs; the buttons are weighted honestly.
 
 export function ConsentModal({
   stage,
@@ -21,11 +22,27 @@ export function ConsentModal({
   busy?: boolean;
   error?: string;
   mode?: "install" | "update";
-  onConfirm: () => void;
+  onConfirm: (cameras: string[] | null | undefined) => void;
   onCancel: () => void;
 }) {
   const open = !!stage;
   const store = stage?.source === "store";
+
+  const { choices, requestAll } = useCameraChoices(stage?.requestsCameras ?? false, stage?.requestedCameras ?? []);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Default to what the manifest requested (all choices checked) each time a fresh
+  // bundle is staged or its cameras resolve.
+  useEffect(() => {
+    setSelected(initialSelection(choices, null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage?.stagingId, choices.length]);
+
+  // Narrowing happens at install; an update preserves the user's existing grants
+  // (editable from the row), so the picker doesn't appear on the update re-consent.
+  const needsCamera = !!stage?.requestsCameras && mode === "install";
+  const canConfirm = !needsCamera || selected.size > 0;
+  const cameras = needsCamera ? grantsToSend(selected, choices, requestAll) : undefined;
+
   return (
     <Modal
       open={open}
@@ -36,7 +53,7 @@ export function ConsentModal({
           <button className="btn-ghost" onClick={onCancel} disabled={busy}>
             Cancel
           </button>
-          <button className="btn-primary" onClick={onConfirm} disabled={busy}>
+          <button className="btn-primary" onClick={() => onConfirm(cameras)} disabled={busy || !canConfirm}>
             {busy ? (mode === "update" ? "Updating…" : "Installing…") : mode === "update" ? "Update" : "Install"}
           </button>
         </>
@@ -83,6 +100,25 @@ export function ConsentModal({
             </p>
             <PermissionList lines={stage.consent} />
           </div>
+
+          {needsCamera && (
+            <div className="rounded-lg border border-line bg-ink-900/40 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <Cctv className="h-4 w-4 text-fg-muted" />
+                <div>
+                  <p className="text-sm text-fg">Cameras</p>
+                  <p className="text-[11px] text-fg-faint">
+                    You decide which cameras this extension can see — the request is a default, not a rule.
+                  </p>
+                </div>
+              </div>
+              {choices.length === 0 ? (
+                <p className="text-xs text-fg-faint">No cameras are available to you to grant.</p>
+              ) : (
+                <CameraGrantList choices={choices} selected={selected} onChange={setSelected} />
+              )}
+            </div>
+          )}
 
           {error && <p className="text-sm text-rec">{error}</p>}
         </div>

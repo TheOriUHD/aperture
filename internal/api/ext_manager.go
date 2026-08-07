@@ -122,6 +122,47 @@ func (s *Server) handleExtNav(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleExtSetCameras re-scopes an installed extension's camera grants — the
+// installing user's decision, changeable at any time. It validates the selection
+// against the manifest ceiling, rewrites camera_grants, and re-mints the backend's
+// token so the change takes effect. It is not a new permission, so no re-consent.
+func (s *Server) handleExtSetCameras(w http.ResponseWriter, r *http.Request) {
+	ex, err := s.st.GetExtension(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	var req struct {
+		Cameras *[]string `json:"cameras"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	m, err := ext.Parse([]byte(ex.ManifestJSON))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	d, err := m.Validate()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	grants, err := resolveCameraGrants(d, req.Cameras)
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "validation", err.Error())
+		return
+	}
+	if err := s.st.SetExtensionCameraGrants(ex.ID, grants); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	ex.CameraGrants = grants
+	s.spawnIfBackend(ex) // re-mint with the new grants (no-op for UI-only / disabled)
+	writeJSON(w, http.StatusOK, s.extView(ex))
+}
+
 func manifestHasNavPanel(manifestJSON string) bool {
 	m, err := ext.Parse([]byte(manifestJSON))
 	if err != nil {
@@ -370,7 +411,7 @@ func (s *Server) handleExtUpdateApply(w http.ResponseWriter, r *http.Request) {
 	_ = os.Chmod(dest, 0o700)
 
 	ex.Name, ex.Version, ex.UpdateURL, ex.ManifestJSON = m.Name, m.Version, updateURL(m), string(raw)
-	ex.Scopes, ex.CameraGrants = d.Scopes, d.CameraGrants
+	ex.Scopes = d.Scopes // keep the user's camera grants: their choice persists across update/revert
 	if err := s.st.UpdateExtension(ex); err != nil {
 		s.log.Error("update: persist row", "id", ex.ID, "err", err)
 	}
@@ -425,7 +466,7 @@ func (s *Server) handleExtRevert(w http.ResponseWriter, r *http.Request) {
 	_ = os.Chmod(dest, 0o700)
 
 	ex.Name, ex.Version, ex.UpdateURL, ex.ManifestJSON = m.Name, m.Version, updateURL(m), string(raw)
-	ex.Scopes, ex.CameraGrants = d.Scopes, d.CameraGrants
+	ex.Scopes = d.Scopes // keep the user's camera grants: their choice persists across update/revert
 	if err := s.st.UpdateExtension(ex); err != nil {
 		s.log.Error("revert: persist row", "id", ex.ID, "err", err)
 	}
@@ -595,6 +636,7 @@ func stageConsentView(stagingID string, m *ext.Manifest, d ext.Derived, source s
 		"stagingId": stagingID, "id": m.ID, "name": m.Name, "version": m.Version,
 		"author": m.Author, "description": m.Description, "source": source,
 		"hasBackend": d.HasBackend, "hasUI": d.HasUI, "consent": d.ConsentLines,
+		"requestsCameras": d.RequestsCameras, "requestedCameras": d.CameraGrants, // ceiling; [] = all
 	}
 }
 
@@ -616,15 +658,11 @@ func (s *Server) clearStageSource(id string) { _ = os.Remove(s.stageSourcePath(i
 // permsExpanded reports whether a staged/updated manifest asks for any scope,
 // camera, or network host the installed extension was not already granted.
 func permsExpanded(d ext.Derived, ex *store.Extension) bool {
-	if !subset(d.Scopes, ex.Scopes) {
-		return true
-	}
-	// Empty camera grants = "all owner cameras". Widening from a specific set to
-	// all cameras, or adding ids to a scoped set, is an expansion; narrowing is not.
-	if len(ex.CameraGrants) > 0 && (len(d.CameraGrants) == 0 || !subset(d.CameraGrants, ex.CameraGrants)) {
-		return true
-	}
-	return false
+	// Camera scope is deliberately NOT part of this check: it is the installing
+	// user's decision, not a permission the author can widen, so a change to it
+	// never forces re-consent (the user set it and can re-edit it any time). Only a
+	// genuinely new API scope does.
+	return !subset(d.Scopes, ex.Scopes)
 }
 
 func subset(a, b []string) bool {

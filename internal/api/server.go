@@ -219,6 +219,7 @@ func (s *Server) routes() http.Handler {
 		g.Get("/ext/{id}/logs", adminSessionOnly, s.handleExtLogs)
 		g.Post("/ext/{id}/pin", adminSessionOnly, s.handleExtPin)
 		g.Delete("/ext/{id}/pin", adminSessionOnly, s.handleExtUnpin)
+		g.Put("/ext/{id}/cameras", adminSessionOnly, s.handleExtSetCameras) // re-scope grants (no re-consent)
 		g.Get("/ext/{id}/update", adminSessionOnly, s.handleExtUpdateCheck)
 		g.Post("/ext/{id}/update", adminSessionOnly, s.handleExtUpdateApply)
 		g.Post("/ext/{id}/revert", adminSessionOnly, s.handleExtRevert)

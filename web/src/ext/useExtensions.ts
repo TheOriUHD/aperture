@@ -43,6 +43,11 @@ export function useExtActions() {
     pin: useMutation({ mutationFn: (id: string) => api.post(`/api/ext/${id}/pin`), ...opts }),
     unpin: useMutation({ mutationFn: (id: string) => api.del(`/api/ext/${id}/pin`), ...opts }),
     revert: useMutation({ mutationFn: (id: string) => api.post(`/api/ext/${id}/revert`), ...opts }),
+    setCameras: useMutation({
+      mutationFn: (v: { id: string; cameras: string[] | null }) =>
+        api.put(`/api/ext/${v.id}/cameras`, { cameras: v.cameras }),
+      ...opts,
+    }),
     applyUpdate: useMutation({
       mutationFn: (v: { id: string; stagingId: string; consented: boolean }) =>
         api.post(`/api/ext/${v.id}/update`, { stagingId: v.stagingId, consented: v.consented }),
@@ -62,8 +67,10 @@ export function stageUrl(url: string) {
 export function stageStore(id: string) {
   return api.post<StageView>("/api/ext/store/install", { id });
 }
-export function confirmInstall(stagingId: string) {
-  return api.post<ExtItem>("/api/ext/install/confirm", { stagingId });
+export function confirmInstall(stagingId: string, cameras?: string[] | null) {
+  // cameras: an explicit id list = grant exactly those; null/undefined = as the
+  // manifest requested (all, or its list). The server validates against the ceiling.
+  return api.post<ExtItem>("/api/ext/install/confirm", { stagingId, cameras });
 }
 
 export function checkUpdate(id: string) {

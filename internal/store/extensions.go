@@ -92,6 +92,15 @@ func (s *Store) SetExtensionPinned(id string, pinned bool) error {
 		boolInt(pinned), time.Now().UnixMilli(), id))
 }
 
+// SetExtensionCameraGrants replaces the camera allowlist the extension's token (and
+// UI broker claim) are scoped to. The installing user narrows this at consent and
+// can re-edit it later; empty means "all the owner's cameras". Changing it re-mints
+// the token but is not a new permission, so it needs no re-consent.
+func (s *Store) SetExtensionCameraGrants(id string, grants []string) error {
+	return affected(s.db.Exec(`UPDATE extensions SET camera_grants = ?, updated_at = ? WHERE id = ?`,
+		csvJoin(grants), time.Now().UnixMilli(), id))
+}
+
 // SetExtensionModified records whether the on-disk files diverge from the installed
 // bundle (set true when edited in-app, cleared on a clean update/reinstall) (T2.3).
 func (s *Store) SetExtensionModified(id string, modified bool) error {

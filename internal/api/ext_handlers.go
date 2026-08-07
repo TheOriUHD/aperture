@@ -115,7 +115,8 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		StagingID string `json:"stagingId"`
+		StagingID string    `json:"stagingId"`
+		Cameras   *[]string `json:"cameras"` // the user's consent-time camera choice
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
@@ -129,6 +130,13 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 	m, d, raw, err := loadStagedManifest(dir)
 	if err != nil {
 		writeErrorCode(w, http.StatusBadRequest, "validation", "staged bundle not found or invalid")
+		return
+	}
+	// The manifest's camera list is the ceiling; the user's selection (if any)
+	// narrows it. Reject an out-of-request or empty selection before touching disk.
+	grants, err := resolveCameraGrants(d, req.Cameras)
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "validation", err.Error())
 		return
 	}
 	if _, e := s.st.GetExtension(m.ID); e == nil {
@@ -169,7 +177,7 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 	ex := &store.Extension{
 		ID: m.ID, Name: m.Name, Version: m.Version, Source: source,
 		UpdateURL: updateURL(m), ManifestJSON: string(raw),
-		Scopes: d.Scopes, CameraGrants: d.CameraGrants,
+		Scopes: d.Scopes, CameraGrants: grants,
 		Enabled: true, ExtUID: uid, InstalledBy: installedBy,
 	}
 	if err := s.st.CreateExtension(ex); err != nil {
@@ -341,6 +349,7 @@ func (s *Server) extView(ex *store.Extension) map[string]any {
 		"pinned": ex.Pinned, "modified": ex.Modified,
 		"hasBackend": false, "hasUI": false, "canPin": false,
 		"consent": []string{}, "updatable": ex.UpdateURL != "",
+		"requestsCameras": false, "requestedCameras": []string{},
 	}
 	// Parse the stored manifest for the human-facing bits the manager renders
 	// (author, plain-language permissions, whether it can be pinned, its icon).
@@ -352,6 +361,8 @@ func (s *Server) extView(ex *store.Extension) map[string]any {
 			v["hasUI"] = d.HasUI
 			v["canPin"] = d.HasNavPanel // only a full-page view earns rail space
 			v["consent"] = d.ConsentLines
+			v["requestsCameras"] = d.RequestsCameras
+			v["requestedCameras"] = d.CameraGrants // the manifest ceiling ([] = all)
 			if d.Icon != "" {
 				v["icon"] = "/ext/" + ex.ID + "/" + d.Icon // served as <img>, CSP'd
 			}
@@ -395,6 +406,37 @@ func updateURL(m *ext.Manifest) string {
 		return m.Update.URL
 	}
 	return ""
+}
+
+// resolveCameraGrants turns a user's camera selection (at consent or when editing)
+// into the camera_grants to store, bounded by what the manifest requested. sel==nil
+// means "as requested" — the manifest's list, or all if it requested all (the
+// non-UI/default path). A non-empty sel is the explicit chosen subset. An empty
+// non-nil sel is rejected for a camera-requesting extension, because empty grants
+// mean ALL cameras — the opposite of the user's intent. A specific manifest request
+// is a ceiling: the selection may only narrow it, never widen it.
+func resolveCameraGrants(d ext.Derived, sel *[]string) ([]string, error) {
+	if sel == nil {
+		return d.CameraGrants, nil
+	}
+	if len(*sel) == 0 {
+		if d.RequestsCameras {
+			return nil, errors.New("select at least one camera to grant")
+		}
+		return d.CameraGrants, nil
+	}
+	if len(d.CameraGrants) > 0 { // a specific request is the ceiling
+		req := make(map[string]bool, len(d.CameraGrants))
+		for _, c := range d.CameraGrants {
+			req[c] = true
+		}
+		for _, c := range *sel {
+			if !req[c] {
+				return nil, fmt.Errorf("camera %q was not requested by this extension", c)
+			}
+		}
+	}
+	return append([]string(nil), (*sel)...), nil
 }
 
 func loadStagedManifest(dir string) (*ext.Manifest, ext.Derived, []byte, error) {

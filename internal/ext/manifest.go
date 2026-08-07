@@ -80,10 +80,11 @@ type Derived struct {
 	CameraGrants []string // camera ids
 	NetHosts     []string // host[:port] for Deno --allow-net (backend)
 	ConsentLines []string // plain-language lines for the consent screen
-	HasBackend   bool
-	HasUI        bool
-	HasNavPanel  bool   // declares a full-page nav-panel view → eligible to be pinned (T2.1)
-	Icon         string // validated bundle-relative icon path (under ui/, .png), or ""
+	HasBackend      bool
+	HasUI           bool
+	HasNavPanel     bool   // declares a full-page nav-panel view → eligible to be pinned (T2.1)
+	Icon            string // validated bundle-relative icon path (under ui/, .png), or ""
+	RequestsCameras bool   // has a camera-touching scope → the consent screen offers camera narrowing
 }
 
 const ManifestVersion = 1
@@ -229,8 +230,10 @@ func (m *Manifest) Validate() (Derived, error) {
 		scopes["system:read"] = true
 	}
 	d.Scopes = sortedKeys(scopes)
+	d.RequestsCameras = touchesCameras(d.Scopes)
 
-	// Camera grants.
+	// Camera grants. The manifest's list is a REQUEST — a ceiling the installing
+	// user narrows at consent — not a fixed setting; empty means "all your cameras".
 	for _, c := range m.Permissions.Cameras {
 		if strings.TrimSpace(c) == "" {
 			return d, fmt.Errorf("permissions.cameras: empty camera id")

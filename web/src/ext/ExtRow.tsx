@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, FileCode2, Trash2, RotateCcw, ArrowUpCircle, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { Switch } from "../components/ui/Switch";
 import { ExtIcon } from "./ExtIcon";
 import { PermissionList } from "./PermissionList";
+import { CameraGrantList, useCameraChoices, grantsToSend, initialSelection } from "./CameraGrants";
 import type { ExtItem, UpdateInfo } from "./types";
 import { useExtActions } from "./useExtensions";
 
@@ -134,6 +135,8 @@ export function ExtRow({
             <PermissionList lines={ext.consent} />
           </div>
 
+          {ext.requestsCameras && <CameraEdit ext={ext} actions={actions} />}
+
           {ext.canPin && (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-ink-900/40 px-3 py-2.5">
               <div className="min-w-0">
@@ -174,6 +177,51 @@ export function ExtRow({
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// CameraEdit re-scopes an installed extension's cameras from its row. The manifest
+// request is the ceiling; the user narrows within it. Saving re-mints the token (no
+// re-consent — camera scope is the user's decision, not a new permission).
+function CameraEdit({ ext, actions }: { ext: ExtItem; actions: Actions }) {
+  const { choices } = useCameraChoices(ext.requestsCameras, ext.requestedCameras);
+  const requestAll = ext.requestsCameras && ext.requestedCameras.length === 0;
+  const grantsKey = ext.cameraGrants.join(",");
+  const [selected, setSelected] = useState<Set<string>>(() => initialSelection(choices, ext.cameraGrants));
+  useEffect(() => {
+    setSelected(initialSelection(choices, ext.cameraGrants));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choices.length, ext.id, grantsKey]);
+
+  const toSend = grantsToSend(selected, choices, requestAll);
+  const currentIsAll = ext.cameraGrants.length === 0;
+  const dirty =
+    toSend === null
+      ? !currentIsAll
+      : currentIsAll || [...toSend].sort().join(",") !== [...ext.cameraGrants].sort().join(",");
+  const canSave = selected.size > 0 && dirty;
+
+  return (
+    <div className="rounded-lg border border-line bg-ink-900/40 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm text-fg">Cameras</p>
+          <p className="text-[11px] text-fg-faint">Which cameras this extension can see. Changing it re-scopes the extension — no re-consent.</p>
+        </div>
+        <button
+          className="btn-subtle h-8 shrink-0"
+          disabled={!canSave || actions.setCameras.isPending}
+          onClick={() => actions.setCameras.mutate({ id: ext.id, cameras: toSend })}
+        >
+          {actions.setCameras.isPending ? "Saving…" : "Save"}
+        </button>
+      </div>
+      {choices.length === 0 ? (
+        <p className="text-xs text-fg-faint">No cameras are available to you to grant.</p>
+      ) : (
+        <CameraGrantList choices={choices} selected={selected} onChange={setSelected} />
       )}
     </div>
   );

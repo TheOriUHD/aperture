@@ -18,6 +18,8 @@ export interface ExtItem {
   scopes: string[];
   cameraGrants: string[];
   consent: string[];
+  requestsCameras: boolean;
+  requestedCameras: string[]; // the manifest ceiling; [] = all
   hasBackend: boolean;
   hasUI: boolean;
   canPin: boolean;
@@ -42,6 +44,8 @@ export interface StageView {
   hasBackend: boolean;
   hasUI: boolean;
   consent: string[];
+  requestsCameras: boolean;
+  requestedCameras: string[]; // the manifest ceiling; [] = all
 }
 
 export interface StoreView {
