@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, uploadFile } from "../lib/api";
-import type { ExtItem, StageView, StoreView, UpdateInfo } from "./types";
+import type { ExtItem, SettingsView, StageView, StoreView, UpdateInfo } from "./types";
 
 // The extension manager's data layer. Every mutation that can change what renders
 // elsewhere (panels, the rail) invalidates those queries too, so the Dashboard
@@ -54,6 +54,31 @@ export function useExtActions() {
       ...opts,
     }),
   };
+}
+
+/** An extension's settings: the schema + current non-secret values + which secrets
+ * are set. Loaded lazily (when a row is expanded). */
+export function useExtSettings(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["ext-settings", id],
+    queryFn: () => api.get<SettingsView>(`/api/ext/${id}/settings`),
+    enabled,
+  });
+}
+
+/** Save an extension's settings. The server validates against the schema and
+ * restarts the backend so it re-reads them, so this also refreshes the row (state)
+ * and the settings query. */
+export function useSaveExtSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; values: Record<string, unknown> }) =>
+      api.put<SettingsView>(`/api/ext/${v.id}/settings`, { values: v.values }),
+    onSuccess: (_data, v) => {
+      qc.invalidateQueries({ queryKey: ["ext-settings", v.id] });
+      qc.invalidateQueries({ queryKey: ["ext"] });
+    },
+  });
 }
 
 /** Staging (never touches the cache until confirm): upload a file, fetch a URL,

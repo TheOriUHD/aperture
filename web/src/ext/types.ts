@@ -20,6 +20,9 @@ export interface ExtItem {
   consent: string[];
   requestsCameras: boolean;
   requestedCameras: string[]; // the manifest ceiling; [] = all
+  requestsAll: boolean; // requested "all" (future-inclusive) vs a specific list
+  cameraConsent: string; // honest one-liner for the camera section ("" when no request)
+  hasSettings: boolean; // has a settings schema → the row shows a settings form
   hasBackend: boolean;
   hasUI: boolean;
   canPin: boolean;
@@ -30,6 +33,26 @@ export interface ExtItem {
   reason?: string; // failure reason when state === "failed"
   installedAt: number;
   updatedAt: number;
+}
+
+// One field of an extension's settings schema (mirrors ext.SettingField).
+export type SettingType = "text" | "secret" | "number" | "boolean" | "select";
+export interface SettingField {
+  key: string;
+  label: string;
+  type: SettingType;
+  help?: string;
+  placeholder?: string;
+  required?: boolean;
+  default?: unknown;
+  options?: { value: string; label: string }[];
+}
+
+// GET /ext/{id}/settings — schema + current NON-secret values + which secrets are set.
+export interface SettingsView {
+  schema: SettingField[];
+  values: Record<string, string>;
+  secretSet: Record<string, boolean>;
 }
 
 /** Consent metadata returned by a stage step (install/url/store), pre-commit. */
@@ -46,6 +69,9 @@ export interface StageView {
   consent: string[];
   requestsCameras: boolean;
   requestedCameras: string[]; // the manifest ceiling; [] = all
+  requestsAll: boolean;
+  cameraConsent: string; // honest one-liner shown in the consent camera section
+  hasSettings: boolean; // configured after install, from the extension's row
 }
 
 export interface StoreView {

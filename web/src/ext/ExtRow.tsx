@@ -7,6 +7,7 @@ import { Switch } from "../components/ui/Switch";
 import { ExtIcon } from "./ExtIcon";
 import { PermissionList } from "./PermissionList";
 import { CameraGrantControl, initialGrantValue } from "./CameraGrants";
+import { ExtSettingsForm } from "./ExtSettingsForm";
 import type { ExtItem, UpdateInfo } from "./types";
 import { useExtActions } from "./useExtensions";
 
@@ -134,6 +135,8 @@ export function ExtRow({
             <p className="label">Permissions</p>
             <PermissionList lines={ext.consent} />
           </div>
+
+          {ext.hasSettings && <ExtSettingsForm ext={ext} />}
 
           {ext.requestsCameras && <CameraEdit ext={ext} actions={actions} />}
 

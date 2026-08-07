@@ -9,6 +9,15 @@ vi.mock("../lib/api", () => ({
     get: vi.fn(async (path: string) => {
       if (path === "/api/cameras") return [{ id: "a", name: "Cam A" }, { id: "b", name: "Cam B" }];
       if (path.endsWith("/logs")) return { lines: [] };
+      if (path.endsWith("/settings"))
+        return {
+          schema: [
+            { key: "url", label: "URL", type: "text", required: true },
+            { key: "token", label: "Token", type: "secret", required: true },
+          ],
+          values: { url: "https://ha.local" },
+          secretSet: { token: true },
+        };
       return [];
     }),
     post: vi.fn(async () => ({})),
@@ -40,6 +49,9 @@ function makeExt(over: Partial<ExtItem> = {}): ExtItem {
     consent: ["It cannot read your recordings files, your database, or your passwords."],
     requestsCameras: false,
     requestedCameras: [],
+    requestsAll: false,
+    cameraConsent: "",
+    hasSettings: false,
     hasBackend: false,
     hasUI: true,
     canPin: false,
@@ -105,6 +117,17 @@ describe("ExtRow render", () => {
     renderRow(makeExt({ requestsCameras: true, requestedCameras: ["a"], cameraGrants: ["a"] }));
     expand();
     expect(screen.getByText("Cameras")).toBeTruthy();
+  });
+
+  it("renders the settings form and masks a set secret", async () => {
+    renderRow(makeExt({ hasSettings: true }));
+    expand();
+    // The form loads its schema; the secret shows a masked "set" placeholder and
+    // never its value.
+    expect(await screen.findByText("Settings")).toBeTruthy();
+    expect(await screen.findByDisplayValue("https://ha.local")).toBeTruthy();
+    const masked = await screen.findByPlaceholderText(/set \(leave blank to keep\)/);
+    expect((masked as HTMLInputElement).type).toBe("password");
   });
 
   // The safety net: even an unforeseen render throw in one row shows the fallback

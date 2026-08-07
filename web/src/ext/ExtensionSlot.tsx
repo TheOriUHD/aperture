@@ -8,7 +8,9 @@ import { useExtPanels } from "./useExtPanels";
 // that keeps every host surface identical with zero extensions installed.
 export function ExtensionSlot({ slot, cameraId }: { slot: string; cameraId?: string }) {
   const { data: panels = [] } = useExtPanels();
-  const forSlot = panelsForSlot(panels, slot);
+  // For camera-detail, the panel's camera grant also gates its PRESENCE: a panel
+  // granted only some cameras renders on exactly those and nowhere else.
+  const forSlot = panelsForSlot(panels, slot, cameraId);
   if (forSlot.length === 0) return null;
   return (
     <>
@@ -75,6 +77,26 @@ export function ExtensionPanel({ panel, cameraId }: { panel: ExtPanel; cameraId?
             break;
           case "storage.keys":
             reply((await api.get<{ keys: string[] }>(kv)).keys);
+            break;
+          case "settings.get": {
+            const sv = await api.get<{ values: Record<string, string> }>(`/api/ext/${panel.extId}/settings`);
+            reply(sv.values[String(p.key ?? "")] ?? null); // non-secret only; secrets are never returned
+            break;
+          }
+          case "settings.all":
+            reply((await api.get<{ values: Record<string, string> }>(`/api/ext/${panel.extId}/settings`)).values);
+            break;
+          case "net.fetch":
+            // Host-mediated egress to a declared host; {{secret:key}} placeholders are
+            // expanded server-side, so a secret never travels through this bridge.
+            reply(
+              await api.post(`/api/ext/${panel.extId}/fetch`, {
+                url: p.url,
+                method: p.method,
+                headers: p.headers,
+                body: p.body,
+              }),
+            );
             break;
         }
       } catch (err) {

@@ -15,6 +15,9 @@
 // show less to a one-camera viewer than to an admin, and that is correct, not a bug.
 
 export interface UiAperture {
+  /** The camera whose view this panel is mounted in (from the host), or null on a
+   * non-camera slot. Use it to make a camera-detail panel react to what's on screen. */
+  readonly cameraId: string | null;
   /** Raw call to any v1 endpoint the extension is scoped for. `path` is relative to
    * /api/v1 (e.g. "/cameras", "/events?limit=20"). Rejects with an Error carrying the
    * broker's message on a non-2xx reply (e.g. 403 when out of scope/camera). */
@@ -30,12 +33,29 @@ export interface UiAperture {
   };
   /** Private per-extension key/value storage (the `storage` permission). Namespaced
    * to this extension and shared across the app; destroyed on uninstall. Values are
-   * strings — JSON-encode structured data yourself. */
+   * strings — JSON-encode structured data yourself. A key declared as a `secret`
+   * setting reads back as null here — secrets are write-only to a client. */
   storage: {
     get(key: string): Promise<string | null>;
     set(key: string, value: string): Promise<void>;
     delete(key: string): Promise<void>;
     keys(): Promise<string[]>;
+  };
+  /** The extension's own settings (the manifest `settings` schema), configured by an
+   * admin on the extension's row. `get` returns a NON-secret value (or null); secret
+   * values are never exposed to a panel — authenticate to a declared host with a
+   * {{secret:key}} placeholder in `net.fetch` instead. */
+  settings: {
+    get(key: string): Promise<string | null>;
+    all(): Promise<Record<string, string>>;
+  };
+  /** Host-mediated outbound request (the `network` permission). The host performs it
+   * server-side to a DECLARED host only. A header value or the body may contain a
+   * `{{secret:key}}` placeholder, expanded from the extension's own secret settings
+   * server-side — so a secret token authenticates the call without ever entering the
+   * panel. Resolves to the upstream `{ status, body }`. */
+  net: {
+    fetch(url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; body: string }>;
   };
   /** Ask the host to resize this panel's iframe to `height` px. The runtime already
    * calls this on content resize via a ResizeObserver; call it explicitly only to

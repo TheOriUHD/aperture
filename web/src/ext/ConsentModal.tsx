@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Puzzle, AlertTriangle, ShieldCheck, Cctv } from "lucide-react";
+import { Puzzle, AlertTriangle, ShieldCheck, Cctv, Settings2 } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
 import { PermissionList } from "./PermissionList";
 import { CameraGrantControl, initialGrantValue } from "./CameraGrants";
@@ -105,11 +105,11 @@ export function ConsentModal({
           {needsCamera && (
             <div className="rounded-lg border border-line bg-ink-900/40 p-3">
               <div className="mb-2 flex items-center gap-2">
-                <Cctv className="h-4 w-4 text-fg-muted" />
+                <Cctv className="h-4 w-4 shrink-0 text-fg-muted" />
                 <div>
-                  <p className="text-sm text-fg">Cameras</p>
+                  <p className="text-sm text-fg">{stage.cameraConsent || "Cameras"}</p>
                   <p className="text-[11px] text-fg-faint">
-                    You decide which cameras this extension can see — the request is a default, not a rule.
+                    You decide which cameras — the request is a default you can narrow now or from its settings later.
                   </p>
                 </div>
               </div>
@@ -120,6 +120,13 @@ export function ConsentModal({
                 onChange={setGrant}
               />
             </div>
+          )}
+
+          {stage.hasSettings && (
+            <p className="flex items-start gap-2 text-[11px] text-fg-faint">
+              <Settings2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              After installing, configure this extension from its row in Extensions before it can run.
+            </p>
           )}
 
           {error && <p className="text-sm text-rec">{error}</p>}

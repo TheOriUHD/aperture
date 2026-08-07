@@ -41,3 +41,23 @@ describe("panelsForSlot — the zero-extensions identity guarantee", () => {
     expect(panels).toEqual(before);
   });
 });
+
+describe("camera-detail — the grant gates panel presence", () => {
+  const all: ExtPanel = { extId: "all", extName: "All", slot: "camera-detail", entry: "ui/a.html", cameraGrants: [] };
+  const hallwayOnly: ExtPanel = { extId: "hall", extName: "Hall", slot: "camera-detail", entry: "ui/h.html", cameraGrants: ["hallway"] };
+  const panels = [all, hallwayOnly];
+
+  it("shows an empty-grant panel on every camera (all-request or pure UI)", () => {
+    expect(panelsForSlot(panels, "camera-detail", "hallway")).toContain(all);
+    expect(panelsForSlot(panels, "camera-detail", "garage")).toContain(all);
+  });
+
+  it("shows a specific-grant panel only on its granted cameras", () => {
+    expect(panelsForSlot(panels, "camera-detail", "hallway")).toContain(hallwayOnly);
+    expect(panelsForSlot(panels, "camera-detail", "garage")).not.toContain(hallwayOnly);
+  });
+
+  it("hides a specific-grant panel when there is no camera context", () => {
+    expect(panelsForSlot(panels, "camera-detail")).toEqual([all]);
+  });
+});
