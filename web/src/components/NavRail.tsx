@@ -7,8 +7,11 @@ import {
   Bell,
   Settings,
   Aperture,
+  Puzzle,
   type LucideIcon,
 } from "lucide-react";
+import { useExtPanels } from "../ext/useExtPanels";
+import { panelsForSlot } from "../ext/panels";
 
 interface NavItem {
   to: string;
@@ -27,6 +30,10 @@ const settingsItem: NavItem = { to: "/settings", tkey: "nav.settings", label: "S
 // Desktop: a vertical icon rail on the left. Hidden on mobile.
 export function NavRail() {
   const { t } = useTranslation();
+  // Extension nav entry: rendered only when a nav-panel extension is installed,
+  // so with zero extensions the rail is byte-identical to before (R3, append-only).
+  const { data: panels = [] } = useExtPanels();
+  const hasNavPanel = panelsForSlot(panels, "nav-panel").length > 0;
   return (
     <nav className="hidden lg:flex flex-col items-center gap-1.5 w-[54px] shrink-0 bg-ink-850 border-r border-line py-3">
       <Link
@@ -40,6 +47,9 @@ export function NavRail() {
       {items.map((item) => (
         <RailLink key={item.to} to={item.to} icon={item.icon} label={t(item.tkey, item.label)} />
       ))}
+      {hasNavPanel && (
+        <RailLink to="/extensions" icon={Puzzle} label={t("nav.extensions", "Extensions")} />
+      )}
       <div className="mt-auto">
         <RailLink to={settingsItem.to} icon={settingsItem.icon} label={t(settingsItem.tkey, settingsItem.label)} />
       </div>

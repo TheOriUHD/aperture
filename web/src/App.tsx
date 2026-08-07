@@ -12,6 +12,7 @@ import { Dashboard } from "./screens/Dashboard";
 import { Cameras } from "./screens/Cameras";
 import { Alarms } from "./screens/Alarms";
 import { Settings } from "./screens/Settings";
+import { ExtensionsPage } from "./ext/ExtensionsPage";
 import { Spinner } from "./components/ui/Spinner";
 
 // Playback pulls in hls.js; load it only when visited.
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="/recordings" element={<Navigate to="/playback" replace />} />
           <Route path="/alarms" element={<Alarms />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/extensions" element={<ExtensionsPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Suspense>

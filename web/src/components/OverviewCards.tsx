@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ExtensionSlot } from "../ext/ExtensionSlot";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
@@ -409,6 +410,7 @@ export function OverviewSidebar({ cameras }: { cameras: Camera[] }) {
       {showSpotlights && <SpotlightsCard />}
       <VideoArchivingCard cameras={cameras} />
       <RecentDetectionsCard cameras={cameras} />
+      <ExtensionSlot slot="dashboard-card" />
     </div>
   );
 }

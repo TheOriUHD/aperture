@@ -186,6 +186,32 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, s.extView(ex))
 }
 
+// handleExtPanels lists the UI panels of every ENABLED extension, for any
+// authenticated user (the web app renders them). Unlike GET /ext (admin-only
+// management), this exposes only what is needed to mount a panel: extension id +
+// name, slot, entry, title. Empty when the gate is off.
+func (s *Server) handleExtPanels(w http.ResponseWriter, r *http.Request) {
+	out := []map[string]any{}
+	if s.extEnabled() {
+		list, _ := s.st.ListExtensions()
+		for _, ex := range list {
+			if !ex.Enabled {
+				continue
+			}
+			m, err := ext.Parse([]byte(ex.ManifestJSON))
+			if err != nil || m.UI == nil {
+				continue
+			}
+			for _, p := range m.UI.Panels {
+				out = append(out, map[string]any{
+					"extId": ex.ID, "extName": ex.Name, "slot": p.Slot, "entry": p.Entry, "title": p.Title,
+				})
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleExtList(w http.ResponseWriter, r *http.Request) {
 	list, err := s.st.ListExtensions()
 	if err != nil {

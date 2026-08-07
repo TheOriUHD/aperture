@@ -185,6 +185,7 @@ func (s *Server) routes() http.Handler {
 		// the caller-session ∩ extension authority (T1.4); it is session-only (a
 		// backend extension uses its own Bearer token directly, not the broker).
 		g.Post("/ext/{id}/broker", authedSessionOnly, s.handleExtBroker)
+		g.Get("/ext/panels", authed, s.handleExtPanels) // any user: what UI panels to mount
 		// Management (admin, session-only): the gate, install (stage → confirm),
 		// list, enable/disable, uninstall (T1.5).
 		g.Post("/ext/gate", adminSessionOnly, s.handleExtGate)

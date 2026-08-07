@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { X, Maximize2, Camera as CameraIcon, Clapperboard } from "lucide-react";
 import { LiveVideo } from "./LiveVideo";
 import { LiveConditions } from "./ConditionsOverlay";
+import { ExtensionSlot } from "../ext/ExtensionSlot";
 import { fsVideoStyle, FullscreenChrome } from "./fullscreen";
 import { useScrollLock } from "../hooks/useScrollLock";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -75,6 +76,9 @@ export function CameraPopout({
           <LiveVideo camera={camera} fit="contain" fsStyle={mobileFs ? fsVideoStyle : undefined} />
           <LiveConditions variant="full" className="top-3 right-14" cameraId={camera.id} />
         </div>
+
+        {/* Extension camera-detail panels flow below the video (nothing when none). */}
+        <ExtensionSlot slot="camera-detail" cameraId={camera.id} />
 
         {/* Top overlay: subtle name pill + close */}
         <div className="absolute top-3 left-3 flex items-center gap-2 rounded-md bg-black/35 px-2.5 py-1 backdrop-blur-sm">

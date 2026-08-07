@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ExtensionSlot } from "../ext/ExtensionSlot";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, UserPlus, Shield, User as UserIcon } from "lucide-react";
@@ -132,6 +133,9 @@ export function Settings() {
             )}
 
             {active === "activity" && isAdmin && <AuditLog />}
+
+            {/* Extension-contributed settings panels (append-only; nothing when none). */}
+            <ExtensionSlot slot="settings" />
           </div>
         </div>
       </div>
