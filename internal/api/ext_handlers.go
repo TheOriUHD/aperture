@@ -115,8 +115,9 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		StagingID string    `json:"stagingId"`
-		Cameras   *[]string `json:"cameras"` // the user's consent-time camera choice
+		StagingID      string    `json:"stagingId"`
+		Cameras        *[]string `json:"cameras"`        // the user's consent-time camera choice (fresh install)
+		AllowDowngrade bool      `json:"allowDowngrade"` // explicit go-ahead for a lower version
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
@@ -132,17 +133,35 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "validation", "staged bundle not found or invalid")
 		return
 	}
-	// The manifest's camera list is the ceiling; the user's selection (if any)
-	// narrows it. Reject an out-of-request or empty selection before touching disk.
+
+	// Installing a bundle whose id is already installed is an UPDATE, not a conflict:
+	// the same stage → consent → confirm path, but the extension's stored data (ext_kv —
+	// its token, settings, mappings) and camera grant are PRESERVED, and the previous
+	// bundle is snapshotted for revert, exactly like a URL-based update. New permissions
+	// were shown on the update-mode consent screen the user just confirmed; a downgrade
+	// needs an explicit go-ahead. (The id matches by construction — we looked ex up by
+	// the bundle's own id — so there is no id-mismatch path here.)
+	if ex, e := s.st.GetExtension(m.ID); e == nil {
+		if semverNewer(ex.Version, m.Version) && !req.AllowDowngrade {
+			writeErrorCode(w, http.StatusConflict, "downgrade",
+				fmt.Sprintf("this is a downgrade from %s to %s — confirm to proceed", ex.Version, m.Version))
+			return
+		}
+		ex.Source = s.readStageSource(req.StagingID) // honest provenance for the swapped-in bundle
+		if err := s.applyBundleUpdate(ex, dir, m, d, raw); err != nil {
+			writeError(w, http.StatusInternalServerError, "update failed")
+			return
+		}
+		s.clearStageSource(req.StagingID)
+		writeJSON(w, http.StatusOK, s.extView(ex))
+		return
+	}
+
+	// Fresh install. The manifest's camera list is the ceiling; the user's selection
+	// (if any) narrows it. Reject an out-of-request or empty selection before touching disk.
 	grants, err := resolveCameraGrants(d, req.Cameras)
 	if err != nil {
 		writeErrorCode(w, http.StatusBadRequest, "validation", err.Error())
-		return
-	}
-	if _, e := s.st.GetExtension(m.ID); e == nil {
-		_ = os.RemoveAll(dir)
-		s.clearStageSource(req.StagingID)
-		writeErrorCode(w, http.StatusConflict, "conflict", "extension "+m.ID+" is already installed")
 		return
 	}
 	source := s.readStageSource(req.StagingID)
@@ -159,7 +178,7 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "install failed")
 		return
 	}
-	chownR(dest, uid)     // hand the extension's files to its own uid (root can)
+	chownR(dest, uid) // hand the extension's files to its own uid (root can)
 	_ = os.Chmod(dest, 0o700)
 
 	caller := auth.FromContext(r.Context())
@@ -279,8 +298,8 @@ func (s *Server) handleExtUninstall(w http.ResponseWriter, r *http.Request) {
 	_ = s.st.DeleteExtensionTokens(id)
 	_ = s.st.ExtKVDeleteAll(id) // destroy its private KV (lifecycle: uninstall wipes storage)
 	_ = s.st.DeleteExtension(id)
-	_ = os.RemoveAll(s.extDir(id))       // its files
-	_ = os.RemoveAll(s.extPrevDir(id))   // and any pre-update snapshot
+	_ = os.RemoveAll(s.extDir(id))     // its files
+	_ = os.RemoveAll(s.extPrevDir(id)) // and any pre-update snapshot
 	w.WriteHeader(http.StatusNoContent)
 }
 

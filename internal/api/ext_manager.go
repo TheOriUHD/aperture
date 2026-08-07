@@ -390,7 +390,22 @@ func (s *Server) handleExtUpdateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stop, back up the current install, swap in the new files.
+	if err := s.applyBundleUpdate(ex, sdir, m, d, raw); err != nil {
+		writeError(w, http.StatusInternalServerError, "update failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.extView(ex))
+}
+
+// applyBundleUpdate swaps a staged bundle over an already-installed extension — shared
+// by a URL-based update and a sideload re-install of the same id. It snapshots the
+// current files for revert, swaps in the new bundle, reconciles stored settings against
+// the new schema, and re-mints the token — while PRESERVING the extension's ext_kv (its
+// token, settings, and mappings) and camera grant. The caller has already verified id
+// match, consent (when permissions expand), and downgrade confirmation.
+func (s *Server) applyBundleUpdate(ex *store.Extension, sdir string, m *ext.Manifest, d ext.Derived, raw []byte) error {
+	oldM, _ := ext.Parse([]byte(ex.ManifestJSON)) // for the settings-schema diff
+
 	if s.extSup != nil {
 		s.extSup.Stop(ex.ID)
 	}
@@ -398,27 +413,50 @@ func (s *Server) handleExtUpdateApply(w http.ResponseWriter, r *http.Request) {
 	_ = os.RemoveAll(prev)
 	dest := s.extDir(ex.ID)
 	if err := os.Rename(dest, prev); err != nil {
-		writeError(w, http.StatusInternalServerError, "update failed (could not snapshot current version)")
-		return
+		s.spawnIfBackend(ex) // files are intact — bring it back up
+		return fmt.Errorf("could not snapshot the current version: %w", err)
 	}
 	if err := os.Rename(sdir, dest); err != nil {
 		_ = os.Rename(prev, dest) // roll back to the snapshot
 		s.spawnIfBackend(ex)
-		writeError(w, http.StatusInternalServerError, "update failed (could not install new version)")
-		return
+		return fmt.Errorf("could not install the new version: %w", err)
 	}
 	chownR(dest, ex.ExtUID)
 	_ = os.Chmod(dest, 0o700)
 
+	// Drop stored settings that no longer fit the new schema; keep the rest.
+	s.reconcileSettingsOnUpdate(ex.ID, oldM, m)
+
 	ex.Name, ex.Version, ex.UpdateURL, ex.ManifestJSON = m.Name, m.Version, updateURL(m), string(raw)
-	ex.Scopes = d.Scopes // keep the user's camera grants: their choice persists across update/revert
+	ex.Scopes = d.Scopes // ex.CameraGrants is left untouched → the grant persists across update/revert
 	if err := s.st.UpdateExtension(ex); err != nil {
 		s.log.Error("update: persist row", "id", ex.ID, "err", err)
 	}
 	_ = s.st.SetExtensionModified(ex.ID, false) // fresh clean bundle
 	ex.Modified = false
-	s.spawnIfBackend(ex) // re-mints the token with the new scopes
-	writeJSON(w, http.StatusOK, s.extView(ex))
+	s.seedSettingDefaults(ex.ID, m) // seed defaults for any NEW non-secret settings
+	s.spawnIfBackend(ex)            // re-mints the token with the new scopes ∩ the preserved grant
+	return nil
+}
+
+// reconcileSettingsOnUpdate drops stored settings that no longer fit the new schema: a
+// key removed from the schema, or one whose TYPE changed (its old stored value may not
+// be valid — or may mean something different — under the new type, e.g. a scalar that
+// became a group). A field that still exists with the SAME type keeps its value. Keys
+// the extension wrote itself via storage.set (not settings) are left untouched.
+func (s *Server) reconcileSettingsOnUpdate(id string, oldM, newM *ext.Manifest) {
+	if oldM == nil {
+		return
+	}
+	newType := map[string]string{}
+	for _, f := range newM.Settings {
+		newType[f.Key] = f.Type
+	}
+	for _, f := range oldM.Settings {
+		if nt, ok := newType[f.Key]; !ok || nt != f.Type {
+			_ = s.st.ExtKVDelete(id, f.Key)
+		}
+	}
 }
 
 // handleExtRevert restores the pre-update snapshot kept by the last apply.
@@ -636,7 +674,16 @@ func (s *Server) stageBundleBytes(b []byte, source string) (map[string]any, erro
 		return nil, fmt.Errorf("remote imports are not allowed: %s", strings.Join(bad, ", "))
 	}
 	s.writeStageSource(stagingID, source)
-	return stageConsentView(stagingID, m, d, source), nil
+	view := stageConsentView(stagingID, m, d, source)
+	// If this id is already installed, the confirm step is an UPDATE — tell the client
+	// so consent reads "replacing X with Y" and can flag a downgrade / new permissions.
+	if cur, e := s.st.GetExtension(m.ID); e == nil {
+		view["update"] = true
+		view["currentVersion"] = cur.Version
+		view["permissionsChanged"] = permsExpanded(d, cur)
+		view["downgrade"] = semverNewer(cur.Version, m.Version)
+	}
+	return view, nil
 }
 
 func stageConsentView(stagingID string, m *ext.Manifest, d ext.Derived, source string) map[string]any {
