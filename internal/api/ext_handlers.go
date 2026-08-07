@@ -333,6 +333,9 @@ func (s *Server) extView(ex *store.Extension) map[string]any {
 			}
 		}
 	}
+	if _, err := os.Stat(s.extPrevDir(ex.ID)); err == nil {
+		v["revertable"] = true // a pre-update snapshot exists
+	}
 	if s.extSup != nil {
 		st, reason := s.extSup.Status(ex.ID)
 		v["state"] = string(st)
