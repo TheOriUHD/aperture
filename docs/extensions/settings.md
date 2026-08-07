@@ -28,18 +28,52 @@ Declaring `settings` **implies** the `storage` permission — you do not write b
 ]
 ```
 
-| Type      | Renders as        | Stored / read back as              |
-| --------- | ----------------- | ---------------------------------- |
-| `text`    | single-line input | the string                         |
-| `secret`  | password input    | write-only — see below             |
-| `number`  | number input      | the number, as a string            |
-| `boolean` | a switch          | `"true"` / `"false"`               |
-| `select`  | a dropdown        | the chosen option's `value`        |
+| Type      | Renders as                       | Stored / read back as                    |
+| --------- | -------------------------------- | ---------------------------------------- |
+| `text`    | single-line input                | the string                               |
+| `secret`  | password input                   | write-only — see below                   |
+| `number`  | number input                     | the number, as a string                  |
+| `boolean` | a switch                         | `"true"` / `"false"`                     |
+| `select`  | a dropdown                       | the chosen option's `value`              |
+| `url`     | single-line input, URL-validated | the URL string (can back a network host) |
+| `camera`  | a picker of granted cameras      | a camera id                              |
+| `group`   | a repeatable list of rows        | a JSON array of row objects — see below  |
 
-Validation runs on save: a bad type or a missing required field is refused with an
-inline message; a `select` value must be one of its options. A non-secret `default`
-is written into storage at install, so the extension sees it before anyone opens the
-form.
+Validation runs on save: a bad type, a malformed `url`, a `camera` outside the
+extension's grant, or a missing required field is refused with an inline message; a
+`select` value must be one of its options. A non-secret scalar `default` is written
+into storage at install, so the extension sees it before anyone opens the form.
+
+## Repeatable groups (real configuration)
+
+Flat scalars can't express "map each camera to a light entity". A `group` field is a
+named, repeatable list whose rows are themselves a small set of fields (scalars +
+`camera`, one level deep — no nested groups or secrets). The form adds/removes rows:
+
+```jsonc
+{
+  "key": "lights",
+  "label": "Camera → light",
+  "type": "group",
+  "help": "Map each camera to the light to control while viewing it.",
+  "fields": [
+    { "key": "camera", "label": "Camera", "type": "camera", "required": true },
+    { "key": "entity", "label": "Light entity", "type": "text", "required": true }
+  ]
+}
+```
+
+It persists in ext_kv as a JSON array and reads back through the SDK as one — the same
+call as a scalar, the value is just structured:
+
+```ts
+// panel: an array of row objects
+const rows = await aperture.settings.get("lights"); // [{camera, entity}, …]
+const mine = rows.find((r) => r.camera === aperture.cameraId);
+
+// backend: the stored JSON string (parse it)
+const rows = JSON.parse((await aperture.storage.get("lights")) ?? "[]");
+```
 
 ## Secrets are write-only
 
@@ -73,9 +107,19 @@ Saving settings **restarts** a backend extension so it re-reads them; the form s
 so. A UI-only extension has nothing to restart. Changing settings is not a permission
 change and never re-prompts consent.
 
+## Network from a setting
+
+A `url` setting can also be the extension's network host: declare
+`"network": ["{{setting:ha_url}}"]` and the egress allow-list follows whatever URL the
+user saves — the author never hard-codes a host the user didn't choose. See
+[permissions.md](permissions.md#network). Changing the URL changes the allow-list
+immediately (no re-consent); an unset or invalid URL refuses egress with a clear
+message.
+
 ## Example
 
-The bundled [ha-room-lights](../../examples/ha-room-lights/) example uses three
-settings — a `text` host URL, a `secret` token, and a `text` entity template — and its
-panel toggles the current camera's light in Home Assistant using the secret via a
+The bundled [ha-room-lights](../../examples/ha-room-lights/) example uses a `url`
+(the Home Assistant address, and its only network host), a `secret` token, and a
+`group` mapping each camera to a light entity. Its panel looks up the camera on screen
+in that mapping and toggles its light, authenticating with the secret via a
 `{{secret:ha_token}}` placeholder.

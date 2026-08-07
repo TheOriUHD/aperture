@@ -116,21 +116,29 @@ const token = await aperture.storage.get("ha_token"); // string | null
 `null` elsewhere. React to it rather than listing everything.
 
 **`aperture.settings.get(key)` / `aperture.settings.all()`** — the extension's own
-settings (the manifest `settings` schema). Returns **non-secret** values only.
+settings (the manifest `settings` schema), **non-secret** values only. A scalar returns
+a string; a `group` returns an **array of row objects** (e.g. a camera→entity mapping).
 
 **`aperture.net.fetch(url, init?)`** — a request the host performs server-side to a host
-declared in `permissions.network`. A header value or the body may contain a
+the extension may reach (a static `permissions.network` host, or the current value of a
+`url` setting via `{{setting:key}}`). A header value or the body may contain a
 `{{secret:key}}` placeholder, expanded from the extension's secret settings server-side —
-so a secret authenticates the call without ever entering the panel. Resolves to the
-upstream `{ status, body }`.
+so a secret authenticates the call without ever entering the panel. It resolves to
+`{ status, ok, body }` on an upstream reply, or `{ status: 0, ok: false, error, detail }`
+on a connection failure (`error` is a plain sentence, `detail` the raw error); it rejects
+only on a client-side problem (host not allowed, url setting unconfigured, undeclared
+secret).
 
 ```ts
 const base = await window.aperture.settings.get("ha_url");
+const lights = await window.aperture.settings.get("lights"); // [{camera, entity}, …]
+const entity = lights.find((l) => l.camera === window.aperture.cameraId)?.entity;
 const r = await window.aperture.net.fetch(base + "/api/services/light/turn_on", {
   method: "POST",
   headers: { Authorization: "Bearer {{secret:ha_token}}" },
-  body: JSON.stringify({ entity_id: "light." + window.aperture.cameraId }),
+  body: JSON.stringify({ entity_id: entity }),
 });
+if (r.status === 0) show(r.error); // legible; r.detail has the raw error
 ```
 
 ### Backend-only methods

@@ -2,24 +2,23 @@
   "manifest": 1,
   "id": "com.example.ha-room-lights",
   "name": "Home Assistant Room Lights",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "author": "Jane Doe",
-  "description": "Adds a light control to the camera view — toggle that camera's room lights in Home Assistant while you watch.",
+  "description": "Toggle a camera's room light in Home Assistant from its camera view — you configure the server and which light maps to which camera.",
   "minApiVersion": "v1",
   "permissions": {
     "data": { "cameras": "read" },
     "cameras": "all",
-    "network": ["https://homeassistant.local:8123"]
+    "network": ["{{setting:ha_url}}"]
   },
   "settings": [
     {
       "key": "ha_url",
       "label": "Home Assistant URL",
-      "type": "text",
+      "type": "url",
       "required": true,
-      "default": "https://homeassistant.local:8123",
-      "placeholder": "https://homeassistant.local:8123",
-      "help": "Must match the network host this extension was granted (homeassistant.local:8123)."
+      "placeholder": "https://192.168.1.10:8123",
+      "help": "Use a LAN IP or a real DNS name — a .local/mDNS address will not resolve inside the container."
     },
     {
       "key": "ha_token",
@@ -29,17 +28,19 @@
       "help": "Home Assistant → your profile → Long-lived access tokens. Stored privately and never shown again."
     },
     {
-      "key": "entity_template",
-      "label": "Light entity",
-      "type": "text",
-      "default": "light.{camera}",
-      "placeholder": "light.{camera}",
-      "help": "The light to control. {camera} is replaced by the camera id — e.g. light.{camera}, or a fixed entity like light.hallway."
+      "key": "lights",
+      "label": "Camera → light",
+      "type": "group",
+      "help": "Map each camera to the Home Assistant light entity to control while you are viewing it.",
+      "fields": [
+        { "key": "camera", "label": "Camera", "type": "camera", "required": true },
+        { "key": "entity", "label": "Light entity", "type": "text", "required": true, "placeholder": "light.hallway" }
+      ]
     }
   ],
   "ui": {
     "panels": [
-      { "slot": "camera-detail", "entry": "ui/panel.html", "title": "Room lights" }
+      { "slot": "camera-detail", "entry": "ui/panel.html", "title": "Room light" }
     ]
   },
   "update": { "url": "https://example.com/ha-room-lights/manifest.json" }

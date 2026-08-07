@@ -3,182 +3,157 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Room lights</title>
+  <title>Room light</title>
   <!--
     A panel is a sandboxed, opaque-origin iframe: it cannot inherit the host app's
     stylesheet or load any external resource (the per-panel CSP allows inline
-    <style>/<script> only), so it brings its own styling. The tokens below mirror
-    Aperture's dark theme (docs/extensions/panels.md) and the body is transparent, so
-    the panel reads as part of the camera-detail card rather than a bare HTML page.
+    <style>/<script> only), so it brings its own styling; the tokens below mirror
+    Aperture's dark theme (docs/extensions/panels.md) and the body is transparent so it
+    reads as part of the camera-detail card.
 
-    What this panel demonstrates — the point of a panel: it reacts to the camera on
-    screen (window.aperture.cameraId), reads its configuration from the extension's
-    own settings (window.aperture.settings), and offers a real control — toggling that
-    camera's room light in Home Assistant. The Home Assistant token is a SECRET setting
-    the panel never sees: the call carries a {{secret:ha_token}} placeholder that the
-    host expands server-side (window.aperture.net.fetch), bounded to the one declared
-    host. No camera video or events are read; the only camera data used is the name.
+    What this demonstrates — the point of a panel: it reacts to the camera on screen
+    (window.aperture.cameraId), looks that camera up in a camera→light mapping the user
+    configured in settings, and toggles that light in Home Assistant. The server URL is a
+    `url` setting (and the extension's only allowed network host — see the manifest's
+    {{setting:ha_url}}), the token is a write-only `secret` injected server-side via a
+    {{secret:ha_token}} placeholder the panel never sees, and outbound failures are shown
+    as a plain sentence with the raw error tucked behind "Details".
   -->
   <style>
     :root {
       color-scheme: dark;
       --fg: #eef0f2; --fg-muted: #8b9199; --fg-faint: #6c727a;
       --surface: #101319; --line: #20242b; --line-strong: #2c3138;
-      --brand: #1b9df0; --online: #3fce7c; --amber: #e6b45a; --danger: #f0494e;
-      --radius: 10px;
+      --amber: #e6b45a; --danger: #f0494e; --radius: 10px;
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0; padding: 14px; background: transparent; color: var(--fg);
-      font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    }
+    body { margin: 0; padding: 14px; background: transparent; color: var(--fg);
+           font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
     .head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-    .glyph {
-      flex: none; width: 34px; height: 34px; display: grid; place-items: center;
-      border-radius: 9px; background: #16202b; color: var(--amber);
-      border: 1px solid var(--line-strong); transition: background .15s, color .15s;
-    }
+    .glyph { flex: none; width: 34px; height: 34px; display: grid; place-items: center;
+             border-radius: 9px; background: #16202b; color: var(--fg-faint);
+             border: 1px solid var(--line-strong); transition: background .15s, color .15s; }
     .glyph.on { background: rgba(230,180,90,.16); color: var(--amber); }
-    .glyph.off { color: var(--fg-faint); }
     .title { margin: 0; font-size: 13px; font-weight: 600; }
     .subtitle { margin: 1px 0 0; font-size: 11px; color: var(--fg-muted); }
-
-    .control {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 12px 14px; border-radius: var(--radius);
-      background: var(--surface); border: 1px solid var(--line);
-    }
-    .state { font-size: 13px; }
-    .state b { color: var(--fg); font-weight: 600; }
-    .state .muted { color: var(--fg-muted); }
-
-    .toggle {
-      appearance: none; border: 0; cursor: pointer; position: relative;
-      width: 52px; height: 30px; border-radius: 999px; background: var(--line-strong);
-      transition: background .18s; flex: none;
-    }
-    .toggle::after {
-      content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px;
-      border-radius: 50%; background: #fff; transition: transform .18s;
-    }
+    .control { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+               padding: 12px 14px; border-radius: var(--radius);
+               background: var(--surface); border: 1px solid var(--line); }
+    .state { font-size: 13px; } .state b { color: var(--fg); } .state .muted { color: var(--fg-muted); }
+    .toggle { appearance: none; border: 0; cursor: pointer; position: relative;
+              width: 52px; height: 30px; border-radius: 999px; background: var(--line-strong);
+              transition: background .18s; flex: none; }
+    .toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px;
+                     border-radius: 50%; background: #fff; transition: transform .18s; }
     .toggle[aria-checked="true"] { background: var(--amber); }
     .toggle[aria-checked="true"]::after { transform: translateX(22px); }
     .toggle[disabled] { opacity: .5; cursor: default; }
-
-    .msg { margin: 10px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--fg-faint); }
-    .msg.error { color: var(--danger); }
-    .msg a, code { color: var(--fg-muted); }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .note { margin: 10px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--fg-faint); }
+    .note.error { color: var(--danger); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--fg-muted); }
+    details { margin-top: 6px; } summary { cursor: pointer; color: var(--fg-faint); font-size: 11px; }
+    details pre { margin: 6px 0 0; padding: 8px; border-radius: 8px; background: var(--surface);
+                  border: 1px solid var(--line); color: var(--fg-muted); font-size: 10.5px;
+                  white-space: pre-wrap; word-break: break-word; }
     .hidden { display: none; }
   </style>
 </head>
 <body>
   <div class="head">
-    <div class="glyph off" id="glyph" aria-hidden="true">
+    <div class="glyph" id="glyph" aria-hidden="true">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M9 18h6M10 21h4M12 2a6 6 0 0 0-4 10.5c.7.7 1 1.2 1 2.5h6c0-1.3.3-1.8 1-2.5A6 6 0 0 0 12 2Z"/>
       </svg>
     </div>
     <div>
-      <p class="title">Room lights</p>
+      <p class="title">Room light</p>
       <p class="subtitle" id="subtitle">Loading…</p>
     </div>
   </div>
 
   <div class="control hidden" id="control">
     <span class="state" id="state"><span class="muted">Checking…</span></span>
-    <button class="toggle" id="toggle" role="switch" aria-checked="false" aria-label="Toggle room light" disabled></button>
+    <button class="toggle" id="toggle" role="switch" aria-checked="false" aria-label="Toggle light" disabled></button>
   </div>
 
-  <p class="msg" id="msg"></p>
+  <p class="note" id="note"></p>
+  <details class="hidden" id="details"><summary>Details</summary><pre id="detailText"></pre></details>
 
   <script>
     (function () {
       var ap = window.aperture;
-      var subtitle = document.getElementById('subtitle');
-      var control = document.getElementById('control');
-      var stateEl = document.getElementById('state');
-      var toggle = document.getElementById('toggle');
-      var glyph = document.getElementById('glyph');
-      var msg = document.getElementById('msg');
-
+      var els = {
+        subtitle: document.getElementById('subtitle'), control: document.getElementById('control'),
+        state: document.getElementById('state'), toggle: document.getElementById('toggle'),
+        glyph: document.getElementById('glyph'), note: document.getElementById('note'),
+        details: document.getElementById('details'), detailText: document.getElementById('detailText')
+      };
       var cameraId = ap && ap.cameraId;
       var haUrl = null, entity = null, isOn = false, busy = false;
 
-      function say(text, isError) { msg.textContent = text || ''; msg.className = 'msg' + (isError ? ' error' : ''); resize(); }
       function resize() { if (ap && ap.resize) ap.resize(document.documentElement.scrollHeight); }
+      function say(text, isError, detail) {
+        els.note.textContent = text || ''; els.note.className = 'note' + (isError ? ' error' : '');
+        if (detail) { els.detailText.textContent = detail; els.details.classList.remove('hidden'); }
+        else { els.details.classList.add('hidden'); }
+        resize();
+      }
       function setOn(on) {
-        isOn = on;
-        toggle.setAttribute('aria-checked', on ? 'true' : 'false');
-        glyph.className = 'glyph ' + (on ? 'on' : 'off');
-        stateEl.innerHTML = on ? '<b>On</b>' : '<span class="muted">Off</span>';
+        isOn = on; els.toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+        els.glyph.className = 'glyph' + (on ? ' on' : '');
+        els.state.innerHTML = on ? '<b>On</b>' : '<span class="muted">Off</span>';
       }
 
-      // Read the light's current state from Home Assistant. The token is injected
-      // server-side from the {{secret:ha_token}} placeholder — the panel never holds it.
-      function haGet(path) {
-        return ap.net.fetch(haUrl + path, { method: 'GET', headers: { Authorization: 'Bearer {{secret:ha_token}}' } });
-      }
-      function haService(action) {
-        return ap.net.fetch(haUrl + '/api/services/light/' + action, {
-          method: 'POST',
+      // A Home Assistant call through the host: the token is injected server-side from
+      // the {{secret:ha_token}} placeholder — the panel never holds it. Returns the
+      // upstream response, or handles a connection failure with a legible message.
+      function ha(method, path, body) {
+        return ap.net.fetch(haUrl + path, {
+          method: method,
           headers: { Authorization: 'Bearer {{secret:ha_token}}', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entity_id: entity })
+          body: body
+        }).then(function (r) {
+          if (r.status === 0) { say(r.error, true, r.detail); return null; }        // connection failure
+          if (r.status === 401) { say('Home Assistant rejected the token — check it in this extension’s settings.', true); return null; }
+          if (r.status === 404) { say('No entity ' + entity + ' in Home Assistant — check the mapping in settings.', true); return null; }
+          return r;
+        }).catch(function (e) {
+          // Client-side problems (URL unconfigured, host not allowed) reject with a
+          // ready-made message.
+          say((e && e.message) || 'Could not reach Home Assistant.', true);
+          return null;
         });
       }
 
-      function needsSetup(text) {
-        say(text + ' Open Settings → Extensions → Home Assistant Room Lights to configure it.', true);
-      }
-
-      toggle.addEventListener('click', function () {
-        if (busy || toggle.disabled) return;
-        busy = true; toggle.disabled = true;
+      els.toggle.addEventListener('click', function () {
+        if (busy || els.toggle.disabled) return;
+        busy = true; els.toggle.disabled = true;
         var next = !isOn;
-        haService(next ? 'turn_on' : 'turn_off').then(function (r) {
-          if (r.status >= 200 && r.status < 300) { setOn(next); say('Turned the light ' + (next ? 'on' : 'off') + '.'); }
-          else if (r.status === 401) needsSetup('Home Assistant rejected the token.');
-          else say('Home Assistant returned status ' + r.status + '.', true);
-        }).catch(function (e) {
-          // Our own egress errors (unconfigured secret, undeclared host) throw here.
-          needsSetup((e && e.message) || 'Could not reach Home Assistant.');
-        }).then(function () { busy = false; toggle.disabled = false; });
+        ha('POST', '/api/services/light/' + (next ? 'turn_on' : 'turn_off'), JSON.stringify({ entity_id: entity }))
+          .then(function (r) { if (r) { setOn(next); say('Turned the light ' + (next ? 'on' : 'off') + '.'); } })
+          .then(function () { busy = false; els.toggle.disabled = false; });
       });
 
       (async function init() {
-        if (!cameraId) { subtitle.textContent = 'Open a camera to control its lights.'; resize(); return; }
+        if (!cameraId) { els.subtitle.textContent = 'Open a camera to control its light.'; resize(); return; }
 
-        // A little camera data (its name) to label the control — the only camera access
-        // this extension has (permissions.data.cameras = read).
-        try { var cam = await ap.cameras.get(cameraId); subtitle.textContent = (cam && cam.name) || cameraId; }
-        catch (e) { subtitle.textContent = cameraId; }
+        try { var cam = await ap.cameras.get(cameraId); els.subtitle.textContent = (cam && cam.name) || cameraId; }
+        catch (e) { els.subtitle.textContent = cameraId; }
 
-        // Non-secret settings drive the target. The secret token is used only via the
-        // placeholder above; settings.get never returns it.
-        haUrl = (await ap.settings.get('ha_url')) || '';
-        var tmpl = (await ap.settings.get('entity_template')) || 'light.{camera}';
-        entity = tmpl.replace('{camera}', cameraId);
-        if (!haUrl) { control.classList.add('hidden'); needsSetup('Home Assistant is not configured yet.'); return; }
+        haUrl = await ap.settings.get('ha_url');
+        var mapping = (await ap.settings.get('lights')) || [];   // [{camera, entity}, …]
+        var row = mapping.filter(function (m) { return m.camera === cameraId; })[0];
+        entity = row && row.entity;
 
-        control.classList.remove('hidden');
-        say('Controls ' + entity + ' in Home Assistant.');
-        resize();
+        if (!haUrl) { say('Set your Home Assistant URL in this extension’s settings to begin.', true); return; }
+        if (!entity) { say('No light is mapped to this camera yet. Add a Camera → light row in the extension’s settings.', true); return; }
 
-        // Reflect the current state (best-effort). A missing token/entity is handled
-        // gracefully so the toggle still works optimistically.
-        try {
-          var r = await haGet('/api/states/' + encodeURIComponent(entity));
-          if (r.status === 401) { needsSetup('Home Assistant rejected the token.'); }
-          else if (r.status >= 200 && r.status < 300) {
-            try { setOn(JSON.parse(r.body).state === 'on'); } catch (e) {}
-            toggle.disabled = false;
-          } else if (r.status === 404) {
-            say('No entity ' + entity + ' in Home Assistant — set the light entity in settings.', true);
-            toggle.disabled = false; // still allow trying
-          } else { toggle.disabled = false; }
-        } catch (e) {
-          needsSetup((e && e.message) || 'Could not reach Home Assistant.');
-        }
+        els.control.classList.remove('hidden');
+        say('Controls ' + entity + '.');
+
+        var r = await ha('GET', '/api/states/' + encodeURIComponent(entity));
+        if (r && r.body) { try { setOn(JSON.parse(r.body).state === 'on'); } catch (e) {} }
+        els.toggle.disabled = false;
         resize();
       })();
     })();

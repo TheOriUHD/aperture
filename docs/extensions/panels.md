@@ -100,8 +100,23 @@ const r = await window.aperture.net.fetch(base + "/api/services/light/turn_on", 
 `{{secret:key}}` may appear in any header value or the body; it is replaced from the
 extension's own secret settings by the host, bounded to the declared network host. See
 [settings.md](settings.md) and [permissions.md](permissions.md#network). The bundled
-`ha-room-lights` example is exactly this: it reads the current camera, its name, and its
-configured light, and toggles that light in Home Assistant.
+`ha-room-lights` example is exactly this: it reads the current camera, finds its light in
+a camera→entity mapping the user configured, and toggles it in Home Assistant.
+
+### Networking notes for self-hosters
+
+- **`.local`/mDNS names do not resolve inside the container.** Aperture runs in a
+  container that does not do multicast DNS, so `https://homeassistant.local:8123` will
+  fail with a name-resolution error. Use a **LAN IP** (`https://192.168.1.10:8123`) or a
+  real DNS name. This is not a bug — it will catch every self-hoster otherwise, so say so
+  in your setting's help text.
+- **Surface failures legibly.** `net.fetch` resolves to `{ status, ok, body }` on an
+  upstream reply, or — on a connection failure — `{ status: 0, ok: false, error, detail }`,
+  where `error` is a plain sentence naming the host (name won't resolve / refused /
+  timed out / TLS) and `detail` is the raw error. Show `error`; keep `detail` behind a
+  disclosure, not front and centre. It rejects only on a client-side problem (host not
+  allowed, the url setting unconfigured, an undeclared secret), whose message is already
+  plain.
 
 ## Keep it self-contained
 

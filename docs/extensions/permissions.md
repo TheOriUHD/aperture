@@ -88,16 +88,26 @@ for a restricted viewer than for an admin. That is correct; see
 
 ## Network
 
-`permissions.network` is a list of absolute `http(s)` URLs — the hosts an extension may
-reach. A **backend** reaches them via Deno `--allow-net`; a **UI panel** reaches them via
-host-mediated `aperture.net.fetch`, where the host performs the request server-side,
-bounded to these same declared hosts (Aperture injects its own API host too, so the SDK
-can reach it). Every other host is refused.
+`permissions.network` is a list of hosts an extension may reach. Each entry is either:
 
-This is the only way an extension reaches the outside world, and **it can send your data
-there.** For a panel using `net.fetch`, anyone who can use that panel can trigger a
-request to the declared host — with any secret the extension injects (see below). Grant
-`network` only to extensions and hosts you trust.
+- a **static** absolute `http(s)` URL (`"https://hooks.example.com"`), or
+- a **`{{setting:key}}` reference** to one of the extension's own `url` settings
+  (`"network": ["{{setting:ha_url}}"]`) — the allow-list then follows **the URL the
+  user configured**, resolved at request time (for a panel) or spawn time (for a
+  backend, which restarts when the setting changes). This is both friendlier and safer:
+  the user chose the host, not the author. An unset or malformed URL refuses egress with
+  a clear "configure it in settings" message; changing it takes effect immediately with
+  no re-consent, since the user is the one choosing.
+
+A **backend** reaches allowed hosts via Deno `--allow-net`; a **UI panel** reaches them
+via host-mediated `aperture.net.fetch`, where the host performs the request server-side
+(Aperture injects its own API host too). Every other host is refused.
+
+Consent is honest about which: a static host is named; a `{{setting:…}}` host reads
+"Connect to a server you configure in its settings." Either way this is the only way an
+extension reaches the outside world, and **it can send your data there** — and anyone
+who can use a panel can trigger its `net.fetch` (with any secret the extension injects,
+below). Grant `network` only to extensions and hosts you trust.
 
 ## Storage and settings
 
