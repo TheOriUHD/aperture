@@ -1,7 +1,8 @@
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { X } from "lucide-react";
 import clsx from "clsx";
 import { useScrollLock } from "../../hooks/useScrollLock";
+import { useEscapeStack } from "../../lib/escapeStack";
 
 const SIZES = { md: "max-w-md", lg: "max-w-2xl", xl: "max-w-5xl", "2xl": "max-w-6xl" } as const;
 
@@ -25,12 +26,7 @@ export function Modal({
   bodyClass?: string;
 }) {
   useScrollLock(open);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  useEscapeStack(open, onClose); // topmost overlay only (see lib/escapeStack)
 
   if (!open) return null;
   return (

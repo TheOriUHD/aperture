@@ -1,6 +1,6 @@
-import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
 import { useScrollLock } from "../../hooks/useScrollLock";
+import { useEscapeStack } from "../../lib/escapeStack";
 
 export function ConfirmDialog({
   open,
@@ -24,12 +24,7 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   useScrollLock(open);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
+  useEscapeStack(open, onCancel); // topmost overlay only (see lib/escapeStack)
 
   if (!open) return null;
   return (
