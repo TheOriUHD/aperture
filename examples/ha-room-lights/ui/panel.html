@@ -2,61 +2,95 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Room Lights</title>
-  <!-- Self-contained per the extension CSP: inline style + script only, no
-       external resources, no network of its own. The host injects window.aperture
-       into <head> before this document's body script runs. -->
+  <!--
+    A panel is a sandboxed, opaque-origin iframe: it CANNOT inherit the host app's
+    stylesheet and cannot load any external resource (the per-panel CSP allows inline
+    <style>/<script> only). So it must bring its own styling. The tokens below mirror
+    Aperture's dark theme (see docs/extensions/panels.md) and the body background is
+    transparent, so the panel reads as part of the surrounding camera-detail card
+    rather than a bare HTML page. Copy this <style> block as a starting point.
+  -->
   <style>
-    :root { color-scheme: light dark; }
-    body { margin: 0; padding: 12px; font: 14px/1.5 system-ui, sans-serif; }
-    h1 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
-    p { margin: 0 0 8px; }
-    ul { margin: 0; padding: 0; list-style: none; }
-    li {
-      display: flex; align-items: center; gap: 8px;
-      margin-bottom: 4px; padding: 6px 8px; border-radius: 6px;
-      background: rgba(127, 127, 127, 0.12);
+    :root {
+      color-scheme: dark;
+      --fg: #eef0f2;         /* primary text            */
+      --fg-muted: #8b9199;   /* secondary text          */
+      --fg-faint: #6c727a;   /* captions / hints        */
+      --surface: #101319;    /* inset row background     */
+      --line: #20242b;       /* borders / dividers       */
+      --brand: #1b9df0;      /* accent                   */
+      --online: #3fce7c;     /* healthy / on             */
+      --danger: #f0494e;     /* errors                   */
+      --radius: 8px;
     }
-    .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #2ecc71; }
-    .muted { opacity: 0.7; }
-    .error { color: #e74c3c; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 14px;
+      background: transparent;             /* blend into the host card */
+      color: var(--fg);
+      font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    .title { margin: 0; font-size: 13px; font-weight: 600; }
+    .subtitle { margin: 2px 0 12px; font-size: 11px; color: var(--fg-muted); }
+    .label { font-size: 11px; font-weight: 500; color: var(--fg-muted); margin: 0 0 8px; }
+    .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+    .row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border-radius: var(--radius);
+      background: var(--surface); border: 1px solid var(--line);
+    }
+    .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--online); }
+    .name { font-size: 13px; color: var(--fg); }
+    .status { margin: 0; font-size: 12px; color: var(--fg-muted); }
+    .status.error { color: var(--danger); }
+    .note { margin: 12px 0 0; font-size: 11px; color: var(--fg-faint); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--fg-muted); }
   </style>
 </head>
 <body>
-  <h1>Room Lights</h1>
-  <p class="muted" id="intro">Cameras this panel can act on:</p>
-  <ul id="cams"></ul>
-  <p class="muted" id="empty" hidden>No cameras available to you here.</p>
+  <h1 class="title">Room Lights</h1>
+  <p class="subtitle">Turns on each room's Home Assistant lights while you watch.</p>
+
+  <p class="label">Cameras this panel can act on</p>
+  <ul class="list" id="cams"></ul>
+  <p class="status" id="status">Loading cameras…</p>
+  <p class="note" id="note" hidden>
+    This example is granted all your cameras. Scope it by listing ids in
+    <code>permissions.cameras</code> in <code>manifest.json</code>, and set your Home
+    Assistant host in <code>permissions.network</code>.
+  </p>
 
   <script>
-    // Every window.aperture call is relayed to the server broker under YOUR
-    // identity ∩ the extension's authority, so this list is only the cameras you
-    // may see — it can be fewer than the extension was granted.
+    // Every window.aperture call is relayed to the server broker under YOUR identity
+    // ∩ the extension's authority, so this list is only the cameras you may see — it
+    // can be fewer than the extension was granted.
     (async function () {
       var list = document.getElementById('cams');
-      var empty = document.getElementById('empty');
-      var intro = document.getElementById('intro');
+      var status = document.getElementById('status');
+      var note = document.getElementById('note');
       try {
         var cams = await window.aperture.cameras.list();
         if (!Array.isArray(cams) || cams.length === 0) {
-          empty.hidden = false;
+          status.textContent = 'No cameras are visible to you here.';
         } else {
           cams.forEach(function (c) {
-            var li = document.createElement('li');
-            var dot = document.createElement('span');
-            dot.className = 'dot';
-            var name = document.createElement('span');
+            var li = document.createElement('li'); li.className = 'row';
+            var dot = document.createElement('span'); dot.className = 'dot';
+            var name = document.createElement('span'); name.className = 'name';
             name.textContent = c.name || c.id;
-            li.appendChild(dot);
-            li.appendChild(name);
-            list.appendChild(li);
+            li.appendChild(dot); li.appendChild(name); list.appendChild(li);
           });
+          status.hidden = true;
+          note.hidden = false;
         }
       } catch (err) {
-        intro.textContent = 'Could not load cameras: ' + ((err && err.message) || err);
-        intro.className = 'error';
+        status.textContent = 'Could not load cameras: ' + ((err && err.message) || err);
+        status.className = 'status error';
       }
-      // The host auto-resizes via ResizeObserver; nudge it once after first paint.
+      // The host auto-resizes via a ResizeObserver; nudge it once after first paint.
       if (window.aperture && window.aperture.resize) {
         window.aperture.resize(document.documentElement.scrollHeight);
       }

@@ -8,7 +8,6 @@
   "minApiVersion": "v1",
   "permissions": {
     "data": { "cameras": "read", "events": "read" },
-    "cameras": ["hallway", "front-door"],
     "network": ["https://homeassistant.local:8123"],
     "storage": true
   },

@@ -10,8 +10,10 @@
 
 import { aperture } from "@aperture/sdk";
 
-// The cameras this extension was granted (manifest: permissions.cameras).
-const ROOMS = ["hallway", "front-door"];
+// This extension is granted your cameras (manifest: permissions.data.cameras +
+// permissions.events). The change feed only delivers events for cameras this
+// extension AND your token may see, so no extra id filtering is required here —
+// scope it down by listing specific ids in permissions.cameras if you prefer.
 
 // Home Assistant target. The manifest declared `network` access to
 // homeassistant.local:8123 only — any other host throws NotCapable.
@@ -22,11 +24,10 @@ const HA_BASE = "https://homeassistant.local:8123";
 // or a setup step. It is namespaced to this extension: no other extension can read
 // it, and it is destroyed when this extension is uninstalled.
 
-// Subscribe to every new event. The server only delivers events this extension's
-// token (cameras:read, events:read on hallway + front-door) is allowed to see, so
-// the ROOMS guard below is belt-and-suspenders.
+// Subscribe to every new event the extension's token is allowed to see (its camera
+// grant ∩ the owner's cameras), and turn on that camera's room light.
 aperture.on("event.created", async (ev) => {
-  if (!ev.camera || !ROOMS.includes(ev.camera)) return;
+  if (!ev.camera) return;
   const haToken = await aperture.storage.get("ha_token");
   if (!haToken) {
     console.error("ha-room-lights: no ha_token in storage yet — set it from the panel");
