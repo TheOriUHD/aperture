@@ -52,9 +52,22 @@ func TestExtKVNamespaceIsolation(t *testing.T) {
 	}
 
 	// An admin session (first-party) may reach any namespace — the host uses this
-	// path to relay a UI panel's storage calls under a trusted extId.
-	sess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
-	if rec := s.reqAs("GET", "/api/v1/ext/com.a/kv/ha_token", sess); rec.Code != 200 {
+	// path to relay an admin's UI-panel storage calls under a trusted extId.
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	if rec := s.reqAs("GET", "/api/v1/ext/com.a/kv/ha_token", adminSess); rec.Code != 200 {
 		t.Errorf("admin session GET = %d, want 200", rec.Code)
+	}
+
+	// A VIEWER session must NOT read the extension's secrets — not by curl and not
+	// via the panel bridge (which relays under the viewer's own session). This is
+	// the hole the routes' `authed` spec would otherwise leave open.
+	viewer := &store.User{ID: "viewer", Email: "v@x", Name: "Viewer", Role: store.RoleViewer}
+	mustDo(t, s.st.CreateUser(viewer))
+	viewerSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, viewer))}
+	if rec := s.reqAs("GET", "/api/v1/ext/com.a/kv/ha_token", viewerSess); rec.Code != 403 {
+		t.Errorf("viewer session GET = %d, want 403 (storage is admin-only for humans)", rec.Code)
+	}
+	if rec := s.reqBody("PUT", "/api/v1/ext/com.a/kv/x", viewerSess, strings.NewReader(`{"value":"y"}`)); rec.Code != 403 {
+		t.Errorf("viewer session PUT = %d, want 403", rec.Code)
 	}
 }

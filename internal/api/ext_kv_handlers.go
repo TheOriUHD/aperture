@@ -28,8 +28,19 @@ const maxExtKVKeyLen = 256
 // generous steady rate for config/state; bursts absorb normal save flurries.
 var extKVWrites = newTokenBucket(25, 50) // 25 writes/sec, burst 50
 
-// extKVGuard resolves the namespace and enforces access: the extension must exist
-// and have declared `storage`, and a token caller may only reach its own ext_id.
+// extKVGuard resolves the namespace and enforces access. The extension must exist
+// and have declared `storage`. Then, by caller class:
+//   - a TOKEN (a backend extension) may reach ONLY its own ext_id — never another
+//     extension's — role-independent;
+//   - a SESSION/CLI (a human) may reach any namespace but MUST be an admin.
+//
+// Raw KV is admin-only for humans because storage is the extension's private config
+// with no per-key ACL, so any read exposes every key — including secrets like an API
+// token. A UI panel reaches storage through the host bridge under the VIEWER'S own
+// session, and a viewer can call window.aperture.storage from the sandboxed iframe's
+// console, so a "viewer via the bridge" allowance would leak those secrets exactly as
+// a direct curl would. Viewer-facing data must instead come from the extension's
+// backend through the broker, where it can be scoped; raw storage stays admin-only.
 // Returns (0,"") when allowed.
 func (s *Server) extKVGuard(r *http.Request, id string) (int, string) {
 	ex, err := s.st.GetExtension(id)
@@ -39,8 +50,18 @@ func (s *Server) extKVGuard(r *http.Request, id string) (int, string) {
 	if !manifestHasStorage(ex.ManifestJSON) {
 		return http.StatusForbidden, "this extension did not request storage"
 	}
-	if c := auth.FromContext(r.Context()); c != nil && c.Class == auth.ClassToken && c.ExtID != id {
-		return http.StatusForbidden, "an extension may only access its own storage"
+	c := auth.FromContext(r.Context())
+	if c == nil {
+		return http.StatusUnauthorized, "authentication required"
+	}
+	if c.Class == auth.ClassToken {
+		if c.ExtID != id {
+			return http.StatusForbidden, "an extension may only access its own storage"
+		}
+		return 0, ""
+	}
+	if c.Role != store.RoleAdmin {
+		return http.StatusForbidden, "extension storage is available to administrators only"
 	}
 	return 0, ""
 }
