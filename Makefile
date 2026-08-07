@@ -8,7 +8,7 @@ LDFLAGS := -s -w \
 	-X $(PKG)/internal/version.Version=$(VERSION) \
 	-X $(PKG)/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build build-go build-web tidy run dev web-dev test lint up down logs clean fmt install-cli
+.PHONY: all build build-go build-web tidy run dev web-dev test lint up down logs clean fmt install-cli examples
 
 all: build
 
@@ -30,6 +30,12 @@ install-cli:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(HOME)/.local/bin/nvrctl ./cmd/nvrctl
 	@echo "Installed 'nvrctl' to ~/.local/bin (defaults to http://localhost:8971)."
 	@echo "Run it with:  nvrctl        (override with --url or APERTURE_URL)"
+
+## Build every examples/<name>/ into a distributable examples/dist/<name>.zip
+## (deterministic; commit the result). TestExampleBundlesAreFresh fails if a
+## shipped zip drifts from its source, so run this after editing any example.
+examples:
+	$(GO) run ./tools/mkbundles
 
 tidy:
 	$(GO) mod tidy

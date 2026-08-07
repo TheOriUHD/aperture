@@ -1,6 +1,10 @@
 package ext
 
 import (
+	"archive/zip"
+	"bytes"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,4 +88,101 @@ func TestMotionWebhookExampleResolves(t *testing.T) {
 	if len(d.NetHosts) != 1 || d.NetHosts[0] != "hooks.example.com" {
 		t.Fatalf("network host = %v, want [hooks.example.com]", d.NetHosts)
 	}
+}
+
+// TestExampleBundlesAreFresh fails if any shipped examples/dist/<name>.zip drifts
+// from the example source it was built from — a stale bundle fails the coherence gate
+// at install and is a bad first experience for anyone following the docs, and nothing
+// else caught it. Run `make examples` to rebuild.
+//
+// It compares CONTENTS, not mtimes: a git checkout stamps every file with the same
+// time, so an mtime rule would both false-pass (all equal) and false-fail arbitrarily.
+// A zip whose files byte-match the source is fresh by definition; anything else is not.
+func TestExampleBundlesAreFresh(t *testing.T) {
+	root := filepath.Join("..", "..", "examples")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Skipf("examples dir not found: %v", err)
+	}
+	checked := 0
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "dist" {
+			continue
+		}
+		dir := filepath.Join(root, e.Name())
+		if _, err := os.Stat(filepath.Join(dir, "manifest.json")); err != nil {
+			continue // not an example bundle
+		}
+		checked++
+		zipFiles, err := readZipFiles(filepath.Join(root, "dist", e.Name()+".zip"))
+		if err != nil {
+			t.Errorf("%s: no distributable bundle (%v) — run `make examples`", e.Name(), err)
+			continue
+		}
+		srcFiles, err := readDirFiles(dir)
+		if err != nil {
+			t.Fatalf("%s: reading source: %v", e.Name(), err)
+		}
+		for name, want := range srcFiles {
+			got, ok := zipFiles[name]
+			if !ok {
+				t.Errorf("%s.zip is STALE: missing %q — run `make examples`", e.Name(), name)
+			} else if !bytes.Equal(got, want) {
+				t.Errorf("%s.zip is STALE: %q differs from source — run `make examples`", e.Name(), name)
+			}
+		}
+		for name := range zipFiles {
+			if _, ok := srcFiles[name]; !ok {
+				t.Errorf("%s.zip is STALE: has %q not in source — run `make examples`", e.Name(), name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Skip("no example bundles to check")
+	}
+}
+
+func readZipFiles(path string) (map[string][]byte, error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	out := map[string][]byte{}
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		b, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		out[f.Name] = b
+	}
+	return out, nil
+}
+
+func readDirFiles(dir string) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		out[filepath.ToSlash(rel)] = b
+		return nil
+	})
+	return out, err
 }
