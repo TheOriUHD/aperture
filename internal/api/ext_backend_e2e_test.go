@@ -48,18 +48,28 @@ func TestBackendExtensionRunsEndToEnd(t *testing.T) {
 	t.Cleanup(sup.StopAll)
 	s.SetExtensions(sup, denoPath, sdkPath, "http://127.0.0.1:8080")
 
-	// A minimal backend that imports the SDK (exercising the import map under
-	// --deny-import), prints a marker, and stays alive.
-	id := "com.test.backend"
+	// The fixture is the SHIPPED canonical backend example, so this test is also the
+	// standing proof that examples/motion-webhook actually runs end to end — the path
+	// that silently didn't work until the import-map ownership fix. It imports the SDK
+	// (exercising the import map under --deny-import), subscribes to the change feed
+	// (which keeps the process alive, retrying with backoff even without a server here),
+	// and prints its ready marker.
+	const id = "com.example.motion-webhook"
+	exampleDir := filepath.Join("..", "..", "examples", "motion-webhook")
+	manifestBytes, err := os.ReadFile(filepath.Join(exampleDir, "manifest.json"))
+	mustDo(t, err)
+	mainTS, err := os.ReadFile(filepath.Join(exampleDir, "backend", "main.ts"))
+	mustDo(t, err)
+	manifest := string(manifestBytes)
+	m, err := ext.Parse(manifestBytes)
+	mustDo(t, err)
+	d, err := m.Validate()
+	mustDo(t, err)
+
 	extDir := s.extDir(id)
 	mustDo(t, os.MkdirAll(filepath.Join(extDir, "backend"), 0o700))
-	mainTS := "import { aperture } from \"@aperture/sdk\";\n" +
-		"void aperture;\n" +
-		"console.log(\"ext-ready\");\n" +
-		"setInterval(() => {}, 3600_000);\n"
-	mustDo(t, os.WriteFile(filepath.Join(extDir, "backend", "main.ts"), []byte(mainTS), 0o600))
-	manifest := `{"manifest":1,"id":"` + id + `","name":"Backend","version":"1.0.0","backend":{"entry":"backend/main.ts"}}`
-	mustDo(t, os.WriteFile(filepath.Join(extDir, "manifest.json"), []byte(manifest), 0o600))
+	mustDo(t, os.WriteFile(filepath.Join(extDir, "backend", "main.ts"), mainTS, 0o600))
+	mustDo(t, os.WriteFile(filepath.Join(extDir, "manifest.json"), manifestBytes, 0o600))
 
 	// Ownership + traversability exactly like production: the extension dir tree is
 	// owned by its uid; every ancestor up to the temp root is traversable (0711) so
@@ -72,8 +82,9 @@ func TestBackendExtensionRunsEndToEnd(t *testing.T) {
 	_ = os.Chmod(sdkDir, 0o755)
 
 	ex := &store.Extension{
-		ID: id, Name: "Backend", Version: "1.0.0", Source: "sideload",
-		ManifestJSON: manifest, Enabled: true, ExtUID: testUID, InstalledBy: "u1",
+		ID: id, Name: m.Name, Version: m.Version, Source: "sideload",
+		ManifestJSON: manifest, Scopes: d.Scopes, CameraGrants: d.CameraGrants,
+		Enabled: true, ExtUID: testUID, InstalledBy: "u1",
 	}
 	mustDo(t, s.st.CreateExtension(ex))
 
@@ -106,7 +117,7 @@ func TestBackendExtensionRunsEndToEnd(t *testing.T) {
 	if strings.Contains(logs, "exited after") || strings.Contains(logs, "giving up") {
 		t.Fatalf("backend crashed at least once (the ownership bug would do exactly this):\n%s", logs)
 	}
-	if !strings.Contains(logs, "ext-ready") {
-		t.Errorf("expected the backend's ready marker in the logs:\n%s", logs)
+	if !strings.Contains(logs, "motion-webhook ready") {
+		t.Errorf("expected the example's ready marker in the logs:\n%s", logs)
 	}
 }

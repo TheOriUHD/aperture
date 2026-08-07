@@ -11,10 +11,11 @@ extension is a small bundle that can contribute either or both of:
   supervises. It reacts to the live change feed and calls the Aperture API, and —
   if you grant it — reaches declared hosts on the network.
 
-One extension can be both. The canonical example,
-[`examples/ha-room-lights`](../../examples/ha-room-lights/), adds a panel to the
-camera-detail view **and** turns on that room's Home Assistant lights while you
-watch.
+One extension can be both. Two worked examples ship in `examples/`:
+[`ha-room-lights`](../../examples/ha-room-lights/) — a **UI panel** that toggles the
+current camera's Home Assistant light while you watch; and
+[`motion-webhook`](../../examples/motion-webhook/) — a **headless backend** that posts
+to a webhook when motion is detected on a granted camera, with nobody watching.
 
 ## What an extension can and cannot do
 
@@ -88,5 +89,7 @@ uninstalling deletes its files and its stored data.
   real controls.
 - **[security.md](security.md)** — the sandbox model in plain language: what it
   stops, what it does not.
-- **[examples/ha-room-lights](../../examples/ha-room-lights/)** — the canonical
+- **[examples/motion-webhook](../../examples/motion-webhook/)** — the canonical
+  **backend** example: react to the change feed, read settings, make one outbound call.
+- **[examples/ha-room-lights](../../examples/ha-room-lights/)** — the canonical panel
   bundle you can copy.

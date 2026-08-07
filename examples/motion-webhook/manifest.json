@@ -1,0 +1,35 @@
+{
+  "manifest": 1,
+  "id": "com.example.motion-webhook",
+  "name": "Motion Webhook",
+  "version": "1.0.0",
+  "author": "Jane Doe",
+  "description": "Posts to a webhook when motion is detected on a granted camera — nobody has to be watching.",
+  "minApiVersion": "v1",
+  "permissions": {
+    "data": { "events": "read" },
+    "cameras": "all",
+    "network": ["https://hooks.example.com"]
+  },
+  "settings": [
+    {
+      "key": "webhook_url",
+      "label": "Webhook URL",
+      "type": "text",
+      "required": true,
+      "default": "https://hooks.example.com/services/T000/B000/replace-me",
+      "help": "Where to POST on motion. Must be under the network host this extension was granted (hooks.example.com) — edit permissions.network to use a different host."
+    },
+    {
+      "key": "auth_token",
+      "label": "Authorization token",
+      "type": "secret",
+      "help": "Optional. Sent as a Bearer token on the webhook request. Stored privately and never shown again."
+    }
+  ],
+  "backend": {
+    "entry": "backend/main.ts",
+    "denoVersion": "2"
+  },
+  "update": { "url": "https://example.com/motion-webhook/manifest.json" }
+}
