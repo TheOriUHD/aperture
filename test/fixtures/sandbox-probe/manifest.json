@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "com.aperture.sandbox-probe",
+  "name": "Sandbox Isolation Probe",
+  "version": "1.0.0",
+  "author": "Aperture",
+  "description": "Verifies the UI-extension sandbox: it tries to read the session cookie, reach into the parent page, and fetch the API directly — all must fail — then confirms the sanctioned broker path still works.",
+  "minApiVersion": "v1",
+  "permissions": {
+    "data": { "cameras": "read" }
+  },
+  "ui": {
+    "panels": [
+      { "slot": "dashboard-card", "entry": "ui/panel.html", "title": "Sandbox Isolation Probe" }
+    ]
+  }
+}

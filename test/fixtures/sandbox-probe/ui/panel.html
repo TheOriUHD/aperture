@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sandbox Isolation Probe</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:14px; color:#e6e9ef; background:#12151b;
+         font:13px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  h1 { font-size:14px; margin:0 0 2px; }
+  .sub { color:#8a93a3; margin:0 0 12px; font-size:12px; }
+  ul { list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+  li { display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border-radius:8px;
+       background:#1a1f28; border:1px solid #262c37; }
+  .badge { flex:0 0 auto; font-weight:700; font-size:11px; padding:2px 8px; border-radius:999px;
+           text-transform:uppercase; letter-spacing:.02em; }
+  .ok   { background:#0f2e1b; color:#57d98a; border:1px solid #1c5236; }
+  .leak { background:#3a1416; color:#ff8a8f; border:1px solid #6e2327; }
+  .info { background:#10283a; color:#5cc0ff; border:1px solid #1e496b; }
+  .head { display:flex; flex-direction:column; }
+  .name { font-weight:600; }
+  .detail { color:#8a93a3; font-size:11.5px; word-break:break-word; }
+  .verdict { margin-top:12px; font-size:12px; font-weight:600; }
+</style>
+</head>
+<body>
+  <h1>🛡️ Sandbox Isolation Probe</h1>
+  <p class="sub">Three raw escapes must be <b>blocked</b>; the sanctioned broker path must <b>work</b>.</p>
+  <ul id="results"></ul>
+  <p class="verdict" id="verdict">Running checks…</p>
+<script>
+(function () {
+  var results = document.getElementById("results");
+  var verdict = document.getElementById("verdict");
+  var leaks = 0, done = 0, total = 4;
+
+  function row(name, kind, label, detail) {
+    if (kind === "leak") leaks++;
+    var li = document.createElement("li");
+    var b = document.createElement("span");
+    b.className = "badge " + kind; b.textContent = label;
+    var head = document.createElement("div"); head.className = "head";
+    var nm = document.createElement("span"); nm.className = "name"; nm.textContent = name;
+    var dt = document.createElement("span"); dt.className = "detail"; dt.textContent = detail;
+    head.appendChild(nm); head.appendChild(dt);
+    li.appendChild(b); li.appendChild(head);
+    results.appendChild(li);
+    done++;
+    if (done >= total) {
+      verdict.textContent = leaks === 0
+        ? "✓ Isolation held on all counts — the panel cannot reach cookies, the parent page, or the API except through the scope-checked broker."
+        : "✗ " + leaks + " isolation failure(s) above — investigate before trusting the sandbox.";
+      verdict.style.color = leaks === 0 ? "#57d98a" : "#ff8a8f";
+      try { if (window.aperture && window.aperture.resize) window.aperture.resize(document.documentElement.scrollHeight + 8); } catch (e) {}
+    }
+  }
+
+  // 1) document.cookie — must never expose the session cookie.
+  try {
+    var c = document.cookie;
+    if (c && c.indexOf("aperture_session") !== -1)
+      row("Read document.cookie", "leak", "Leak", "session cookie visible: " + c);
+    else
+      row("Read document.cookie", "ok", "Blocked", c ? ("only non-session cookies: " + c) : "empty — no cookies in this opaque origin");
+  } catch (e) {
+    row("Read document.cookie", "ok", "Blocked", "threw " + ((e && e.name) || "SecurityError"));
+  }
+
+  // 2) Reach into the parent page's DOM — cross-origin, must be denied.
+  try {
+    var t = window.parent.document.title;
+    row("Read parent page DOM", "leak", "Leak", "parent <title> readable: " + t);
+  } catch (e) {
+    row("Read parent page DOM", "ok", "Blocked", "threw " + ((e && e.name) || "SecurityError"));
+  }
+
+  // 3) Direct fetch to the API — CSP connect-src 'none' + opaque origin must block it.
+  fetch("/api/v1/cameras", { credentials: "include" })
+    .then(function (r) { return r.text().then(function (body) {
+      row("Direct fetch /api/v1/cameras", "leak", "Leak", "reached API: HTTP " + r.status + " (" + body.length + " bytes)");
+    }); })
+    .catch(function (e) {
+      row("Direct fetch /api/v1/cameras", "ok", "Blocked", "refused: " + ((e && e.message) || "blocked by CSP"));
+    });
+
+  // 4) Sanctioned path via the broker — SHOULD work, proving the sandbox permits the
+  //    one intended channel while blocking the raw escapes above.
+  if (!(window.aperture && window.aperture.request)) {
+    row("Broker request /cameras", "leak", "Missing", "window.aperture was not injected — the SDK bridge is absent");
+  } else {
+    window.aperture.request("GET", "/cameras")
+      .then(function (list) {
+        var n = Array.isArray(list) ? list.length : 0;
+        row("Broker request /cameras", "info", "Works", "reached the API through the scope-checked broker: " + n + " camera(s) visible");
+      })
+      .catch(function (e) {
+        row("Broker request /cameras", "info", "Reached", "broker applied authz: " + ((e && e.message) || "error"));
+      });
+  }
+})();
+</script>
+</body>
+</html>
