@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { Switch } from "../components/ui/Switch";
 import { ExtIcon } from "./ExtIcon";
 import { PermissionList } from "./PermissionList";
-import { CameraGrantList, useCameraChoices, grantsToSend, initialSelection } from "./CameraGrants";
+import { CameraGrantControl, initialGrantValue } from "./CameraGrants";
 import type { ExtItem, UpdateInfo } from "./types";
 import { useExtActions } from "./useExtensions";
 
@@ -186,26 +186,23 @@ export function ExtRow({
 // request is the ceiling; the user narrows within it. Saving re-mints the token (no
 // re-consent — camera scope is the user's decision, not a new permission).
 function CameraEdit({ ext, actions }: { ext: ExtItem; actions: Actions }) {
-  // The API returns null for an all-cameras request/grant (a nil Go slice); treat it
-  // as the empty array it means.
+  // The API returns [] for an all-cameras request/grant; be defensive about null too.
   const grants = ext.cameraGrants ?? [];
   const requested = ext.requestedCameras ?? [];
-  const { choices } = useCameraChoices(ext.requestsCameras, requested);
   const requestAll = ext.requestsCameras && requested.length === 0;
   const grantsKey = grants.join(",");
-  const [selected, setSelected] = useState<Set<string>>(() => initialSelection(choices, grants));
+  const [grant, setGrant] = useState<string[] | null>(() => initialGrantValue(requestAll, requested, grants));
   useEffect(() => {
-    setSelected(initialSelection(choices, grants));
+    setGrant(initialGrantValue(requestAll, requested, grants));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [choices.length, ext.id, grantsKey]);
+  }, [ext.id, grantsKey, requestAll]);
 
-  const toSend = grantsToSend(selected, choices, requestAll);
   const currentIsAll = grants.length === 0;
   const dirty =
-    toSend === null
+    grant === null
       ? !currentIsAll
-      : currentIsAll || [...toSend].sort().join(",") !== [...grants].sort().join(",");
-  const canSave = selected.size > 0 && dirty;
+      : currentIsAll || [...grant].sort().join(",") !== [...grants].sort().join(",");
+  const canSave = (grant === null || grant.length > 0) && dirty;
 
   return (
     <div className="rounded-lg border border-line bg-ink-900/40 p-3">
@@ -217,16 +214,12 @@ function CameraEdit({ ext, actions }: { ext: ExtItem; actions: Actions }) {
         <button
           className="btn-subtle h-8 shrink-0"
           disabled={!canSave || actions.setCameras.isPending}
-          onClick={() => actions.setCameras.mutate({ id: ext.id, cameras: toSend })}
+          onClick={() => actions.setCameras.mutate({ id: ext.id, cameras: grant })}
         >
           {actions.setCameras.isPending ? "Saving…" : "Save"}
         </button>
       </div>
-      {choices.length === 0 ? (
-        <p className="text-xs text-fg-faint">No cameras are available to you to grant.</p>
-      ) : (
-        <CameraGrantList choices={choices} selected={selected} onChange={setSelected} />
-      )}
+      <CameraGrantControl requestsCameras={ext.requestsCameras} requestedCameras={requested} value={grant} onChange={setGrant} />
     </div>
   );
 }

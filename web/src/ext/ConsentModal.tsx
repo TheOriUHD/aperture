@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Puzzle, AlertTriangle, ShieldCheck, Cctv } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
 import { PermissionList } from "./PermissionList";
-import { CameraGrantList, useCameraChoices, grantsToSend, initialSelection } from "./CameraGrants";
+import { CameraGrantControl, initialGrantValue } from "./CameraGrants";
 import type { StageView } from "./types";
 
 // The consent decision, as a modal over the manager. Identity on top; permissions in
@@ -28,20 +28,21 @@ export function ConsentModal({
   const open = !!stage;
   const store = stage?.source === "store";
 
-  const { choices, requestAll } = useCameraChoices(stage?.requestsCameras ?? false, stage?.requestedCameras ?? []);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Default to what the manifest requested (all choices checked) each time a fresh
-  // bundle is staged or its cameras resolve.
+  const requestAll = (stage?.requestsCameras ?? false) && (stage?.requestedCameras ?? []).length === 0;
+  const [grant, setGrant] = useState<string[] | null>(null);
+  // Default to what the manifest requested each time a fresh bundle is staged.
   useEffect(() => {
-    setSelected(initialSelection(choices, null));
+    setGrant(initialGrantValue(requestAll, stage?.requestedCameras ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage?.stagingId, choices.length]);
+  }, [stage?.stagingId, requestAll]);
 
   // Narrowing happens at install; an update preserves the user's existing grants
   // (editable from the row), so the picker doesn't appear on the update re-consent.
   const needsCamera = !!stage?.requestsCameras && mode === "install";
-  const canConfirm = !needsCamera || selected.size > 0;
-  const cameras = needsCamera ? grantsToSend(selected, choices, requestAll) : undefined;
+  // null = "all cameras (incl. future)"; a non-empty list is a valid choice; an empty
+  // list means "specific" with nothing selected, which is not installable.
+  const canConfirm = !needsCamera || grant === null || grant.length > 0;
+  const cameras = needsCamera ? grant : undefined;
 
   return (
     <Modal
@@ -112,11 +113,12 @@ export function ConsentModal({
                   </p>
                 </div>
               </div>
-              {choices.length === 0 ? (
-                <p className="text-xs text-fg-faint">No cameras are available to you to grant.</p>
-              ) : (
-                <CameraGrantList choices={choices} selected={selected} onChange={setSelected} />
-              )}
+              <CameraGrantControl
+                requestsCameras={stage.requestsCameras}
+                requestedCameras={stage.requestedCameras}
+                value={grant}
+                onChange={setGrant}
+              />
             </div>
           )}
 
