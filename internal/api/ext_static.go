@@ -98,7 +98,9 @@ const extSDKBootstrap = `<script>(function(){
   });
   function call(t,p){return new Promise(function(res,rej){var id=++seq;pending[id]={resolve:res,reject:rej};parent.postMessage({__apReq:true,id:id,type:t,payload:p},'*');});}
   function req(method,path,body){return call('api.request',{method:method,path:path,body:body});}
+  var camId=null; try{camId=new URLSearchParams(location.search).get('camera');}catch(e){}
   window.aperture={
+    cameraId:camId,
     request:req,
     cameras:{list:function(){return req('GET','/cameras');},get:function(id){return req('GET','/cameras/'+id);}},
     events:{list:function(q){return req('GET','/events'+(q?('?'+q):''));}},
@@ -107,6 +109,13 @@ const extSDKBootstrap = `<script>(function(){
       set:function(k,v){return call('storage.set',{key:k,value:v});},
       delete:function(k){return call('storage.delete',{key:k});},
       keys:function(){return call('storage.keys',{});}
+    },
+    settings:{
+      get:function(k){return call('settings.get',{key:k});},
+      all:function(){return call('settings.all',{});}
+    },
+    net:{
+      fetch:function(url,init){init=init||{};return call('net.fetch',{url:url,method:init.method,headers:init.headers,body:init.body});}
     },
     resize:function(h){parent.postMessage({__apReq:true,type:'ui.resize',payload:{height:h}},'*');}
   };

@@ -233,6 +233,16 @@ func (s *Server) routes() http.Handler {
 		g.Get("/ext/{id}/kv/{key}", authed, s.handleExtKVGet)
 		g.Put("/ext/{id}/kv/{key}", authed, s.handleExtKVSet)
 		g.Delete("/ext/{id}/kv/{key}", authed, s.handleExtKVDelete)
+		// Extension-defined settings. Reads are authed (a viewer's panel picks up
+		// non-secret config; secret values are never returned); writes are admin-only,
+		// validated, and restart the backend so it re-reads them.
+		g.Get("/ext/{id}/settings", authed, s.handleExtSettingsGet)
+		g.Put("/ext/{id}/settings", adminSessionOnly, s.handleExtSettingsPut)
+		// Host-mediated outbound fetch (the `network` permission, panel side): the
+		// host performs the request to a DECLARED host only, expanding {{secret:key}}
+		// from the extension's own secret settings server-side so the plaintext never
+		// reaches the browser.
+		g.Post("/ext/{id}/fetch", authed, s.handleExtFetch)
 		g.Post("/setup", pub, s.handleSetup)
 		g.Post("/auth/login", pub, s.handleLogin)
 		g.Post("/auth/login/2fa", pub, s.handleLogin2FA)

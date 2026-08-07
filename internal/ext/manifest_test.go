@@ -43,12 +43,19 @@ func TestManifestHALightsResolves(t *testing.T) {
 	if want := []string{"hallway", "front-door"}; !reflect.DeepEqual(d.CameraGrants, want) {
 		t.Fatalf("cameraGrants = %v, want %v", d.CameraGrants, want)
 	}
+	if !d.RequestsCameras || d.RequestsAll {
+		t.Fatalf("a specific camera list = RequestsCameras && !RequestsAll, got %v/%v", d.RequestsCameras, d.RequestsAll)
+	}
+	if d.CameraConsent == "" {
+		t.Fatalf("a camera-requesting extension must carry a camera-consent line")
+	}
 	if want := []string{"homeassistant.local:8123"}; !reflect.DeepEqual(d.NetHosts, want) {
 		t.Fatalf("netHosts = %v, want %v (scheme stripped, port kept)", d.NetHosts, want)
 	}
-	// Consent names the cameras and warns about outbound.
+	// The generic consent lines warn about outbound + storage + the hard "cannot".
+	// Camera specifics live in CameraConsent + the picker, NOT these lines.
 	joined := strings.Join(d.ConsentLines, "\n")
-	for _, must := range []string{"hallway", "front-door", "homeassistant.local:8123", "cannot read your recordings"} {
+	for _, must := range []string{"homeassistant.local:8123", "private folder", "cannot read your recordings"} {
 		if !strings.Contains(joined, must) {
 			t.Errorf("consent missing %q in:\n%s", must, joined)
 		}
@@ -76,8 +83,13 @@ func TestManifestRejections(t *testing.T) {
 		"unknown data domain":              `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"data":{"nope":"read"}}}`,
 		"un-grantable value (coverage write)": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"data":{"coverage":"write"}}}`,
 		"bad alarm value":                  `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"alarm":"disarm"}}`,
-		"network without backend":          `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","ui":{"panels":[{"slot":"settings","entry":"ui/x.html"}]},"permissions":{"network":["https://x.test"]}}`,
 		"bad network url":                  `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"network":["not a url"]}}`,
+		"bad camera request (string)":      `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"cameras":"some"}}`,
+		"empty camera id":                  `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"cameras":["ok",""]}}`,
+		"unknown setting type":             `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"k","label":"L","type":"colour"}]}`,
+		"select without options":           `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"k","label":"L","type":"select"}]}`,
+		"duplicate setting key":            `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"k","label":"A","type":"text"},{"key":"k","label":"B","type":"text"}]}`,
+		"bad setting key charset":          `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"Bad Key","label":"L","type":"text"}]}`,
 		"unknown ui slot":                  `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","ui":{"panels":[{"slot":"nope","entry":"ui/x.html"}]}}`,
 		"entry path traversal":             `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"../escape.ts"}}`,
 		"entry absolute path":              `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"/etc/passwd"}}`,
@@ -92,6 +104,89 @@ func TestManifestRejections(t *testing.T) {
 				t.Fatalf("expected rejection, got none")
 			}
 		})
+	}
+}
+
+func TestCameraModelExplicit(t *testing.T) {
+	// "all" — an explicit request for every camera, incl. future ones.
+	m, _ := Parse([]byte(`{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"data":{"events":"read"},"cameras":"all"}}`))
+	d, err := m.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.RequestsCameras || !d.RequestsAll || len(d.CameraGrants) != 0 {
+		t.Fatalf(`"all" => RequestsCameras && RequestsAll && no grant list; got %v/%v/%v`, d.RequestsCameras, d.RequestsAll, d.CameraGrants)
+	}
+
+	// A specific list is a ceiling, not "all".
+	m, _ = Parse([]byte(`{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"data":{"events":"read"},"cameras":["c1"]}}`))
+	d, _ = m.Validate()
+	if !d.RequestsCameras || d.RequestsAll || !reflect.DeepEqual(d.CameraGrants, []string{"c1"}) {
+		t.Fatalf("specific list wrong: %v/%v/%v", d.RequestsCameras, d.RequestsAll, d.CameraGrants)
+	}
+
+	// Absent = NO camera access (a pure non-camera extension).
+	m, _ = Parse([]byte(`{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"system":"read"}}`))
+	d, _ = m.Validate()
+	if d.RequestsCameras || d.CameraConsent != "" {
+		t.Fatalf("absent cameras must not request cameras; got %v / %q", d.RequestsCameras, d.CameraConsent)
+	}
+}
+
+func TestCameraDataWithoutRequestGate(t *testing.T) {
+	// A fresh bundle reading camera data (events) without a cameras request is
+	// incoherent under the opt-in model — the install gate must catch it.
+	m, _ := Parse([]byte(`{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"data":{"events":"read"}}}`))
+	d, _ := m.Validate()
+	if !CameraDataWithoutRequest(d) {
+		t.Fatalf("events:read without a cameras request should be flagged for install")
+	}
+	// The SAME manifest still Validates without error (lenient) — so an extension
+	// installed before this model is never retro-broken on the spawn path.
+	if _, err := m.Validate(); err != nil {
+		t.Fatalf("Validate must stay lenient for legacy manifests, got %v", err)
+	}
+	// Declaring the cameras permission resolves the incoherence.
+	m2, _ := Parse([]byte(`{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"data":{"events":"read"},"cameras":"all"}}`))
+	d2, _ := m2.Validate()
+	if CameraDataWithoutRequest(d2) {
+		t.Fatalf("events:read WITH cameras:all is coherent")
+	}
+	// A non-camera extension is never flagged.
+	m3, _ := Parse([]byte(`{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"system":"read"}}`))
+	d3, _ := m3.Validate()
+	if CameraDataWithoutRequest(d3) {
+		t.Fatalf("a non-camera extension must never be flagged")
+	}
+}
+
+func TestSettingsImplyStorageAndSecrets(t *testing.T) {
+	src := `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},
+	  "settings":[
+	    {"key":"url","label":"URL","type":"text","required":true},
+	    {"key":"token","label":"Token","type":"secret","required":true},
+	    {"key":"mode","label":"Mode","type":"select","options":[{"value":"a","label":"A"}]}
+	  ]}`
+	m, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := m.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.HasStorage {
+		t.Fatalf("declaring settings must imply storage")
+	}
+	if len(d.Settings) != 3 {
+		t.Fatalf("settings length = %d, want 3", len(d.Settings))
+	}
+	if !reflect.DeepEqual(d.SecretKeys, []string{"token"}) {
+		t.Fatalf("secret keys = %v, want [token]", d.SecretKeys)
+	}
+	// The storage consent line reflects that secrets may be stored.
+	if !strings.Contains(strings.Join(d.ConsentLines, "\n"), "secrets you enter") {
+		t.Fatalf("settings should produce a secret-aware storage consent line: %v", d.ConsentLines)
 	}
 }
 

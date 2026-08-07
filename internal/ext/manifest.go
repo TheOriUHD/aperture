@@ -7,6 +7,7 @@
 package ext
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -31,6 +32,13 @@ type Manifest struct {
 	UI            *UISpec      `json:"ui,omitempty"`
 	Backend       *BackendSpec `json:"backend,omitempty"`
 	Update        *UpdateSpec  `json:"update,omitempty"`
+	// Settings is the extension's own settings schema: the fields the manager
+	// renders as a form on the extension's row and the extension reads back like
+	// storage. Declaring settings IMPLIES the storage permission (settings live in
+	// the extension's private ext_kv namespace), so an author never has to write
+	// both. Secret fields are write-only — their values are never returned to a
+	// client, only whether one is set.
+	Settings []SettingField `json:"settings,omitempty"`
 	// Icon is an OPTIONAL bundle-relative path (under ui/, a .png) used as the
 	// nav-rail icon when the user pins the extension (T2.1). It is served as an
 	// <img> from /ext/{id}/* under the extension CSP and validated to be a small
@@ -43,13 +51,73 @@ type Manifest struct {
 // not expressible here is not grantable — notably the session-only operations
 // (tokens/users/backup/restore/restart/reindex/purge), which have no scope at all.
 type Permissions struct {
-	Data    map[string]string `json:"data,omitempty"`    // domain -> "read"|"write" (media also "live")
-	Alarm   string            `json:"alarm,omitempty"`   // "arm"
-	System  string            `json:"system,omitempty"`  // "read"
-	Cameras []string          `json:"cameras,omitempty"` // camera-id grants (composed as owner ∩ grants)
-	Network []string          `json:"network,omitempty"` // outbound URLs (backend only)
-	Storage bool              `json:"storage,omitempty"` // its own namespaced ext_kv
+	Data   map[string]string `json:"data,omitempty"`   // domain -> "read"|"write" (media also "live")
+	Alarm  string            `json:"alarm,omitempty"`  // "arm"
+	System string            `json:"system,omitempty"` // "read"
+	// Cameras is the camera request — the PRIMARY privacy control and camera access
+	// is OPT-IN: absent means the extension gets NO camera data and no camera UI
+	// (not "all"). "all" is an explicit request for every camera plus any added
+	// later; a list is a ceiling the installing admin narrows within. An old bundle
+	// that wrote a bare id list still parses (→ that list).
+	Cameras *CameraReq `json:"cameras,omitempty"`
+	Network []string   `json:"network,omitempty"` // outbound URLs (backend + host-mediated panel fetch)
+	Storage bool       `json:"storage,omitempty"` // its own namespaced ext_kv (also implied by settings)
 }
+
+// CameraReq is the manifest's camera request. It is EITHER "all" (every camera,
+// including any added later) or an explicit list of camera ids (a ceiling the
+// admin narrows). Absent from the manifest (a nil *CameraReq) = no camera access
+// at all. A bare JSON string other than "all" is rejected.
+type CameraReq struct {
+	All bool
+	IDs []string
+}
+
+func (c *CameraReq) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if string(b) == "null" {
+		return nil
+	}
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		if s != "all" {
+			return fmt.Errorf(`permissions.cameras: %q is not valid (use "all" or a list of camera ids)`, s)
+		}
+		c.All = true
+		return nil
+	}
+	var ids []string
+	if err := json.Unmarshal(b, &ids); err != nil {
+		return fmt.Errorf(`permissions.cameras must be "all" or a list of camera ids`)
+	}
+	c.IDs = ids
+	return nil
+}
+
+// SettingField is one field of an extension's settings form. Type is one of
+// text|secret|number|boolean|select. A secret field is write-only: its stored
+// value is never returned to a client, only whether one is set.
+type SettingField struct {
+	Key         string          `json:"key"`
+	Label       string          `json:"label"`
+	Type        string          `json:"type"`
+	Help        string          `json:"help,omitempty"`
+	Placeholder string          `json:"placeholder,omitempty"`
+	Required    bool            `json:"required,omitempty"`
+	Default     json.RawMessage `json:"default,omitempty"`
+	Options     []SettingOption `json:"options,omitempty"` // select only
+}
+
+type SettingOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// settingTypes is the closed set of field types the form + validation understand.
+var settingTypes = map[string]bool{"text": true, "secret": true, "number": true, "boolean": true, "select": true}
 
 type UISpec struct {
 	Panels []Panel `json:"panels"`
@@ -77,14 +145,22 @@ type UpdateSpec struct {
 // runtime paths; this stays pure.
 type Derived struct {
 	Scopes       []string // API scopes for the extension's token / broker claim
-	CameraGrants []string // camera ids
-	NetHosts     []string // host[:port] for Deno --allow-net (backend)
+	CameraGrants []string // camera ids (empty when "all" or no request)
+	NetHosts     []string // host[:port] for Deno --allow-net + host-mediated fetch
 	ConsentLines []string // plain-language lines for the consent screen
 	HasBackend      bool
 	HasUI           bool
 	HasNavPanel     bool   // declares a full-page nav-panel view → eligible to be pinned (T2.1)
 	Icon            string // validated bundle-relative icon path (under ui/, .png), or ""
-	RequestsCameras bool   // has a camera-touching scope → the consent screen offers camera narrowing
+	RequestsCameras bool   // the manifest EXPLICITLY requested cameras ("all" or a list)
+	RequestsAll     bool   // requested "all" — every camera, including any added later
+	CameraConsent   string // one honest line for the consent camera section ("" when no request)
+	// Settings is the resolved settings schema; SecretKeys is the subset whose
+	// values must never be returned to a client. HasStorage folds in the settings
+	// auto-imply (settings ⇒ storage).
+	Settings   []SettingField
+	SecretKeys []string
+	HasStorage bool
 }
 
 const ManifestVersion = 1
@@ -92,6 +168,10 @@ const ManifestVersion = 1
 var (
 	reID     = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`) // reverse-DNS
 	reSemver = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
+
+	// reSettingKey bounds a settings key to the same charset a KV key allows, so a
+	// setting maps cleanly onto the extension's ext_kv namespace.
+	reSettingKey = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 	// knownSlots are the host mount points Pass 1 exposes (T1.6).
 	knownSlots = map[string]bool{"camera-detail": true, "settings": true, "dashboard-card": true, "nav-panel": true}
@@ -230,33 +310,121 @@ func (m *Manifest) Validate() (Derived, error) {
 		scopes["system:read"] = true
 	}
 	d.Scopes = sortedKeys(scopes)
-	d.RequestsCameras = touchesCameras(d.Scopes)
 
-	// Camera grants. The manifest's list is a REQUEST — a ceiling the installing
-	// user narrows at consent — not a fixed setting; empty means "all your cameras".
-	for _, c := range m.Permissions.Cameras {
-		if strings.TrimSpace(c) == "" {
-			return d, fmt.Errorf("permissions.cameras: empty camera id")
-		}
-	}
-	d.CameraGrants = append([]string(nil), m.Permissions.Cameras...)
-
-	// Network (outbound) — backend only.
-	if len(m.Permissions.Network) > 0 {
-		if !d.HasBackend {
-			return d, fmt.Errorf("permissions.network requires a backend (a UI-only extension cannot make outbound requests)")
-		}
-		for _, raw := range m.Permissions.Network {
-			host, err := netHost(raw)
-			if err != nil {
-				return d, fmt.Errorf("permissions.network: %w", err)
+	// Camera access is OPT-IN and explicit. Absent (nil) = no camera data, no
+	// camera UI. "all" = every camera plus any added later. A list is a ceiling the
+	// installing admin narrows within. (Whether a camera-DATA scope may appear
+	// without a camera request is a fresh-install coherence rule enforced by
+	// CameraDataWithoutRequest, NOT here — so an already-installed extension whose
+	// older manifest predates this model is never retro-rejected on the spawn path.)
+	if cr := m.Permissions.Cameras; cr != nil {
+		d.RequestsCameras = true
+		d.RequestsAll = cr.All
+		for _, c := range cr.IDs {
+			if strings.TrimSpace(c) == "" {
+				return d, fmt.Errorf("permissions.cameras: empty camera id")
 			}
-			d.NetHosts = append(d.NetHosts, host)
+		}
+		d.CameraGrants = append([]string(nil), cr.IDs...)
+		d.CameraConsent = cameraConsentLine(d.Scopes)
+	}
+
+	// Network (outbound). Allowed for a backend (Deno --allow-net) AND for a UI panel
+	// (the host-mediated /ext/{id}/fetch egress) — both bounded to these hosts.
+	for _, raw := range m.Permissions.Network {
+		host, err := netHost(raw)
+		if err != nil {
+			return d, fmt.Errorf("permissions.network: %w", err)
+		}
+		d.NetHosts = append(d.NetHosts, host)
+	}
+
+	// Settings schema. Declaring settings implies storage (settings live in the
+	// extension's private ext_kv namespace); secret fields are recorded so their
+	// values are never returned to a client.
+	if err := validateSettings(m.Settings); err != nil {
+		return d, err
+	}
+	d.Settings = m.Settings
+	for _, f := range m.Settings {
+		if f.Type == "secret" {
+			d.SecretKeys = append(d.SecretKeys, f.Key)
 		}
 	}
+	d.HasStorage = m.Permissions.Storage || len(m.Settings) > 0
 
 	d.ConsentLines = consentLines(m, d)
 	return d, nil
+}
+
+// validateSettings checks a settings schema: unique, well-formed keys; a known
+// type; select fields carry options.
+func validateSettings(fields []SettingField) error {
+	seen := map[string]bool{}
+	for i, f := range fields {
+		if strings.TrimSpace(f.Key) == "" {
+			return fmt.Errorf("settings[%d].key is required", i)
+		}
+		if !reSettingKey.MatchString(f.Key) {
+			return fmt.Errorf("settings[%d].key %q must be [a-z0-9._-]", i, f.Key)
+		}
+		if seen[f.Key] {
+			return fmt.Errorf("settings: duplicate key %q", f.Key)
+		}
+		seen[f.Key] = true
+		if strings.TrimSpace(f.Label) == "" {
+			return fmt.Errorf("settings[%d].label is required", i)
+		}
+		if !settingTypes[f.Type] {
+			return fmt.Errorf("settings[%d] (%s): unknown type %q", i, f.Key, f.Type)
+		}
+		if f.Type == "select" {
+			if len(f.Options) == 0 {
+				return fmt.Errorf("settings[%d] (%s): a select field needs options", i, f.Key)
+			}
+			for j, o := range f.Options {
+				if strings.TrimSpace(o.Value) == "" {
+					return fmt.Errorf("settings[%d].options[%d].value is required", i, j)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// CameraDataWithoutRequest reports a fresh-install-only incoherence: the extension
+// reads camera data (cameras/events/coverage/media/segments) yet did not declare
+// the `cameras` permission. Enforced at install (stageBundleBytes) so that an
+// absent camera request unambiguously means NO camera access; the spawn/derive
+// path stays lenient so an extension installed under the older model is never
+// retro-broken when nvrd restarts.
+func CameraDataWithoutRequest(d Derived) bool {
+	return touchesCameras(d.Scopes) && !d.RequestsCameras
+}
+
+// cameraConsentLine is the single honest statement shown in the consent camera
+// section, scaled to what the extension can actually see.
+func cameraConsentLine(scopes []string) string {
+	live, data := false, false
+	for _, s := range scopes {
+		switch strings.SplitN(s, ":", 2)[0] {
+		case "media":
+			if s == "media:live" {
+				live = true
+			}
+			data = true
+		case "cameras", "events", "coverage", "segments":
+			data = true
+		}
+	}
+	switch {
+	case live:
+		return "Watch your cameras' live video"
+	case data:
+		return "See your cameras and their events"
+	default:
+		return "Add its controls to your cameras' views" // placement only, no camera data
+	}
 }
 
 // safeEntry rejects absolute paths and traversal so an entry can only reference a
@@ -283,20 +451,20 @@ func netHost(raw string) (string, error) {
 func consentLines(m *Manifest, d Derived) []string {
 	var lines []string
 	if len(d.Scopes) > 0 {
-		verb := scopeSummary(d.Scopes)
-		if len(d.CameraGrants) > 0 {
-			lines = append(lines, fmt.Sprintf("%s — only for the cameras: %s", verb, strings.Join(d.CameraGrants, ", ")))
-		} else if touchesCameras(d.Scopes) {
-			lines = append(lines, verb+" — for all your cameras")
-		} else {
-			lines = append(lines, verb)
-		}
+		// A generic data summary WITHOUT any camera qualifier — the camera decision
+		// (whether, and which) is the user's, made in the consent screen's own camera
+		// section + picker, so restating it here would double up.
+		lines = append(lines, scopeSummary(d.Scopes))
 	}
 	for _, h := range d.NetHosts {
 		lines = append(lines, fmt.Sprintf("Connect over the internet to %s — it can send your data there", h))
 	}
-	if m.Permissions.Storage {
-		lines = append(lines, "Keep its own settings in a private folder")
+	if d.HasStorage {
+		if len(d.Settings) > 0 {
+			lines = append(lines, "Store its settings — including any secrets you enter — in a private folder")
+		} else {
+			lines = append(lines, "Keep its own settings in a private folder")
+		}
 	}
 	lines = append(lines, "It cannot read your recordings files, your database, or your passwords.")
 	return lines

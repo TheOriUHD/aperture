@@ -185,6 +185,7 @@ func (s *Server) handleExtConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.clearStageSource(req.StagingID)
+	s.seedSettingDefaults(m.ID, m) // non-secret defaults visible to the backend/panel immediately
 	s.freezeV1()
 	s.spawnIfBackend(ex)
 	writeJSON(w, http.StatusCreated, s.extView(ex))
@@ -209,6 +210,10 @@ func (s *Server) handleExtPanels(w http.ResponseWriter, r *http.Request) {
 			for _, p := range m.UI.Panels {
 				out = append(out, map[string]any{
 					"extId": ex.ID, "extName": ex.Name, "slot": p.Slot, "entry": p.Entry, "title": p.Title,
+					// The camera grant gates a camera-detail panel's PRESENCE: a specific
+					// grant makes it render only on those cameras; an empty grant (an "all"
+					// request, or no camera request — a pure-UI control) renders everywhere.
+					"cameraGrants": ex.CameraGrants,
 				})
 			}
 		}
@@ -350,6 +355,7 @@ func (s *Server) extView(ex *store.Extension) map[string]any {
 		"hasBackend": false, "hasUI": false, "canPin": false,
 		"consent": []string{}, "updatable": ex.UpdateURL != "",
 		"requestsCameras": false, "requestedCameras": []string{},
+		"requestsAll": false, "cameraConsent": "", "hasSettings": false,
 	}
 	// Parse the stored manifest for the human-facing bits the manager renders
 	// (author, plain-language permissions, whether it can be pinned, its icon).
@@ -363,6 +369,9 @@ func (s *Server) extView(ex *store.Extension) map[string]any {
 			v["consent"] = d.ConsentLines
 			v["requestsCameras"] = d.RequestsCameras
 			v["requestedCameras"] = d.CameraGrants // the manifest ceiling ([] = all); nil→[] centrally in writeJSON
+			v["requestsAll"] = d.RequestsAll       // requested "all" (future-inclusive) vs a specific list
+			v["cameraConsent"] = d.CameraConsent
+			v["hasSettings"] = len(d.Settings) > 0
 			if d.Icon != "" {
 				v["icon"] = "/ext/" + ex.ID + "/" + d.Icon // served as <img>, CSP'd
 			}

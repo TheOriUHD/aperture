@@ -623,6 +623,14 @@ func (s *Server) stageBundleBytes(b []byte, source string) (map[string]any, erro
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
+	// Camera access is opt-in: a fresh bundle that reads camera data must say so with
+	// an explicit `cameras` permission. (Enforced here at install — not in Validate —
+	// so an extension installed under the older model is never retro-rejected when
+	// nvrd restarts and re-derives it on the spawn path.)
+	if ext.CameraDataWithoutRequest(d) {
+		_ = os.RemoveAll(dir)
+		return nil, fmt.Errorf(`this extension reads camera data but does not request cameras — add "cameras": "all" or a list of camera ids under permissions`)
+	}
 	if bad := scanBundleImports(dir); len(bad) > 0 {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("remote imports are not allowed: %s", strings.Join(bad, ", "))
@@ -637,6 +645,8 @@ func stageConsentView(stagingID string, m *ext.Manifest, d ext.Derived, source s
 		"author": m.Author, "description": m.Description, "source": source,
 		"hasBackend": d.HasBackend, "hasUI": d.HasUI, "consent": d.ConsentLines,
 		"requestsCameras": d.RequestsCameras, "requestedCameras": d.CameraGrants, // ceiling; [] = all (nil→[] in writeJSON)
+		"requestsAll": d.RequestsAll, "cameraConsent": d.CameraConsent,
+		"hasSettings": len(d.Settings) > 0,
 	}
 }
 

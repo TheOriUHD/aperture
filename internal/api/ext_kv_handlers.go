@@ -66,9 +66,31 @@ func (s *Server) extKVGuard(r *http.Request, id string) (int, string) {
 	return 0, ""
 }
 
+// manifestHasStorage reports whether the extension has a private KV namespace —
+// either it declared storage, or it declared settings (which imply storage: the
+// settings live in that namespace).
 func manifestHasStorage(manifestJSON string) bool {
 	m, err := ext.Parse([]byte(manifestJSON))
-	return err == nil && m.Permissions.Storage
+	if err != nil {
+		return false
+	}
+	return m.Permissions.Storage || len(m.Settings) > 0
+}
+
+// manifestSecretKeys returns the set of setting keys declared `secret`. Their
+// values must never be returned to a client (a session/CLI caller): a secret is
+// write-only in the UI, and reachable in plaintext only by the extension's own
+// backend, server-side, via its token.
+func manifestSecretKeys(manifestJSON string) map[string]bool {
+	out := map[string]bool{}
+	if m, err := ext.Parse([]byte(manifestJSON)); err == nil {
+		for _, f := range m.Settings {
+			if f.Type == "secret" {
+				out[f.Key] = true
+			}
+		}
+	}
+	return out
 }
 
 func extKVKey(r *http.Request) (string, bool) {
@@ -103,6 +125,16 @@ func (s *Server) handleExtKVGet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeErrorCode(w, http.StatusBadRequest, "validation", "invalid key")
 		return
+	}
+	// A secret setting is write-only to any client: only the extension's own backend
+	// (a token, server-side) may read the plaintext. To a session/CLI caller a secret
+	// key reads as absent, so a UI panel's storage.get(secret) resolves to null rather
+	// than leaking the value into the browser.
+	if c := auth.FromContext(r.Context()); c != nil && c.Class != auth.ClassToken {
+		if ex, e := s.st.GetExtension(id); e == nil && manifestSecretKeys(ex.ManifestJSON)[key] {
+			writeError(w, http.StatusNotFound, "no such key")
+			return
+		}
 	}
 	v, found, err := s.st.ExtKVGet(id, key)
 	if err != nil {

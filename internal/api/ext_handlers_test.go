@@ -57,7 +57,9 @@ func newExtAdmin(t *testing.T) (*Server, cred) {
 	return s, cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
 }
 
-const uiManifest = `{"manifest":1,"id":"com.example.panel","name":"Panel","version":"1.0.0","permissions":{"data":{"events":"read"}},"ui":{"panels":[{"slot":"settings","entry":"ui/panel.html"}]}}`
+// A pure-UI panel with a NON-camera scope: under the opt-in camera model it needs
+// no camera request and gets no camera ceremony at install.
+const uiManifest = `{"manifest":1,"id":"com.example.panel","name":"Panel","version":"1.0.0","permissions":{"system":"read"},"ui":{"panels":[{"slot":"settings","entry":"ui/panel.html"}]}}`
 
 func TestExtInstallLifecycle(t *testing.T) {
 	s, adminC := newExtAdmin(t)
