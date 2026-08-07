@@ -57,6 +57,7 @@ export default function App() {
           <Route path="/alarms" element={<Alarms />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/extensions" element={<ExtensionsPage />} />
+          <Route path="/extensions/:id" element={<ExtensionsPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Suspense>

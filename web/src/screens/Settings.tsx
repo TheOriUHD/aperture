@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ExtensionSlot } from "../ext/ExtensionSlot";
+import { ExtensionsManager } from "../ext/ExtensionsManager";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, UserPlus, Shield, User as UserIcon } from "lucide-react";
@@ -48,6 +49,7 @@ export function Settings() {
     { id: "detection", label: t("settings.tabDetection", "Detection"), admin: true },
     { id: "automations", label: t("settings.tabAutomations", "Automations"), admin: true },
     { id: "integrations", label: t("settings.tabIntegrations", "Integrations"), admin: true },
+    { id: "extensions", label: t("settings.tabExtensions", "Extensions"), admin: true },
     { id: "activity", label: t("settings.tabActivity", "Activity"), admin: true },
   ].filter((tb) => !tb.admin || isAdmin);
 
@@ -131,6 +133,8 @@ export function Settings() {
                 <OidcSettings />
               </>
             )}
+
+            {active === "extensions" && isAdmin && <ExtensionsManager />}
 
             {active === "activity" && isAdmin && <AuditLog />}
 

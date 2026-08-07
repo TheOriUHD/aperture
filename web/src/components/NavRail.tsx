@@ -10,8 +10,8 @@ import {
   Puzzle,
   type LucideIcon,
 } from "lucide-react";
-import { useExtPanels } from "../ext/useExtPanels";
-import { panelsForSlot } from "../ext/panels";
+import { useExtNav } from "../ext/useExtNav";
+import type { ExtNavItem } from "../ext/types";
 
 interface NavItem {
   to: string;
@@ -30,10 +30,12 @@ const settingsItem: NavItem = { to: "/settings", tkey: "nav.settings", label: "S
 // Desktop: a vertical icon rail on the left. Hidden on mobile.
 export function NavRail() {
   const { t } = useTranslation();
-  // Extension nav entry: rendered only when a nav-panel extension is installed,
-  // so with zero extensions the rail is byte-identical to before (R3, append-only).
-  const { data: panels = [] } = useExtPanels();
-  const hasNavPanel = panelsForSlot(panels, "nav-panel").length > 0;
+  // Pinned extensions each earn their own rail entry + full page. Pinning is
+  // user-granted in the manager (never manifest-asserted), so with none pinned the
+  // rail is byte-identical to before. They sit in the bottom group, just above
+  // Settings — the app keeps no "Notifications" rail item, so this is the natural
+  // home for user-elevated destinations.
+  const { data: pinned = [] } = useExtNav();
   return (
     <nav className="hidden lg:flex flex-col items-center gap-1.5 w-[54px] shrink-0 bg-ink-850 border-r border-line py-3">
       <Link
@@ -47,13 +49,41 @@ export function NavRail() {
       {items.map((item) => (
         <RailLink key={item.to} to={item.to} icon={item.icon} label={t(item.tkey, item.label)} />
       ))}
-      {hasNavPanel && (
-        <RailLink to="/extensions" icon={Puzzle} label={t("nav.extensions", "Extensions")} />
-      )}
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col items-center gap-1.5">
+        {pinned.map((ext) => (
+          <ExtRailLink key={ext.id} ext={ext} />
+        ))}
         <RailLink to={settingsItem.to} icon={settingsItem.icon} label={t(settingsItem.tkey, settingsItem.label)} />
       </div>
     </nav>
+  );
+}
+
+// ExtRailLink renders a pinned extension's rail entry. The icon is loaded as an
+// <img> from the extension's CSP'd asset route — NEVER inlined as markup — so a
+// hostile bundle can't run script in the host session via the rail; a missing or
+// broken icon falls back to the neutral Puzzle glyph.
+function ExtRailLink({ ext }: { ext: ExtNavItem }) {
+  return (
+    <NavLink
+      to={`/extensions/${ext.id}`}
+      title={ext.name}
+      aria-label={ext.name}
+      className={({ isActive }) => clsx("nav-item group", isActive && "nav-item-active")}
+    >
+      {({ isActive }) => (
+        <>
+          {ext.icon ? (
+            <img src={ext.icon} alt="" className="h-5 w-5 rounded object-cover" />
+          ) : (
+            <Puzzle className="h-5 w-5" />
+          )}
+          {isActive && (
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r bg-brand" />
+          )}
+        </>
+      )}
+    </NavLink>
   );
 }
 
