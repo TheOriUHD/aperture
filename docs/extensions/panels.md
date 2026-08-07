@@ -101,7 +101,10 @@ const r = await window.aperture.net.fetch(base + "/api/services/light/turn_on", 
 extension's own secret settings by the host, bounded to the declared network host. See
 [settings.md](settings.md) and [permissions.md](permissions.md#network). The bundled
 `ha-room-lights` example is exactly this: it reads the current camera, finds its light in
-a camera→entity mapping the user configured, and toggles it in Home Assistant.
+a camera→entity mapping the user configured, reads the light's state and capabilities,
+and offers on/off plus capability-aware brightness, colour, and warm–cool controls — all
+of that is just more fields on the same `net.fetch` GET/POST, so **rich device control
+needs no SDK surface beyond `net.fetch` + `settings`.**
 
 ### Networking notes for self-hosters
 

@@ -2,9 +2,9 @@
   "manifest": 1,
   "id": "com.example.ha-room-lights",
   "name": "Home Assistant Room Lights",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "author": "Jane Doe",
-  "description": "Toggle a camera's room light in Home Assistant from its camera view — you configure the server and which light maps to which camera.",
+  "description": "Control a camera's room light in Home Assistant from its camera view — on/off, brightness, and colour — with the server and camera→light mapping you configure.",
   "minApiVersion": "v1",
   "permissions": {
     "data": { "cameras": "read" },

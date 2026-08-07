@@ -11,13 +11,19 @@
     Aperture's dark theme (docs/extensions/panels.md) and the body is transparent so it
     reads as part of the camera-detail card.
 
-    What this demonstrates — the point of a panel: it reacts to the camera on screen
-    (window.aperture.cameraId), looks that camera up in a camera→light mapping the user
-    configured in settings, and toggles that light in Home Assistant. The server URL is a
-    `url` setting (and the extension's only allowed network host — see the manifest's
-    {{setting:ha_url}}), the token is a write-only `secret` injected server-side via a
-    {{secret:ha_token}} placeholder the panel never sees, and outbound failures are shown
-    as a plain sentence with the raw error tucked behind "Details".
+    What this demonstrates — a well-made panel that does REAL device control: it reacts
+    to the camera on screen (window.aperture.cameraId), looks that camera up in a
+    camera→light mapping the user configured in settings, reads the light's current
+    state and capabilities from Home Assistant, and offers on/off plus — only where the
+    bulb supports them — brightness, colour, and warm–cool temperature. It starts the
+    controls where the light actually is, debounces drags into one request, and shows
+    outbound failures as a plain sentence with the raw error behind "Details".
+
+    Notably it needs NO new SDK or host capability beyond what the earlier version used:
+    reading supported_color_modes and setting rgb_color / brightness_pct /
+    color_temp_kelvin are just more fields on the same window.aperture.net.fetch GET and
+    POST, with the ha_token secret injected server-side. The extension surface already
+    covers this kind of real work.
   -->
   <style>
     :root {
@@ -36,6 +42,7 @@
     .glyph.on { background: rgba(230,180,90,.16); color: var(--amber); }
     .title { margin: 0; font-size: 13px; font-weight: 600; }
     .subtitle { margin: 1px 0 0; font-size: 11px; color: var(--fg-muted); }
+
     .control { display: flex; align-items: center; justify-content: space-between; gap: 12px;
                padding: 12px 14px; border-radius: var(--radius);
                background: var(--surface); border: 1px solid var(--line); }
@@ -48,14 +55,33 @@
     .toggle[aria-checked="true"] { background: var(--amber); }
     .toggle[aria-checked="true"]::after { transform: translateX(22px); }
     .toggle[disabled] { opacity: .5; cursor: default; }
+
+    /* Adaptive controls — shown only when the light is on and supports each one. */
+    .controls { margin-top: 10px; display: grid; gap: 11px;
+                padding: 12px 14px; border-radius: var(--radius);
+                background: var(--surface); border: 1px solid var(--line); }
+    .ctl { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 10px; }
+    .ctl > label { font-size: 11px; color: var(--fg-muted); }
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 6px;
+                        border-radius: 999px; background: var(--line-strong); cursor: pointer; }
+    input#bri { background: linear-gradient(90deg, #5a4a2c, var(--amber)); }
+    input#temp { background: linear-gradient(90deg, #ffb46b, #dfe9ff); }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px;
+      border-radius: 50%; background: #fff; border: 2px solid rgba(0,0,0,.28); box-shadow: 0 1px 2px rgba(0,0,0,.45); }
+    input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%;
+      background: #fff; border: 2px solid rgba(0,0,0,.28); }
+    .swatch { justify-self: start; }
+    input[type=color] { width: 46px; height: 26px; padding: 0; border: 1px solid var(--line-strong);
+                        border-radius: 7px; background: none; cursor: pointer; }
+    input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
+    input[type=color]::-webkit-color-swatch { border: none; border-radius: 5px; }
+
     .note { margin: 10px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--fg-faint); }
     .note.error { color: var(--danger); }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--fg-muted); }
     details { margin-top: 6px; } summary { cursor: pointer; color: var(--fg-faint); font-size: 11px; }
     details pre { margin: 6px 0 0; padding: 8px; border-radius: 8px; background: var(--surface);
                   border: 1px solid var(--line); color: var(--fg-muted); font-size: 10.5px;
                   white-space: pre-wrap; word-break: break-word; }
-    .hidden { display: none; }
   </style>
 </head>
 <body>
@@ -71,90 +97,150 @@
     </div>
   </div>
 
-  <div class="control hidden" id="control">
+  <div class="control" id="control" hidden>
     <span class="state" id="state"><span class="muted">Checking…</span></span>
     <button class="toggle" id="toggle" role="switch" aria-checked="false" aria-label="Toggle light" disabled></button>
   </div>
 
+  <div class="controls" id="controls" hidden>
+    <div class="ctl" id="briRow" hidden>
+      <label for="bri">Brightness</label>
+      <input type="range" id="bri" min="1" max="100" value="100" aria-label="Brightness">
+    </div>
+    <div class="ctl" id="colRow" hidden>
+      <label for="col">Colour</label>
+      <input type="color" id="col" class="swatch" value="#ffd9a0" aria-label="Colour">
+    </div>
+    <div class="ctl" id="tempRow" hidden>
+      <label for="temp">Warm · Cool</label>
+      <input type="range" id="temp" min="2000" max="6500" value="4000" aria-label="Colour temperature">
+    </div>
+  </div>
+
   <p class="note" id="note"></p>
-  <details class="hidden" id="details"><summary>Details</summary><pre id="detailText"></pre></details>
+  <details id="details" hidden><summary>Details</summary><pre id="detailText"></pre></details>
 
   <script>
     (function () {
       var ap = window.aperture;
+      var $ = function (id) { return document.getElementById(id); };
       var els = {
-        subtitle: document.getElementById('subtitle'), control: document.getElementById('control'),
-        state: document.getElementById('state'), toggle: document.getElementById('toggle'),
-        glyph: document.getElementById('glyph'), note: document.getElementById('note'),
-        details: document.getElementById('details'), detailText: document.getElementById('detailText')
+        subtitle: $('subtitle'), control: $('control'), state: $('state'), toggle: $('toggle'), glyph: $('glyph'),
+        controls: $('controls'), briRow: $('briRow'), bri: $('bri'), colRow: $('colRow'), col: $('col'),
+        tempRow: $('tempRow'), temp: $('temp'), note: $('note'), details: $('details'), detailText: $('detailText')
       };
       var cameraId = ap && ap.cameraId;
       var haUrl = null, entity = null, isOn = false, busy = false;
+      var caps = { brightness: false, color: false, colorTemp: false };
+      var pending = {}, timer = null;
 
       function resize() { if (ap && ap.resize) ap.resize(document.documentElement.scrollHeight); }
       function say(text, isError, detail) {
         els.note.textContent = text || ''; els.note.className = 'note' + (isError ? ' error' : '');
-        if (detail) { els.detailText.textContent = detail; els.details.classList.remove('hidden'); }
-        else { els.details.classList.add('hidden'); }
-        resize();
+        els.details.hidden = !detail; if (detail) els.detailText.textContent = detail; resize();
       }
       function setOn(on) {
         isOn = on; els.toggle.setAttribute('aria-checked', on ? 'true' : 'false');
         els.glyph.className = 'glyph' + (on ? ' on' : '');
         els.state.innerHTML = on ? '<b>On</b>' : '<span class="muted">Off</span>';
+        els.controls.hidden = !on;
+        if (!on && timer) { clearTimeout(timer); timer = null; pending = {}; } // don't let a queued drag turn it back on
+        resize();
       }
 
       // A Home Assistant call through the host: the token is injected server-side from
-      // the {{secret:ha_token}} placeholder — the panel never holds it. Returns the
-      // upstream response, or handles a connection failure with a legible message.
+      // the {{secret:ha_token}} placeholder. Returns the upstream response, or null after
+      // surfacing a legible message for the shared failure cases.
       function ha(method, path, body) {
         return ap.net.fetch(haUrl + path, {
-          method: method,
-          headers: { Authorization: 'Bearer {{secret:ha_token}}', 'Content-Type': 'application/json' },
-          body: body
+          method: method, headers: { Authorization: 'Bearer {{secret:ha_token}}', 'Content-Type': 'application/json' }, body: body
         }).then(function (r) {
-          if (r.status === 0) { say(r.error, true, r.detail); return null; }        // connection failure
+          if (r.status === 0) { say(r.error, true, r.detail); return null; }
           if (r.status === 401) { say('Home Assistant rejected the token — check it in this extension’s settings.', true); return null; }
           if (r.status === 404) { say('No entity ' + entity + ' in Home Assistant — check the mapping in settings.', true); return null; }
           return r;
-        }).catch(function (e) {
-          // Client-side problems (URL unconfigured, host not allowed) reject with a
-          // ready-made message.
-          say((e && e.message) || 'Could not reach Home Assistant.', true);
-          return null;
+        }).catch(function (e) { say((e && e.message) || 'Could not reach Home Assistant.', true); return null; });
+      }
+
+      function rgbToHex(a) {
+        return '#' + a.slice(0, 3).map(function (n) { return ('0' + (Number(n) & 255).toString(16)).slice(-2); }).join('');
+      }
+      function hexToRgb(h) { return [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)]; }
+
+      // Decide which controls the bulb supports, size the temperature range, and start
+      // each control where the light actually is.
+      function applyState(state, attrs) {
+        var modes = attrs.supported_color_modes || [];
+        var colorModes = ['hs', 'xy', 'rgb', 'rgbw', 'rgbww'];
+        caps.brightness = modes.some(function (m) { return m !== 'onoff'; });
+        caps.color = modes.some(function (m) { return colorModes.indexOf(m) >= 0; });
+        // One hue control: a full picker supersedes a warm–cool slider, so a
+        // colour-temp-only bulb gets warm–cool and a colour bulb gets the picker.
+        caps.colorTemp = modes.indexOf('color_temp') >= 0 && !caps.color;
+
+        els.briRow.hidden = !caps.brightness;
+        els.colRow.hidden = !caps.color;
+        els.tempRow.hidden = !caps.colorTemp;
+
+        if (caps.colorTemp) {
+          var minK = attrs.min_color_temp_kelvin || (attrs.max_mireds ? Math.round(1e6 / attrs.max_mireds) : 2000);
+          var maxK = attrs.max_color_temp_kelvin || (attrs.min_mireds ? Math.round(1e6 / attrs.min_mireds) : 6500);
+          els.temp.min = minK; els.temp.max = maxK;
+        }
+        if (caps.brightness && attrs.brightness != null) els.bri.value = Math.max(1, Math.round(attrs.brightness / 255 * 100));
+        if (caps.color && attrs.rgb_color) els.col.value = rgbToHex(attrs.rgb_color);
+        if (caps.colorTemp) {
+          var k = attrs.color_temp_kelvin || (attrs.color_temp ? Math.round(1e6 / attrs.color_temp) : null);
+          if (k) els.temp.value = k;
+        }
+        setOn(state === 'on');
+      }
+
+      function refresh() {
+        return ha('GET', '/api/states/' + encodeURIComponent(entity)).then(function (r) {
+          if (!r || !r.body) return;
+          try { var s = JSON.parse(r.body); applyState(s.state, s.attributes || {}); say('Controls ' + entity + '.'); }
+          catch (e) { setOn(false); }
+          els.toggle.disabled = false;
         });
       }
+
+      // Coalesce rapid drags into one turn_on request.
+      function flush() {
+        timer = null;
+        var body = JSON.stringify(Object.assign({ entity_id: entity }, pending)); pending = {};
+        ha('POST', '/api/services/light/turn_on', body).then(function (r) { if (r) setOn(true); });
+      }
+      function push(params) { Object.assign(pending, params); if (timer) clearTimeout(timer); timer = setTimeout(flush, 250); }
+
+      els.bri.addEventListener('input', function () { push({ brightness_pct: Number(els.bri.value) }); });
+      els.col.addEventListener('input', function () { push({ rgb_color: hexToRgb(els.col.value) }); });
+      els.temp.addEventListener('input', function () { push({ color_temp_kelvin: Number(els.temp.value) }); });
 
       els.toggle.addEventListener('click', function () {
         if (busy || els.toggle.disabled) return;
         busy = true; els.toggle.disabled = true;
         var next = !isOn;
         ha('POST', '/api/services/light/' + (next ? 'turn_on' : 'turn_off'), JSON.stringify({ entity_id: entity }))
-          .then(function (r) { if (r) { setOn(next); say('Turned the light ' + (next ? 'on' : 'off') + '.'); } })
+          .then(function (r) { if (r) { if (next) return refresh(); setOn(false); } })
           .then(function () { busy = false; els.toggle.disabled = false; });
       });
 
       (async function init() {
         if (!cameraId) { els.subtitle.textContent = 'Open a camera to control its light.'; resize(); return; }
-
         try { var cam = await ap.cameras.get(cameraId); els.subtitle.textContent = (cam && cam.name) || cameraId; }
         catch (e) { els.subtitle.textContent = cameraId; }
 
         haUrl = await ap.settings.get('ha_url');
-        var mapping = (await ap.settings.get('lights')) || [];   // [{camera, entity}, …]
+        var mapping = (await ap.settings.get('lights')) || [];
         var row = mapping.filter(function (m) { return m.camera === cameraId; })[0];
         entity = row && row.entity;
 
         if (!haUrl) { say('Set your Home Assistant URL in this extension’s settings to begin.', true); return; }
         if (!entity) { say('No light is mapped to this camera yet. Add a Camera → light row in the extension’s settings.', true); return; }
 
-        els.control.classList.remove('hidden');
-        say('Controls ' + entity + '.');
-
-        var r = await ha('GET', '/api/states/' + encodeURIComponent(entity));
-        if (r && r.body) { try { setOn(JSON.parse(r.body).state === 'on'); } catch (e) {} }
-        els.toggle.disabled = false;
-        resize();
+        els.control.hidden = false;
+        await refresh();
       })();
     })();
   </script>
