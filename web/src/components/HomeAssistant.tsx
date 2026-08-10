@@ -176,7 +176,10 @@ export function HomeAssistant() {
         <div className="border-t border-line mt-5 pt-4">
           <p className="text-xs font-medium text-fg-muted mb-1">Live video URLs</p>
           <p className="text-xs text-fg-faint mb-2.5">
-            For live streams in HA, add each as a go2rtc / generic camera using its RTSP URL:
+            For live streams in HA, add each as a go2rtc / generic camera using its RTSP URL. These
+            point at the host where the RTSP port is reachable; if a URL below isn't reachable (e.g.
+            you open Aperture through a reverse proxy), set <code className="text-fg-muted">APERTURE_STREAM_HOST</code> to
+            your LAN IP.
           </p>
           <div className="space-y-1.5">
             {ha.streams.map((s) => (

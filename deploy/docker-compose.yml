@@ -32,6 +32,13 @@ services:
       # nvrd reaches it through the Docker host gateway.
       APERTURE_GO2RTC_URL: "http://host.docker.internal:1984"
       APERTURE_GO2RTC_RTSP: "rtsp://host.docker.internal:8554"
+      # Address EXTERNAL consumers (a player, Home Assistant, a VMS) use to reach
+      # go2rtc's RTSP/snapshot ports. Set this to your host's LAN IP (e.g. 192.168.1.50)
+      # whenever you open Aperture through a reverse proxy or domain — the proxy forwards
+      # the web UI but NOT the raw RTSP port, so the advertised rtsp:// URL must name the
+      # LAN address go2rtc actually listens on. Empty = use the host you opened the UI on
+      # (fine only when that is a directly-reachable IP). Set in deploy/.env.
+      APERTURE_STREAM_HOST: "${APERTURE_STREAM_HOST:-}"
       APERTURE_MQTT_URL: "tcp://mosquitto:1883"
       # Public base URL used to build stream URLs handed to browsers / Home Assistant.
       APERTURE_PUBLIC_URL: "${APERTURE_PUBLIC_URL:-http://localhost:8971}"

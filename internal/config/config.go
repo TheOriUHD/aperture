@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,8 +20,16 @@ type Config struct {
 	RecordingsDir string // recorded segments root
 	PublicURL     string // base URL used to build externally-shared stream URLs
 
-	Go2RTCURL  string // go2rtc HTTP API base, e.g. http://go2rtc:1984
-	Go2RTCRTSP string // go2rtc RTSP restream base, e.g. rtsp://go2rtc:8554
+	Go2RTCURL  string // go2rtc HTTP API base, e.g. http://go2rtc:1984 (how NVRD reaches go2rtc)
+	Go2RTCRTSP string // go2rtc RTSP restream base, e.g. rtsp://go2rtc:8554 (how NVRD reaches go2rtc)
+	// StreamHost is the host (or host:port) where go2rtc's RTSP restream + snapshot
+	// ports are reachable by EXTERNAL consumers (a player, Home Assistant, a VMS).
+	// It is distinct from how NVRD itself reaches go2rtc (Go2RTC*), and from the web
+	// UI's host: behind a reverse proxy the UI host is a domain that does not forward
+	// the raw RTSP port, so the advertised RTSP URL must name the address go2rtc
+	// actually listens on (typically the LAN IP). Empty = fall back to the request's
+	// own host (correct when the UI is reached directly by that IP).
+	StreamHost string
 
 	MQTTURL string // tcp://host:1883, empty disables HA publishing
 
@@ -48,6 +57,20 @@ func (c *Config) DBPath() string { return filepath.Join(c.DataDir, "aperture.db"
 
 // Go2RTCConfigPath returns where nvrd may render go2rtc config if needed.
 func (c *Config) Go2RTCConfigPath() string { return filepath.Join(c.DataDir, "go2rtc.yaml") }
+
+// Go2RTCRTSPPort / Go2RTCSnapPort are the ports go2rtc listens on for the RTSP
+// restream and the HTTP snapshot API, parsed from the reach-go2rtc bases (so a
+// customised port is respected) with the go2rtc defaults as a fallback. Used to
+// build the externally-advertised stream URLs alongside StreamHost.
+func (c *Config) Go2RTCRTSPPort() string { return portOf(c.Go2RTCRTSP, "8554") }
+func (c *Config) Go2RTCSnapPort() string { return portOf(c.Go2RTCURL, "1984") }
+
+func portOf(base, def string) string {
+	if u, err := url.Parse(base); err == nil && u.Port() != "" {
+		return u.Port()
+	}
+	return def
+}
 
 // FrameCacheDir holds extracted hover-scrub preview JPEGs.
 func (c *Config) FrameCacheDir() string { return filepath.Join(c.DataDir, "frame-cache") }
@@ -86,6 +109,7 @@ func Load() (*Config, error) {
 		PublicURL:      strings.TrimRight(env("APERTURE_PUBLIC_URL", "http://localhost:8080"), "/"),
 		Go2RTCURL:      strings.TrimRight(env("APERTURE_GO2RTC_URL", "http://localhost:1984"), "/"),
 		Go2RTCRTSP:     strings.TrimRight(env("APERTURE_GO2RTC_RTSP", "rtsp://localhost:8554"), "/"),
+		StreamHost:     strings.TrimSpace(env("APERTURE_STREAM_HOST", "")),
 		MQTTURL:        env("APERTURE_MQTT_URL", ""),
 		ONVIFEnabled:   env("APERTURE_ONVIF_ENABLED", "false") == "true",
 		ONVIFAddr:      env("APERTURE_ONVIF_ADDR", ":10101"),

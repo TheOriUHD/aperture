@@ -12,17 +12,14 @@ import (
 func (s *Server) handleGetHA(w http.ResponseWriter, r *http.Request) {
 	set := s.ha.LoadSettings()
 
-	host := r.Host
-	if i := strings.LastIndex(host, ":"); i >= 0 {
-		host = host[:i]
-	}
+	rtspHost := s.advertisedRTSPHost(r)
 	cams, _ := s.st.ListCameras()
 	streams := make([]map[string]any, 0, len(cams))
 	for _, c := range cams {
 		streams = append(streams, map[string]any{
 			"cameraId": c.ID,
 			"name":     c.Name,
-			"rtsp":     "rtsp://" + host + ":8554/" + stream.StreamName(c.ID),
+			"rtsp":     "rtsp://" + rtspHost + "/" + stream.StreamName(c.ID),
 		})
 	}
 
@@ -36,6 +33,27 @@ func (s *Server) handleGetHA(w http.ResponseWriter, r *http.Request) {
 		"connected":   s.ha.Connected(),
 		"streams":     streams,
 	})
+}
+
+// advertisedRTSPHost returns the host:port an external consumer (a player, Home
+// Assistant, a VMS) should use to reach go2rtc's RTSP restream. It prefers the
+// configured StreamHost — required behind a reverse proxy, where the request host is
+// a domain that does not forward the raw RTSP port and go2rtc actually listens on the
+// LAN IP — and otherwise falls back to the host the client used to reach Aperture
+// (correct when the UI is opened directly by that IP). A StreamHost without a port
+// gets go2rtc's RTSP port appended.
+func (s *Server) advertisedRTSPHost(r *http.Request) string {
+	host := s.cfg.StreamHost
+	if host == "" {
+		host = r.Host
+		if i := strings.LastIndex(host, ":"); i >= 0 {
+			host = host[:i]
+		}
+	}
+	if host != "" && !strings.Contains(host, ":") {
+		host = host + ":" + s.cfg.Go2RTCRTSPPort()
+	}
+	return host
 }
 
 // handleHASensors returns the Home Assistant sensor readings Aperture has cached

@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/TheOriUHD/aperture/internal/config"
@@ -103,14 +104,32 @@ func (s *Server) mediaServiceURL() string {
 	return "http://" + s.advertiseHostPort() + "/onvif/media_service"
 }
 
-// snapshotURL builds the per-camera JPEG snapshot URL served by go2rtc.
+// snapshotURL builds the per-camera JPEG snapshot URL served by go2rtc, advertised
+// at an address an external ONVIF client can actually reach (not the internal
+// how-NVRD-reaches-go2rtc host, e.g. host.docker.internal).
 func (s *Server) snapshotURL(camID string) string {
-	return s.cfg.Go2RTCURL + "/api/frame.jpeg?src=cam_" + camID
+	return "http://" + s.streamAdvertiseHost(s.cfg.Go2RTCSnapPort()) + "/api/frame.jpeg?src=cam_" + camID
 }
 
-// streamURL builds the per-camera RTSP restream URL served by go2rtc.
+// streamURL builds the per-camera RTSP restream URL served by go2rtc, at an
+// externally-reachable address (see streamAdvertiseHost).
 func (s *Server) streamURL(camID string) string {
-	return s.cfg.Go2RTCRTSP + "/cam_" + camID
+	return "rtsp://" + s.streamAdvertiseHost(s.cfg.Go2RTCRTSPPort()) + "/cam_" + camID
+}
+
+// streamAdvertiseHost returns host:port an external client should use to reach
+// go2rtc's restream/snapshot: the configured StreamHost, or the best-effort primary
+// LAN IP. The Go2RTC* bases name how NVRD reaches go2rtc (e.g. host.docker.internal)
+// and are unroutable for anyone else, so they must not be advertised.
+func (s *Server) streamAdvertiseHost(port string) string {
+	host := strings.TrimSpace(s.cfg.StreamHost)
+	if host == "" {
+		host = primaryIP()
+	}
+	if !strings.Contains(host, ":") {
+		host = net.JoinHostPort(host, port)
+	}
+	return host
 }
 
 // advertiseHostPort returns host:port that ONVIF clients should use to reach the
