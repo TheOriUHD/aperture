@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/stream"
 )
 
@@ -61,9 +62,8 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 // through to go2rtc (WebRTC with MSE fallback).
 func (s *Server) handleStreamWS(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	token := r.URL.Query().Get("token")
-	camID, err := s.am.VerifyStreamToken(token)
-	if err != nil || camID != id {
+	r, ok := s.authorizeStreamWS(r, id, r.URL.Query().Get("token"))
+	if !ok {
 		writeError(w, http.StatusUnauthorized, "invalid stream token")
 		return
 	}
@@ -76,4 +76,22 @@ func (s *Server) handleStreamWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.sm.ProxyWS(w, r, name)
+}
+
+// authorizeStreamWS authorizes a live-WS request by its `token` query param (a browser
+// cannot set an Authorization header on a WebSocket handshake). Two token kinds are
+// accepted, returning the request with any resolved claims attached:
+//  1. a short-lived stream token minted by /stream-token (the first-party UI); or
+//  2. a scoped media:live API token for a camera it may see — how a cross-origin
+//     client (the Home Assistant live card) connects directly, no CORS-gated mint. The
+//     authority is identical to any media:live token; camera access stays owner ∩ grants.
+func (s *Server) authorizeStreamWS(r *http.Request, id, token string) (*http.Request, bool) {
+	if camID, err := s.am.VerifyStreamToken(token); err == nil && camID == id {
+		return r, true
+	}
+	if claims := s.am.APIToken(token); claims != nil && hasScope(claims.Scopes, ScopeMediaLive) {
+		r = r.WithContext(auth.WithClaims(r.Context(), claims))
+		return r, s.allowedCamera(r, id)
+	}
+	return r, false
 }
