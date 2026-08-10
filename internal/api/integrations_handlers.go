@@ -35,7 +35,11 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		Scopes        []string `json:"scopes"`
 		CameraGrants  []string `json:"cameraGrants"`
 	}
-	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
 		writeError(w, http.StatusBadRequest, "name required")
 		return
 	}
@@ -56,6 +60,10 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	}
 	tok, plain, err := s.st.CreateAPIToken(c.UserID, strings.TrimSpace(req.Name), exp, req.Scopes, req.CameraGrants)
 	if err != nil {
+		// A user-owned token needs a real users row; a synthetic principal (the CLI's
+		// "cli", which has none) trips the FK. Log the cause — a bare 500 here cost a
+		// debugging session once.
+		s.log.Error("create api token", "user", c.UserID, "err", err)
 		writeError(w, http.StatusInternalServerError, "could not create token")
 		return
 	}
