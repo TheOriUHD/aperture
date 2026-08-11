@@ -231,3 +231,31 @@ export function usePurge() {
     },
   });
 }
+
+// The Home Assistant Live Card integration: a single server-managed live key plus each
+// camera's human slug. See internal/api/integrations_live.go.
+export interface LiveKeyCamera {
+  id: string;
+  name: string;
+  slug: string;
+}
+export interface LiveKeyInfo {
+  key: string;
+  cameras: LiveKeyCamera[];
+  apertureUrl: string;
+}
+
+export function useLiveKey() {
+  return useQuery({
+    queryKey: ["live-key"],
+    queryFn: () => api.get<LiveKeyInfo>("/api/integrations/live-key"),
+  });
+}
+
+export function useRollLiveKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<LiveKeyInfo>("/api/integrations/live-key/roll"),
+    onSuccess: (data) => qc.setQueryData(["live-key"], data),
+  });
+}

@@ -9,6 +9,7 @@ import { TopBar } from "../components/TopBar";
 import { UserModal } from "../components/UserModal";
 import { StorageManager } from "../components/StorageManager";
 import { HomeAssistant } from "../components/HomeAssistant";
+import { LiveViewCard } from "../components/LiveViewCard";
 import { LocationWeather } from "../components/LocationWeather";
 import { SystemHealth } from "../components/SystemHealth";
 import { OidcSettings } from "../components/OidcSettings";
@@ -127,6 +128,7 @@ export function Settings() {
             {active === "integrations" && isAdmin && (
               <>
                 <HomeAssistant />
+                <LiveViewCard />
                 <Webhooks />
                 <ApiTokens />
                 <InteropEgress />

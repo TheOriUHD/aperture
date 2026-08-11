@@ -238,6 +238,11 @@ func (s *Server) routes() http.Handler {
 		// validated, and restart the backend so it re-reads them.
 		g.Get("/ext/{id}/settings", authed, s.handleExtSettingsGet)
 		g.Put("/ext/{id}/settings", adminSessionOnly, s.handleExtSettingsPut)
+
+		// Home Assistant Live Card: a single server-managed live key (reveal/reroll)
+		// so no scoped token has to be hand-built, plus camera slugs for the config.
+		g.Get("/integrations/live-key", adminSessionOnly, s.handleGetLiveKey)
+		g.Post("/integrations/live-key/roll", adminSessionOnly, s.handleRollLiveKey)
 		// Host-mediated outbound fetch (the `network` permission, panel side): the
 		// host performs the request to a DECLARED host only, expanding {{secret:key}}
 		// from the extension's own secret settings server-side so the plaintext never

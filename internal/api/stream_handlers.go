@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"time"
 
@@ -61,7 +62,13 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 // handleStreamWS authorizes a stream token, then proxies the live WebSocket
 // through to go2rtc (WebRTC with MSE fallback).
 func (s *Server) handleStreamWS(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	// {id} may be a real camera id or a human slug ("zimmer_ph") — resolve before
+	// authorizing and before building the go2rtc stream name (cam_<id>).
+	id, found := s.resolveCameraID(chi.URLParam(r, "id"))
+	if !found {
+		writeError(w, http.StatusNotFound, "camera not found")
+		return
+	}
 	r, ok := s.authorizeStreamWS(r, id, r.URL.Query().Get("token"))
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "invalid stream token")
@@ -87,6 +94,12 @@ func (s *Server) handleStreamWS(w http.ResponseWriter, r *http.Request) {
 //     authority is identical to any media:live token; camera access stays owner ∩ grants.
 func (s *Server) authorizeStreamWS(r *http.Request, id, token string) (*http.Request, bool) {
 	if camID, err := s.am.VerifyStreamToken(token); err == nil && camID == id {
+		return r, true
+	}
+	// The server-managed live key (Home Assistant Live Card): a single revealable,
+	// re-rollable secret that authorizes live view of any camera. Constant-time compare
+	// so it can't be probed by timing. See integrations_live.go for the trade-off.
+	if lk := s.currentLiveKey(); lk != "" && subtle.ConstantTimeCompare([]byte(token), []byte(lk)) == 1 {
 		return r, true
 	}
 	if claims := s.am.APIToken(token); claims != nil && hasScope(claims.Scopes, ScopeMediaLive) {
