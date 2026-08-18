@@ -33,8 +33,8 @@ export default {
         // grey = nothing recorded, blue = recorded, lighter blue = motion/event.
         rail: {
           idle: "#343c46",  // grey track (no recording)
-          rec: "#1f7fc4",   // recorded footage
-          event: "#4aa8e8", // motion/event duration — a step lighter, not pale
+          rec: "#05254D",   // recorded footage (deep navy)
+          event: "#0B4EAD", // motion/event duration (brighter blue)
         },
         online: "#3fce7c",
       },

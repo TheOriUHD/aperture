@@ -108,7 +108,7 @@ export function VerticalTimeline({
   // Absence of blue IS the "no recording" state, which is why there is no
   // separate gap layer any more — a stale or fragmented coverage fetch can no
   // longer paint a scary "no footage" stripe over footage that exists.
-  const RAIL_W = 6;
+  const RAIL_W = 8;
 
   // Non-passive wheel so scrubbing doesn't scroll the page; accumulate on a ref
   // for lag-free response to fast scrolls.
