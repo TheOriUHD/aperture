@@ -16,6 +16,8 @@ import {
   LayoutGrid,
   Calendar,
   Columns2,
+  PanelLeft,
+  PanelBottom,
   Download,
   Cctv,
   Scissors,
@@ -93,6 +95,17 @@ export function Playback() {
   const [following, setFollowing] = useState(!hasDeepLink);
   const [selectedState, setSelectedState] = useState(() => (hasDeepLink ? deepLinkT : Date.now()));
   const { prefs } = usePrefs();
+  // Collapsible chrome: hide the camera list and/or the events strip so the
+  // player fills the screen (only the app's nav rail stays). Persisted so the
+  // layout you chose survives a reload.
+  const [showRail, setShowRail] = useState(() => localStorage.getItem("pb.rail") !== "0");
+  const [showEvents, setShowEvents] = useState(() => localStorage.getItem("pb.events") !== "0");
+  useEffect(() => {
+    localStorage.setItem("pb.rail", showRail ? "1" : "0");
+  }, [showRail]);
+  useEffect(() => {
+    localStorage.setItem("pb.events", showEvents ? "1" : "0");
+  }, [showEvents]);
   const { user } = useAuth();
   const qc = useQueryClient();
   const isAdmin = user?.role === "admin";
@@ -900,12 +913,14 @@ export function Playback() {
 
       {/* Top half: rail + timeline + player. Events panel is a full-width section below. */}
       <div className={`flex min-h-0 flex-1 ${railRight ? "flex-row-reverse" : ""}`}>
-        <CameraRail
-          cameras={cameras ?? []}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          multiIds={multiActive ? multiCams : undefined}
-        />
+        {showRail && (
+          <CameraRail
+            cameras={cameras ?? []}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            multiIds={multiActive ? multiCams : undefined}
+          />
+        )}
 
       {/* timeline column */}
       <div className="relative w-[220px] shrink-0 border-x border-line flex flex-col bg-ink-900">
@@ -917,14 +932,32 @@ export function Playback() {
             >
               {fmtDate(selectedMs)}
             </button>
-            <button
-              onClick={() => setRailRight((r) => !r)}
-              className="btn-icon h-6 w-6"
-              aria-label="Flip timeline to the other side"
-              title="Flip timeline to the other side"
-            >
-              <Columns2 className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => setShowRail((v) => !v)}
+                className={`btn-icon h-6 w-6 ${showRail ? "" : "text-brand"}`}
+                aria-label={showRail ? "Hide the camera list" : "Show the camera list"}
+                title={showRail ? "Hide the camera list" : "Show the camera list"}
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setShowEvents((v) => !v)}
+                className={`btn-icon h-6 w-6 ${showEvents ? "" : "text-brand"}`}
+                aria-label={showEvents ? "Hide the events panel" : "Show the events panel"}
+                title={showEvents ? "Hide the events panel" : "Show the events panel"}
+              >
+                <PanelBottom className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setRailRight((r) => !r)}
+                className="btn-icon h-6 w-6"
+                aria-label="Flip timeline to the other side"
+                title="Flip timeline to the other side"
+              >
+                <Columns2 className="h-4 w-4" />
+              </button>
+            </div>
           </div>
           {/* zoom pill */}
           <div className="flex items-center gap-2 rounded-full bg-ink-800 px-3 py-1">
@@ -1273,7 +1306,9 @@ export function Playback() {
 
       {/* Bottom half: events panel spans the full width, under everything. Drag its
           top edge to grow it into a multi-row grid. */}
-      <EventStrip dateLabel={fmtDate(selectedMs)} events={filteredEvents} onSelect={(ms) => seekToTime(ms)} />
+      {showEvents && (
+        <EventStrip dateLabel={fmtDate(selectedMs)} events={filteredEvents} onSelect={(ms) => seekToTime(ms)} />
+      )}
     </div>
   );
 }

@@ -176,15 +176,32 @@ export function VerticalTimeline({
     }
   }
 
-  // Visible events, and which ones get a thumbnail (avoid overlapping squares).
-  const visEvents = events.filter((e) => e.end > bottomTime && e.start < topTime);
+  // Visible events, merged into CONTINUOUS bands. Motion arrives as many short
+  // events; drawn one-by-one they read as a stipple of dots rather than "this is
+  // when something was happening". Anything closer together than a sliver of the
+  // visible window becomes one run, so a busy period is a single solid bar.
+  const visEvents = events
+    .filter((e) => e.end > bottomTime && e.start < topTime)
+    .sort((a, b) => a.start - b.start);
+  const mergeGap = windowMs * 0.012;
+  const bands: { id: string; start: number; end: number; thumbUrl?: string }[] = [];
+  for (const e of visEvents) {
+    const last = bands[bands.length - 1];
+    if (last && e.start <= last.end + mergeGap) {
+      last.end = Math.max(last.end, e.end);
+      if (!last.thumbUrl) last.thumbUrl = e.thumbUrl;
+    } else {
+      bands.push({ id: e.id, start: e.start, end: e.end, thumbUrl: e.thumbUrl });
+    }
+  }
+  // One thumbnail per band, and only where they won't overlap each other.
   const thumbIds = new Set<string>();
   {
     let last = -100;
-    for (const e of visEvents) {
-      const c = pct((e.start + e.end) / 2);
+    for (const b of bands) {
+      const c = pct((b.start + b.end) / 2);
       if (Math.abs(c - last) >= 4.5) {
-        thumbIds.add(e.id);
+        thumbIds.add(b.id);
         last = c;
       }
     }
@@ -302,8 +319,8 @@ export function VerticalTimeline({
           }}
         />
       ))}
-      {/* motion/event duration: a step lighter than the recorded blue */}
-      {visEvents.map((e) => {
+      {/* motion/event duration: continuous bands over the recorded rail */}
+      {bands.map((e) => {
         const cy = pct((e.start + e.end) / 2);
         return (
           <div key={e.id}>
@@ -313,12 +330,9 @@ export function VerticalTimeline({
                 left: railX,
                 width: RAIL_W,
                 top: `${pct(e.end)}%`,
-                height: `${Math.max(pct(e.start) - pct(e.end), 0.5)}%`,
+                // A floor so a brief event is still a visible mark, not a hairline.
+                height: `${Math.max(pct(e.start) - pct(e.end), 0.55)}%`,
               }}
-            />
-            <div
-              className="absolute h-2.5 w-2.5 rounded-full bg-rail-event border border-ink-900"
-              style={{ left: railX + RAIL_W / 2, top: `${cy}%`, transform: "translate(-50%,-50%)" }}
             />
             {thumbIds.has(e.id) && (
               <button
@@ -327,7 +341,7 @@ export function VerticalTimeline({
                   ev.stopPropagation();
                   onEventClick(e.start);
                 }}
-                className="absolute rounded-sm overflow-hidden border border-motion/70 hover:border-motion bg-ink-800 shadow"
+                className="absolute rounded-sm overflow-hidden border border-rail-event/70 hover:border-rail-event bg-ink-800 shadow"
                 style={{ left: railX + RAIL_W + 9, top: `${cy}%`, transform: "translateY(-50%)", width: 38, height: 26 }}
                 aria-label="Jump to motion event"
               >
