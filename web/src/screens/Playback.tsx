@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import Hls from "hls.js";
@@ -51,8 +51,7 @@ import { useAuth } from "../lib/auth";
 import { fsVideoStyle, FullscreenChrome } from "../components/fullscreen";
 import { useCameras } from "../hooks/useCameras";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { useSite, useAstro, useWeatherRange } from "../hooks/useEnvironment";
-import { buildShadeBands } from "../lib/shading";
+import { useSite, useWeatherRange } from "../hooks/useEnvironment";
 import { usePrefs } from "../lib/prefs";
 import { api } from "../lib/api";
 import { warmLive, stopWarmLive } from "../lib/liveWarm";
@@ -291,21 +290,10 @@ export function Playback() {
     thumbUrl: e.thumbUrl,
   }));
 
-  // Day/night timeline shading from the astro layer. We fetch the playhead day
-  // plus its neighbours so the night band stays continuous across midnight.
+  // Site profile drives the weather ribbon's timezone/enablement. (The day/night
+  // background shading it used to feed is gone — it tinted the whole timeline and
+  // read as an unexplained colour change mid-scroll.)
   const { data: site } = useSite();
-  const dayKey = (ms: number) =>
-    new Date(ms).toLocaleDateString("en-CA", { timeZone: site?.timezone || undefined });
-  const astroPrev = useAstro(dayKey(selectedMs - DAY_MS));
-  const astroDay = useAstro(dayKey(selectedMs));
-  const astroNext = useAstro(dayKey(selectedMs + DAY_MS));
-  const shadeBands = useMemo(
-    () =>
-      site?.configured
-        ? buildShadeBands([astroPrev.data?.sun, astroDay.data?.sun, astroNext.data?.sun])
-        : [],
-    [site?.configured, astroPrev.data, astroDay.data, astroNext.data],
-  );
 
   // The day's weather samples feed the timeline's environmental ribbon (opt-in).
   const { data: dayWeather } = useWeatherRange(dayStart, dayEnd, !!site?.configured && !!prefs.timelineRibbon);
@@ -839,7 +827,6 @@ export function Playback() {
               events={tlEvents}
               live={atLiveEdge}
               following={following}
-              shadeBands={shadeBands}
               ribbon={ribbon}
               onScrubTo={scrubToTime}
               onScrubEnd={endScrub}
@@ -981,7 +968,6 @@ export function Playback() {
             events={tlEvents}
             live={atLiveEdge}
             following={following}
-            shadeBands={shadeBands}
             ribbon={ribbon}
             onScrubTo={scrubToTime}
             onScrubEnd={endScrub}

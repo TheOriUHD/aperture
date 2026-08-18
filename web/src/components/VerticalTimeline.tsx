@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fmtTime, fmtTimeSec } from "../lib/format";
-import { shadeColor, type ShadeBand } from "../lib/shading";
 
 export interface TR {
   start: number;
@@ -44,7 +43,6 @@ export function VerticalTimeline({
   events,
   live,
   following = false,
-  shadeBands,
   ribbon,
   playheadFrac = 0.2,
   onScrubTo,
@@ -62,7 +60,6 @@ export function VerticalTimeline({
   // real time). Gates the smooth-glide transform so it never drifts when paused
   // or scrubbed near the edge — distinct from `live` (playhead-at-edge display).
   following?: boolean;
-  shadeBands?: ShadeBand[];
   ribbon?: { ts: number; tempC?: number; precipMm?: number }[];
   playheadFrac?: number;
   onScrubTo: (ms: number) => void;
@@ -276,20 +273,6 @@ export function VerticalTimeline({
       {/* Scrolling strip layer — GPU-translated for smooth live glide. Everything
           time-positioned lives in here; the fixed playhead stays outside it. */}
       <div ref={scrollRef} className="absolute inset-0">
-      {/* Day/night shading from the astro layer, behind everything. */}
-      {shadeBands?.map((b, i) => {
-        const top = pct(b.end);
-        const h = pct(b.start) - pct(b.end);
-        if (h <= 0 || top >= 100 || top + h <= 0) return null;
-        return (
-          <div
-            key={`sh${i}`}
-            className="absolute left-0 right-0 pointer-events-none"
-            style={{ top: `${top}%`, height: `${h}%`, backgroundColor: shadeColor(b.kind) }}
-          />
-        );
-      })}
-
       {minors.map((t) => (
         <div key={`mi${t}`} className="absolute h-px w-2 bg-line" style={{ left: railX - 10, top: `${pct(t)}%` }} />
       ))}
