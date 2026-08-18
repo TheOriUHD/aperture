@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Trash2, CalendarClock, Brush } from "lucide-react";
 import { Modal } from "./ui/Modal";
+import { CameraOnvifPanel } from "./CameraOnvifPanel";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Switch } from "./ui/Switch";
 import { ScheduleModal } from "./ScheduleModal";
@@ -390,6 +391,8 @@ export function CameraModal({
               )}
             </div>
           )}
+          {isEdit && camera && <CameraOnvifPanel cameraId={camera.id} />}
+
           {mode === "scheduled" &&
             (isEdit ? (
               <button type="button" className="btn-subtle w-full" onClick={() => setScheduleOpen(true)}>

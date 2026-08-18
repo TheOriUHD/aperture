@@ -385,6 +385,10 @@ func (s *Server) routes() http.Handler {
 		// destructive change with real numbers instead of applying it blind.
 		g.Post("/system/storage/locations/allocate/preview", adminScoped(ScopeStorageRead), s.handleAllocatePreview)
 		// Mirrored destinations: which locations a camera records/mirrors to.
+		// Camera-side ONVIF: read/adjust the picture settings the camera exposes.
+		g.Get("/cameras/{id}/onvif", adminScopedCam(ScopeCamerasRead), s.handleGetCameraONVIF)
+		g.Put("/cameras/{id}/onvif", adminScopedCam(ScopeCamerasWrite), s.handleSetCameraONVIF)
+		g.Put("/cameras/{id}/onvif/imaging", adminScopedCam(ScopeCamerasWrite), s.handleSetCameraImaging)
 		g.Get("/cameras/{id}/destinations", scopedCam(ScopeStorageRead), s.handleGetCameraDestinations)
 		g.Put("/cameras/{id}/destinations", adminScopedCam(ScopeStorageWrite), s.handleSetCameraDestinations)
 		g.Post("/system/storage/locations/reorder", adminScoped(ScopeStorageWrite), s.handleReorderLocations)

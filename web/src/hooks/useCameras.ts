@@ -84,3 +84,72 @@ export function useTestCamera() {
       api.post<CameraTestResult>("/api/cameras/test", { rtspMainUrl }),
   });
 }
+
+// Camera-side ONVIF: the picture settings the camera itself exposes. Optional —
+// a camera that doesn't answer simply reports why, and nothing else is affected.
+export interface OnvifRange {
+  min: number;
+  max: number;
+}
+export interface OnvifImaging {
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  sharpness?: number;
+  irCutFilter?: string;
+  ranges: Record<string, OnvifRange>;
+  irCutOptions?: string[];
+}
+export interface OnvifProbe {
+  ok: boolean;
+  port: number;
+  device: { manufacturer: string; model: string; firmware: string; serial: string };
+  hasImaging: boolean;
+  hasPtz: boolean;
+  videoSource: string;
+  error?: string;
+}
+export interface CameraOnvif {
+  enabled: boolean;
+  port: number;
+  user: string;
+  host: string;
+  hasPassword: boolean;
+  probe?: OnvifProbe;
+  imaging?: OnvifImaging;
+  imagingError?: string;
+}
+
+export function useCameraOnvif(cameraId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["camera-onvif", cameraId],
+    queryFn: () => api.get<CameraOnvif>(`/api/cameras/${cameraId}/onvif`),
+    enabled: !!cameraId && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useSetCameraOnvif() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; enabled?: boolean; port?: number; user?: string; password?: string }) =>
+      api.put<CameraOnvif>(`/api/cameras/${id}/onvif`, body),
+    onSuccess: (d, v) => qc.setQueryData(["camera-onvif", v.id], d),
+  });
+}
+
+// Applies picture settings to the camera itself.
+export function useSetCameraImaging() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: {
+      id: string;
+      brightness?: number;
+      contrast?: number;
+      saturation?: number;
+      sharpness?: number;
+      irCutFilter?: string;
+    }) => api.put<CameraOnvif>(`/api/cameras/${id}/onvif/imaging`, body),
+    onSuccess: (d, v) => qc.setQueryData(["camera-onvif", v.id], d),
+  });
+}
