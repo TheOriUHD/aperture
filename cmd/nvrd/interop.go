@@ -107,6 +107,16 @@ func (h *homekitService) SetEnabled(on bool) error {
 		b.SetOnArmed(h.onArmed)
 	}
 	ctx, cancel := context.WithCancel(h.base)
+	// A bridge that dies on its own (bad pin, port clash) must clear the running
+	// state, so the UI never shows a green light for a subsystem that is down.
+	b.SetOnExit(func(err error) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.bridge == b {
+			h.cancel, h.bridge = nil, nil
+			h.log.Error("homekit stopped after an unexpected exit", "err", err)
+		}
+	})
 	h.cancel, h.bridge = cancel, b
 	go b.Run(ctx)
 	return nil
@@ -127,7 +137,7 @@ func (h *homekitService) Bridge() *homekit.Bridge {
 }
 
 func (h *homekitService) Info() map[string]any {
-	// The pairing code is a fixed constant (documented caveat) and the operator
-	// needs it to add the bridge in the Home app, so the UI shows it.
-	return map[string]any{"pin": homekit.SetupPin}
+	// The operator needs the pairing code to add the bridge in the Home app, so
+	// the UI shows it. Generated once per install and persisted (see homekit).
+	return map[string]any{"pin": homekit.SetupPin(h.st)}
 }

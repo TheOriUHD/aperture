@@ -13,6 +13,9 @@ package homekit
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"time"
@@ -27,10 +30,45 @@ import (
 	"github.com/TheOriUHD/aperture/internal/store"
 )
 
-// SetupPin is the HomeKit pairing code shown to the operator. HomeKit requires
-// a fixed 8-digit pin; this one is a constant (documented as a caveat — it is
-// not secret-random per install). Enter it in the Home app as "123-45-678".
-const SetupPin = "12345678"
+// setupPinSetting stores this install's HomeKit pairing code. HomeKit requires a
+// fixed 8-digit pin, and Apple REJECTS a list of trivial ones (all-same digits,
+// 12345678, 87654321) — the hap library refuses to start with "insecure pin".
+// The pin was previously the hard-coded 12345678, which is on that list, so the
+// bridge could never actually start. It is now generated once per install and
+// persisted, which also stops every Aperture sharing one pairing code.
+const setupPinSetting = "homekit.pin"
+
+// forbiddenPins are the codes Apple/hap reject outright.
+var forbiddenPins = map[string]bool{
+	"00000000": true, "11111111": true, "22222222": true, "33333333": true,
+	"44444444": true, "55555555": true, "66666666": true, "77777777": true,
+	"88888888": true, "99999999": true, "12345678": true, "87654321": true,
+}
+
+// SetupPin returns this install's pairing code, generating and persisting one on
+// first use. Shown in the UI (formatted 123-45-678) so the operator can pair.
+func SetupPin(st *store.Store) string {
+	if v, err := st.GetSetting(setupPinSetting); err == nil && len(v) == 8 && !forbiddenPins[v] {
+		return v
+	}
+	pin := randomPin()
+	_ = st.SetSetting(setupPinSetting, pin)
+	return pin
+}
+
+func randomPin() string {
+	for {
+		var b [4]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			return "83719264" // deterministic fallback; still not a forbidden pin
+		}
+		n := binary.BigEndian.Uint32(b[:]) % 100_000_000
+		pin := fmt.Sprintf("%08d", n)
+		if !forbiddenPins[pin] {
+			return pin
+		}
+	}
+}
 
 // Bridge is the running HomeKit subsystem. Construct with New, then call Run.
 type Bridge struct {
@@ -46,6 +84,9 @@ type Bridge struct {
 	motion map[string]*accessory.MotionSensor
 
 	sec *accessory.SecuritySystem
+
+	// onExit reports an unexpected server exit to the supervisor.
+	onExit func(error)
 
 	mu        sync.Mutex
 	armed     bool
@@ -129,13 +170,14 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger) (*Bridge, error)
 	if err != nil {
 		return nil, err
 	}
-	server.Pin = SetupPin
+	pin := SetupPin(st)
+	server.Pin = pin
 	// Bind to the same interface as the HTTP server's port is irrelevant;
 	// hap picks its own TCP port. Leaving Addr empty lets hap choose.
 	b.server = server
 
 	log.Info("homekit bridge configured",
-		"cameras", len(b.motion), "pin", SetupPin, "store", filepath.Join(cfg.DataDir, "homekit"))
+		"cameras", len(b.motion), "pin", pin, "store", filepath.Join(cfg.DataDir, "homekit"))
 	return b, nil
 }
 
@@ -143,12 +185,22 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger) (*Bridge, error)
 // its own graceful shutdown when ctx is done (hap.Server.ListenAndServe
 // returns nil on context cancellation).
 func (b *Bridge) Run(ctx context.Context) {
-	b.log.Info("homekit bridge starting", "pin", SetupPin)
+	b.log.Info("homekit bridge starting", "pin", SetupPin(b.st))
 	go b.syncArmedLoop(ctx) // reflect HA/notify-driven arm changes into the Home app
-	if err := b.server.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+	err := b.server.ListenAndServe(ctx)
+	if err != nil && ctx.Err() == nil {
 		b.log.Error("homekit server exited", "err", err)
 	}
+	// Tell the supervisor the bridge is down, so a server that dies on its own
+	// (bad pin, port clash) reports as stopped instead of a false green light.
+	if b.onExit != nil && ctx.Err() == nil {
+		b.onExit(err)
+	}
 }
+
+// SetOnExit registers a callback fired when Run returns other than by
+// cancellation — i.e. the bridge failed or died.
+func (b *Bridge) SetOnExit(fn func(error)) { b.onExit = fn }
 
 // syncArmedLoop keeps the SecuritySystem characteristic in step with the "armed"
 // setting, which other surfaces (Home Assistant, notify) can change directly.
