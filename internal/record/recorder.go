@@ -76,6 +76,7 @@ func (r *Recorder) Run(ctx context.Context) {
 		case <-indexT.C:
 			r.indexOnce()
 			r.uploadOnce()
+			r.mirrorOnce()
 		case <-reconT.C:
 			r.Reconcile()
 		}
@@ -604,7 +605,9 @@ func (r *Recorder) activeDir() string {
 // Unknown, disabled, or mis-configured locations fall back to the default dir so
 // recording never stops, and the segment is indexed as living on the default.
 func (r *Recorder) resolveTarget(cam store.Camera) (dir, locID string, remote bool) {
-	def := func() (string, string, bool) { return filepath.Join(r.activeDir(), cam.ID), store.DefaultLocationID, false }
+	def := func() (string, string, bool) {
+		return filepath.Join(r.activeDir(), cam.ID), store.DefaultLocationID, false
+	}
 	if cam.LocationID == store.DefaultLocationID {
 		return def()
 	}

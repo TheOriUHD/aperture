@@ -9,8 +9,8 @@ import (
 type Segment struct {
 	ID         string `json:"id"`
 	CameraID   string `json:"cameraId"`
-	LocationID string `json:"-"` // storage location this file lives on ("" = default root)
-	Path       string `json:"-"` // backend-relative for added locations; absolute for the default
+	LocationID string `json:"-"`       // storage location this file lives on ("" = default root)
+	Path       string `json:"-"`       // backend-relative for added locations; absolute for the default
 	StartTS    int64  `json:"startTs"` // unix ms
 	EndTS      int64  `json:"endTs"`   // unix ms
 	DurationMS int64  `json:"durationMs"`
@@ -235,11 +235,18 @@ func (s *Store) OldestSegmentsInLocation(locationID string, limit int) ([]*Segme
 	return collectSegments(rows)
 }
 
-// TotalBytesInLocation sums footage bytes stored on a location.
+// TotalBytesInLocation sums the footage bytes PHYSICALLY on a location:
+// canonical segments living there plus mirror copies parked there. Capacity
+// enforcement and the storage views both need the physical figure — counting
+// only canonical rows would let mirrors overflow a share invisibly.
 func (s *Store) TotalBytesInLocation(locationID string) (int64, error) {
 	var v sql.NullInt64
 	err := s.db.QueryRow(`SELECT COALESCE(SUM(size_bytes),0) FROM segments WHERE location_id = ?`, locationID).Scan(&v)
-	return v.Int64, err
+	if err != nil {
+		return 0, err
+	}
+	copies, err := s.TotalCopyBytesInLocation(locationID)
+	return v.Int64 + copies, err
 }
 
 // CountSegmentsInLocation counts segments stored on a location (delete guard).
@@ -395,10 +402,10 @@ func collectSegments(rows *sql.Rows) ([]*Segment, error) {
 // WITHOUT deleting anything, so the UI can state real numbers before the user
 // commits — lowering an allocation removes footage immediately and irreversibly.
 type EvictionPreview struct {
-	Bytes    int64
-	Segments int64
-	OldestTS int64
-	NewestTS int64
+	Bytes     int64
+	Segments  int64
+	OldestTS  int64
+	NewestTS  int64
 	PerCamera map[string]*EvictionCamera
 }
 
@@ -422,21 +429,23 @@ func (s *Store) PreviewEvictionInLocation(locationID string, targetBytes int64) 
 	if total <= targetBytes {
 		return p, nil // nothing to do — this is a no-op or an increase
 	}
-	rows, err := s.db.Query(segmentSelect+
-		` WHERE location_id = ? AND locked = 0 ORDER BY start_ts ASC`, locationID)
+	// Walk BOTH kinds of physical unit on the location — canonical segments and
+	// mirror copies — oldest-first, exactly as the janitor's cap enforcement does.
+	evs, err := s.OldestEvictablesInLocation(locationID, 1<<30)
 	if err != nil {
 		return nil, err
 	}
-	segs, err := collectSegments(rows)
-	if err != nil {
-		return nil, err
-	}
-	for _, seg := range segs {
+	for _, ev := range evs {
 		if total <= targetBytes {
 			break
 		}
-		total -= seg.SizeBytes
-		p.Bytes += seg.SizeBytes
+		seg := ev.Seg
+		size := seg.SizeBytes
+		if ev.IsCopy {
+			size = ev.Copy.SizeBytes
+		}
+		total -= size
+		p.Bytes += size
 		p.Segments++
 		if p.OldestTS == 0 || seg.StartTS < p.OldestTS {
 			p.OldestTS = seg.StartTS
@@ -449,7 +458,7 @@ func (s *Store) PreviewEvictionInLocation(locationID string, targetBytes int64) 
 			c = &EvictionCamera{}
 			p.PerCamera[seg.CameraID] = c
 		}
-		c.Bytes += seg.SizeBytes
+		c.Bytes += size
 		c.Segments++
 		if c.OldestTS == 0 || seg.StartTS < c.OldestTS {
 			c.OldestTS = seg.StartTS

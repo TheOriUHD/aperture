@@ -4,7 +4,7 @@ import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { StorageSetupWizard } from "./storage/StorageSetupWizard";
 import { EditLocationModal } from "./storage/EditLocationModal";
 import { useStorage, type StorageLocation } from "../hooks/useStorage";
-import { useStorageLocations, useDeleteLocation, useAssignCameras } from "../hooks/useStorageLocations";
+import { useStorageLocations, useDeleteLocation, useSetCameraDestinations } from "../hooks/useStorageLocations";
 import { useCameras } from "../hooks/useCameras";
 import { usePurge, useReindex, type PurgeResult } from "../hooks/useSystem";
 import { ApiError } from "../lib/api";
@@ -86,26 +86,37 @@ function locIcon(type: string) {
   return HardDrive;
 }
 
+// One camera's row on a destination card: member or not, primary or mirror.
+export interface CardCam {
+  id: string;
+  name: string;
+  member: boolean;
+  primary: boolean;
+  retentionDays: number; // per-location override (0 = the camera's own)
+}
+
 function DestinationCard({
   loc,
   cams,
-  allCams,
   onEdit,
   onRemove,
-  onAssign,
-  assigning,
+  onAddMirror,
+  onRemoveMirror,
+  onMakePrimary,
+  busy,
 }: {
   loc: StorageLocation;
-  cams: { id: string; name: string }[];
-  allCams: { id: string; name: string }[];
+  cams: CardCam[];
   onEdit: () => void;
   onRemove: () => void;
-  onAssign: (cameraIds: string[]) => void;
-  assigning: boolean;
+  onAddMirror: (cameraId: string) => void;
+  onRemoveMirror: (cameraId: string) => void;
+  onMakePrimary: (cameraId: string) => void;
+  busy: boolean;
 }) {
-  // Which cameras record here is edited ON the card. It used to be reachable only
-  // from Settings → Cameras → edit a camera, so clicking through from a card that
-  // listed camera names led to the location editor and a dead end.
+  // Which cameras record or mirror here is edited ON the card. It used to be
+  // reachable only from Settings → Cameras → edit a camera, so clicking through
+  // from a card that listed camera names led to the location editor — a dead end.
   const [picking, setPicking] = useState(false);
   const Icon = locIcon(loc.type);
   const path = (loc.config?.path as string) || "";
@@ -165,13 +176,17 @@ function DestinationCard({
         <button
           className="flex w-full items-center gap-1.5 text-left text-[11px] text-fg-muted hover:text-fg"
           onClick={() => setPicking((v) => !v)}
-          disabled={assigning}
+          disabled={busy}
         >
           <Video className="h-3 w-3 shrink-0" />
           <span className="truncate">
-            {cams.length === 0
-              ? "No cameras — click to assign"
-              : `${cams.length} ${cams.length === 1 ? "camera" : "cameras"}: ${cams.map((c) => c.name).join(", ")}`}
+            {(() => {
+              const members = cams.filter((c) => c.member);
+              if (members.length === 0) return "No cameras — click to assign";
+              return `${members.length} ${members.length === 1 ? "camera" : "cameras"}: ${members
+                .map((c) => c.name + (c.primary ? "" : " (mirror)"))
+                .join(", ")}`;
+            })()}
           </span>
           <ChevronDown className={`ml-auto h-3 w-3 shrink-0 transition-transform ${picking ? "rotate-180" : ""}`} />
         </button>
@@ -179,26 +194,44 @@ function DestinationCard({
         {picking && (
           <div className="mt-2 space-y-1 rounded-lg border border-line bg-ink-900 p-2">
             <p className="px-0.5 pb-1 text-[10px] text-fg-faint">
-              New footage goes here. Existing recordings stay where they are.
+              A camera <span className="text-fg-muted">records</span> to its primary destination and can{" "}
+              <span className="text-fg-muted">mirror</span> to any others at the same time — same footage,
+              per-destination retention (set the days in the camera&apos;s settings).
             </p>
-            {allCams.map((c) => {
-              const here = cams.some((x) => x.id === c.id);
-              return (
-                <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-0.5 py-1 text-xs text-fg-muted hover:text-fg">
-                  <input
-                    type="checkbox"
-                    className="accent-brand"
-                    checked={here}
-                    disabled={assigning}
-                    onChange={() => !here && onAssign([c.id])}
-                  />
-                  <span className="truncate">{c.name}</span>
-                  {here && <span className="ml-auto text-[10px] text-fg-faint">here</span>}
-                </label>
-              );
-            })}
+            {cams.map((c) => (
+              <div key={c.id} className="flex items-center gap-2 rounded px-0.5 py-1 text-xs text-fg-muted">
+                <input
+                  type="checkbox"
+                  className="accent-brand"
+                  checked={c.member}
+                  disabled={busy || (c.member && c.primary)}
+                  title={c.member && c.primary ? "This is the camera's recording destination — make another destination primary first" : undefined}
+                  onChange={() => (c.member ? onRemoveMirror(c.id) : onAddMirror(c.id))}
+                />
+                <span className="truncate text-fg">{c.name}</span>
+                {c.member && c.primary && (
+                  <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand">records here</span>
+                )}
+                {c.member && !c.primary && (
+                  <span className="rounded bg-ink-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-faint">mirror</span>
+                )}
+                {c.member && c.retentionDays > 0 && (
+                  <span className="text-[10px] text-fg-faint">{c.retentionDays}d here</span>
+                )}
+                {c.member && !c.primary && (
+                  <button
+                    className="ml-auto text-[10px] text-brand hover:underline disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => onMakePrimary(c.id)}
+                    title="Record here instead (the current destination becomes a mirror)"
+                  >
+                    make primary
+                  </button>
+                )}
+              </div>
+            ))}
             <p className="px-0.5 pt-1 text-[10px] text-fg-faint">
-              To move a camera away, tick it on another destination.
+              Existing recordings stay where they are; mirrors fill in automatically.
             </p>
           </div>
         )}
@@ -214,7 +247,6 @@ export function StorageManager() {
   const purge = usePurge();
   const reindex = useReindex();
   const del = useDeleteLocation();
-  const assign = useAssignCameras();
 
   const [cameraId, setCameraId] = useState("");
   const [preset, setPreset] = useState<Preset>("24h");
@@ -226,6 +258,9 @@ export function StorageManager() {
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editLoc, setEditLoc] = useState<StorageLocation | null>(null);
+  // A destination being RECONFIGURED (connection/credentials) through the wizard's
+  // probe-gated flow — base setup is only changeable behind a passing test.
+  const [wizardEdit, setWizardEdit] = useState<StorageLocation | null>(null);
   const [delLoc, setDelLoc] = useState<StorageLocation | null>(null);
   const [forceLoc, setForceLoc] = useState<StorageLocation | null>(null);
 
@@ -239,8 +274,60 @@ export function StorageManager() {
   const freeInAlloc = Math.max(0, totalAlloc - totalUsed);
 
   // Which cameras record to each location (by id).
-  const camsByLoc = (id: string) =>
-    (cameras ?? []).filter((c) => (c.locationId || "") === id).map((c) => ({ id: c.id, name: c.name }));
+  const setDest = useSetCameraDestinations();
+
+  // Memberships come from the locations themselves (each lists its cameras with a
+  // primary flag), so mirrors show up — deriving from cameras.locationId would
+  // only ever show the primary.
+  const membershipsOf = (camId: string) => {
+    const out: { locationId: string; retentionDays: number; primary: boolean }[] = [];
+    for (const l of locations) {
+      const m = (l.cameras ?? []).find((c) => c.cameraId === camId);
+      if (m) out.push({ locationId: l.id, retentionDays: m.retentionDays, primary: m.primary });
+    }
+    return out;
+  };
+  const cardCams = (locId: string): CardCam[] =>
+    (cameras ?? []).map((c) => {
+      const m = (locations.find((l) => l.id === locId)?.cameras ?? []).find((x) => x.cameraId === c.id);
+      return {
+        id: c.id,
+        name: c.name,
+        member: !!m,
+        primary: m?.primary ?? false,
+        retentionDays: m?.retentionDays ?? 0,
+      };
+    });
+  const addMirror = (camId: string, locId: string) => {
+    const ms = membershipsOf(camId);
+    const primary = ms.find((m) => m.primary)?.locationId ?? "";
+    setDest.mutate({
+      cameraId: camId,
+      primaryLocationId: primary,
+      destinations: [...ms.map((m) => ({ locationId: m.locationId, retentionDays: m.retentionDays })), { locationId: locId, retentionDays: 0 }],
+    });
+  };
+  const removeMirror = (camId: string, locId: string) => {
+    const ms = membershipsOf(camId);
+    const primary = ms.find((m) => m.primary)?.locationId ?? "";
+    if (locId === primary) return; // the card disables this; belt and braces
+    setDest.mutate({
+      cameraId: camId,
+      primaryLocationId: primary,
+      destinations: ms.filter((m) => m.locationId !== locId).map((m) => ({ locationId: m.locationId, retentionDays: m.retentionDays })),
+    });
+  };
+  const makePrimary = (camId: string, locId: string) => {
+    const ms = membershipsOf(camId);
+    const dests = ms.some((m) => m.locationId === locId)
+      ? ms
+      : [...ms, { locationId: locId, retentionDays: 0, primary: false }];
+    setDest.mutate({
+      cameraId: camId,
+      primaryLocationId: locId,
+      destinations: dests.map((m) => ({ locationId: m.locationId, retentionDays: m.retentionDays })),
+    });
+  };
 
   // Per-camera footage donut (footage by camera + app data = total footprint).
   const camSegs = (storage?.cameras ?? []).map((c, i) => ({ value: c.bytes, color: CAM_COLORS[i % CAM_COLORS.length] }));
@@ -354,12 +441,13 @@ export function StorageManager() {
             <DestinationCard
               key={loc.id || "default"}
               loc={loc}
-              cams={camsByLoc(loc.id)}
-              allCams={(cameras ?? []).map((c) => ({ id: c.id, name: c.name }))}
+              cams={cardCams(loc.id)}
               onEdit={() => setEditLoc(loc)}
               onRemove={() => setDelLoc(loc)}
-              assigning={assign.isPending}
-              onAssign={(ids) => assign.mutate({ locationId: loc.id, cameraIds: ids })}
+              busy={setDest.isPending}
+              onAddMirror={(camId) => addMirror(camId, loc.id)}
+              onRemoveMirror={(camId) => removeMirror(camId, loc.id)}
+              onMakePrimary={(camId) => makePrimary(camId, loc.id)}
             />
           ))}
         </div>
@@ -454,8 +542,23 @@ export function StorageManager() {
         onCancel={() => setForceLoc(null)}
       />
 
-      <StorageSetupWizard open={wizardOpen} onClose={() => setWizardOpen(false)} initialStep="type" />
-      <EditLocationModal loc={editLoc} onClose={() => setEditLoc(null)} />
+      <StorageSetupWizard
+        open={wizardOpen || !!wizardEdit}
+        onClose={() => {
+          setWizardOpen(false);
+          setWizardEdit(null);
+        }}
+        initialStep="type"
+        edit={wizardEdit}
+      />
+      <EditLocationModal
+        loc={editLoc}
+        onClose={() => setEditLoc(null)}
+        onReconfigure={() => {
+          setWizardEdit(editLoc);
+          setEditLoc(null);
+        }}
+      />
     </div>
   );
 }

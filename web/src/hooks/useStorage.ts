@@ -50,6 +50,9 @@ export interface StorageLocation {
   hasCredential: boolean;
   usedBytes: number;
   cameraCount: number;
+  // Membership list: which cameras record here (primary) or mirror here, with the
+  // per-location retention override (0 = the camera's own retentionDays).
+  cameras?: { cameraId: string; name: string; primary: boolean; retentionDays: number }[];
   diskTotalBytes?: number;
   diskFreeBytes?: number;
   sortOrder?: number;

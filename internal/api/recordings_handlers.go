@@ -432,28 +432,56 @@ func (s *Server) handleSegmentFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "video/mp2t")
 	// Local segments store an absolute path → serve straight from disk. Network
 	// segments store a backend-relative path → stream through the backend with full
-	// HTTP range support (seeking, partial content) via ServeContent.
+	// HTTP range support (seeking, partial content) via ServeContent. If the
+	// canonical copy can't be reached (file gone, share down), fall back to any
+	// mirror copy — a mirrored recording stays playable through either home.
 	if filepath.IsAbs(seg.Path) {
-		http.ServeFile(w, r, seg.Path)
+		if _, err := os.Stat(seg.Path); err == nil {
+			http.ServeFile(w, r, seg.Path)
+			return
+		}
+	} else if s.registry != nil {
+		if backend, err := s.registry.For(seg.LocationID); err == nil {
+			if rc, _, err := backend.Open(seg.Path); err == nil {
+				defer rc.Close()
+				http.ServeContent(w, r, segID+".ts", time.UnixMilli(seg.StartTS), rc)
+				return
+			}
+		}
+	}
+	for _, c := range s.segmentCopies(seg.ID) {
+		if filepath.IsAbs(c.Path) {
+			if _, err := os.Stat(c.Path); err == nil {
+				http.ServeFile(w, r, c.Path)
+				return
+			}
+			continue
+		}
+		if s.registry == nil {
+			continue
+		}
+		backend, err := s.registry.For(c.LocationID)
+		if err != nil {
+			continue
+		}
+		rc, _, err := backend.Open(c.Path)
+		if err != nil {
+			continue
+		}
+		defer rc.Close()
+		http.ServeContent(w, r, segID+".ts", time.UnixMilli(seg.StartTS), rc)
 		return
 	}
-	if s.registry == nil {
-		writeError(w, http.StatusServiceUnavailable, "storage backend unavailable")
-		return
-	}
-	backend, err := s.registry.For(seg.LocationID)
+	writeError(w, http.StatusNotFound, "not found")
+}
+
+// segmentCopies is CopiesForSegment with errors flattened to "no copies".
+func (s *Server) segmentCopies(segID string) []*store.SegmentCopy {
+	copies, err := s.st.CopiesForSegment(segID)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "storage backend unavailable")
-		return
+		return nil
 	}
-	rc, _, err := backend.Open(seg.Path)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	defer rc.Close()
-	// rc is a ReadSeeker; ServeContent handles range requests over it.
-	http.ServeContent(w, r, segID+".ts", time.UnixMilli(seg.StartTS), rc)
+	return copies
 }
 
 // recordingsDir is the directory recordings currently live in: the operator
@@ -734,7 +762,8 @@ func (s *Server) scheduleRestart(reason string) {
 // makes the total unlimited — reported as 0, matching the existing convention.
 func (s *Server) storageTotals() (allocated, used, free int64) {
 	recorded, _ := s.st.TotalBytes()
-	used = recorded + s.appFilesBytes()
+	copies, _ := s.st.TotalCopyBytes()
+	used = recorded + copies + s.appFilesBytes()
 
 	allocated = s.st.GetSettingInt64("storage_cap_bytes")
 	unlimited := allocated <= 0

@@ -91,9 +91,36 @@ func (j *Janitor) enforce() {
 		if cam.RecordMode == store.ModeMotion {
 			j.pruneNonMotion(cam.ID, now-motionGraceMs)
 		}
-		if cam.RetentionDays > 0 {
-			before := now - int64(cam.RetentionDays)*86_400_000
-			j.deleteExpired(cam.ID, before)
+		// With mirrored destinations a segment's lifetime is per LOCATION: it dies
+		// everywhere only once it is older than every destination's retention
+		// (0 = inherit the camera's days; any unlimited destination = immortal
+		// until caps bite). Inside that window, per-destination retention removes
+		// the copy on each location — promoting the canonical copy away first when
+		// a fresher home survives — so "local keeps 1 day, NAS keeps 7" works.
+		dests, _ := j.st.DestinationsForCamera(cam.ID)
+		maxDays, unlimited := 0, false
+		for _, d := range dests {
+			days := d.RetentionDays
+			if days <= 0 {
+				days = cam.RetentionDays
+			}
+			if days <= 0 {
+				unlimited = true
+			} else if days > maxDays {
+				maxDays = days
+			}
+		}
+		if !unlimited && maxDays > 0 {
+			j.deleteExpired(cam.ID, now-int64(maxDays)*86_400_000)
+		}
+		for _, d := range dests {
+			days := d.RetentionDays
+			if days <= 0 {
+				days = cam.RetentionDays
+			}
+			if days > 0 {
+				j.enforceDestinationRetention(cam.ID, d.LocationID, now-int64(days)*86_400_000)
+			}
 		}
 		if cam.StorageQuotaBytes > 0 {
 			j.enforceQuota(cam.ID, cam.StorageQuotaBytes)
@@ -222,17 +249,31 @@ func (j *Janitor) enforceLocationCap(locationID string, capBytes int64, includeA
 	}
 	deleted := 0
 	for total > target {
-		oldest, err := j.st.OldestSegmentsInLocation(locationID, deleteBatch)
+		oldest, err := j.st.OldestEvictablesInLocation(locationID, deleteBatch)
 		if err != nil || len(oldest) == 0 {
 			break
 		}
 		progressed := false
-		for _, s := range oldest {
+		for _, ev := range oldest {
 			if total <= target {
 				break
 			}
-			if j.delete(s) {
-				total -= s.SizeBytes
+			if ev.IsCopy {
+				// A mirror copy: freeing it loses nothing (the canonical survives
+				// elsewhere) — always the cheapest eviction.
+				j.removeCopyFile(ev.Copy)
+				if err := j.st.DeleteSegmentCopy(ev.Copy.SegmentID, ev.Copy.LocationID); err == nil {
+					total -= ev.Copy.SizeBytes
+					deleted++
+					progressed = true
+				}
+				continue
+			}
+			// A canonical copy: if a mirror survives elsewhere, promote it so the
+			// footage lives on and only THIS location's bytes are freed; otherwise
+			// it is a full delete, exactly as before mirrors existed.
+			if j.evictCanonical(ev.Seg) {
+				total -= ev.Seg.SizeBytes
 				deleted++
 				progressed = true
 			}
@@ -243,6 +284,101 @@ func (j *Janitor) enforceLocationCap(locationID string, capBytes int64, includeA
 	}
 	if deleted > 0 {
 		j.log.Warn("retention: over storage cap, removed oldest", "location", locationID, "count", deleted)
+	}
+}
+
+// enforceDestinationRetention removes footage older than beforeMs from ONE
+// location for ONE camera — the per-destination retention override. Mirror
+// copies are simply deleted; a canonical copy is promoted to a surviving mirror
+// first, and if no mirror exists yet it is left alone (the mirror pass will copy
+// it within a tick and the next sweep promotes it) — footage another destination
+// still wants is never destroyed by this pass.
+func (j *Janitor) enforceDestinationRetention(cameraID, locationID string, beforeMs int64) {
+	removed := 0
+	if copies, err := j.st.ExpiredCopiesInLocation(cameraID, locationID, beforeMs, deleteBatch); err == nil {
+		for _, c := range copies {
+			j.removeCopyFile(c)
+			if err := j.st.DeleteSegmentCopy(c.SegmentID, c.LocationID); err == nil {
+				removed++
+			}
+		}
+	}
+	if segs, err := j.st.ExpiredSegmentsInLocation(cameraID, locationID, beforeMs, deleteBatch); err == nil {
+		for _, s := range segs {
+			if j.exportLocked(s) {
+				continue
+			}
+			copies, err := j.st.CopiesForSegment(s.ID)
+			if err != nil || len(copies) == 0 {
+				continue // no surviving home yet — the mirror pass fills one in
+			}
+			if j.promoteAndRemove(s, copies) {
+				removed++
+			}
+		}
+	}
+	if removed > 0 {
+		j.log.Info("retention: destination retention removed footage",
+			"camera", cameraID, "location", locationID, "count", removed)
+	}
+}
+
+// evictCanonical frees a canonical segment from its location: promote a mirror
+// when one survives, else delete the segment entirely.
+func (j *Janitor) evictCanonical(s *store.Segment) bool {
+	copies, err := j.st.CopiesForSegment(s.ID)
+	if err == nil && len(copies) > 0 {
+		if j.exportLocked(s) {
+			return false
+		}
+		return j.promoteAndRemove(s, copies)
+	}
+	return j.delete(s)
+}
+
+// promoteAndRemove promotes the first usable mirror copy into the segment row
+// and removes the OLD canonical file. Local copies are preferred (cheaper to
+// serve) over network ones.
+func (j *Janitor) promoteAndRemove(s *store.Segment, copies []*store.SegmentCopy) bool {
+	pick := copies[0]
+	for _, c := range copies {
+		if filepath.IsAbs(c.Path) {
+			pick = c
+			break
+		}
+	}
+	oldPath, oldLoc := s.Path, s.LocationID
+	if err := j.st.PromoteCopy(s.ID, pick.LocationID); err != nil {
+		j.log.Error("retention: promote copy", "segment", s.ID, "err", err)
+		return false
+	}
+	if oldPath != "" && filepath.IsAbs(oldPath) {
+		if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+			j.log.Error("retention: remove promoted-away file", "path", oldPath, "err", err)
+		}
+	} else if oldPath != "" && j.reg != nil {
+		if b, err := j.reg.For(oldLoc); err == nil {
+			_ = b.Remove(oldPath)
+		}
+	}
+	return true
+}
+
+// removeCopyFile best-effort deletes a mirror copy's physical file.
+func (j *Janitor) removeCopyFile(c *store.SegmentCopy) {
+	if c.Path == "" {
+		return
+	}
+	if filepath.IsAbs(c.Path) {
+		if err := os.Remove(c.Path); err != nil && !os.IsNotExist(err) {
+			j.log.Error("retention: remove copy file", "path", c.Path, "err", err)
+		}
+		return
+	}
+	if j.reg != nil {
+		if b, err := j.reg.For(c.LocationID); err == nil {
+			_ = b.Remove(c.Path)
+		}
 	}
 }
 
@@ -409,6 +545,14 @@ func (j *Janitor) enforceLocationFreeSpace(loc *store.StorageLocation) {
 func (j *Janitor) delete(s *store.Segment) bool {
 	if j.exportLocked(s) {
 		return false
+	}
+	// Full death: a segment deleted here dies EVERYWHERE — remove every mirror
+	// copy (file + row) before the canonical file and row.
+	if copies, err := j.st.CopiesForSegment(s.ID); err == nil {
+		for _, c := range copies {
+			j.removeCopyFile(c)
+			_ = j.st.DeleteSegmentCopy(c.SegmentID, c.LocationID)
+		}
 	}
 	// A held, unexpired lease overlapping this segment protects it (T2.8). Only
 	// consulted when a lease exists at all (leasesActive), so the common no-lease

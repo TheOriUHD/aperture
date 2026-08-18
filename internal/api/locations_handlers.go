@@ -25,6 +25,10 @@ type locationReq struct {
 	Secret          string         `json:"secret"` // plaintext credential (encrypted before storage)
 	AllocationBytes int64          `json:"allocationBytes"`
 	SortOrder       int            `json:"sortOrder"`
+	// Test-only: probe an EXISTING location without re-entering its credential —
+	// when set and Secret is empty, the stored secret is decrypted server-side for
+	// the probe (the plaintext never travels to the browser).
+	LocationID string `json:"locationId"`
 }
 
 type locationUpdateReq struct {
@@ -64,7 +68,7 @@ func (s *Server) defaultLocationView() map[string]any {
 	dir := s.recordingsDir()
 	used, _ := s.st.TotalBytesInLocation(store.DefaultLocationID)
 	used += s.appFilesBytes()
-	camCount, _ := s.st.CamerasUsingLocation(store.DefaultLocationID)
+	cams := s.locationCameras(store.DefaultLocationID)
 	total, free := diskUsage(dir)
 	return map[string]any{
 		"id":              store.DefaultLocationID,
@@ -77,10 +81,31 @@ func (s *Server) defaultLocationView() map[string]any {
 		"hasCredential":   false,
 		"isDefault":       true,
 		"usedBytes":       used,
-		"cameraCount":     camCount,
+		"cameraCount":     len(cams),
+		"cameras":         cams,
 		"diskTotalBytes":  total,
 		"diskFreeBytes":   free,
 	}
+}
+
+// locationCameras lists the memberships of a location for its card: which
+// cameras write here (primary) or mirror here, with the per-location retention.
+func (s *Server) locationCameras(locationID string) []map[string]any {
+	dests, _ := s.st.DestinationsForLocation(locationID)
+	out := make([]map[string]any, 0, len(dests))
+	for _, d := range dests {
+		cam, err := s.st.GetCamera(d.CameraID)
+		if err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"cameraId":      cam.ID,
+			"name":          cam.Name,
+			"primary":       cam.LocationID == locationID,
+			"retentionDays": d.RetentionDays,
+		})
+	}
+	return out
 }
 
 // statWithTimeout runs a backend's Stat with a hard deadline so an unreachable
@@ -106,7 +131,7 @@ func statWithTimeout(b storage.Backend, d time.Duration) (storage.Stat, bool) {
 
 func (s *Server) locationView(loc *store.StorageLocation) map[string]any {
 	used, _ := s.st.TotalBytesInLocation(loc.ID)
-	camCount, _ := s.st.CamerasUsingLocation(loc.ID)
+	cams := s.locationCameras(loc.ID)
 	m := map[string]any{
 		"id":              loc.ID,
 		"name":            loc.Name,
@@ -118,7 +143,8 @@ func (s *Server) locationView(loc *store.StorageLocation) map[string]any {
 		"hasCredential":   loc.HasCredential,
 		"isDefault":       false,
 		"usedBytes":       used,
-		"cameraCount":     camCount,
+		"cameraCount":     len(cams),
+		"cameras":         cams,
 		"createdAt":       loc.CreatedAt,
 		"updatedAt":       loc.UpdatedAt,
 	}
@@ -354,6 +380,10 @@ func (s *Server) handleDeleteLocation(w http.ResponseWriter, r *http.Request) {
 		}
 		s.purgeLocationSegments(id)
 	}
+	// Mirrors: drop the location's memberships and copy rows (the physical copies
+	// live on the location being detached, so their files go with it).
+	_ = s.st.RemoveDestinationsForLocation(id)
+	_ = s.st.DeleteCopiesInLocation(id)
 	if err := s.st.DeleteStorageLocation(id); err != nil {
 		writeStoreError(w, err)
 		return
@@ -407,7 +437,15 @@ func (s *Server) handleTestLocation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	res := storage.Probe(&storage.Spec{Type: req.Type, Config: req.Config, Secret: req.Secret})
+	secretVal := req.Secret
+	if secretVal == "" && req.LocationID != "" && s.cipher != nil {
+		if enc, err := s.st.LocationSecret(req.LocationID); err == nil && enc != "" {
+			if plain, err := s.cipher.Decrypt(enc); err == nil {
+				secretVal = plain
+			}
+		}
+	}
+	res := storage.Probe(&storage.Spec{Type: req.Type, Config: req.Config, Secret: secretVal})
 	writeJSON(w, http.StatusOK, res)
 }
 

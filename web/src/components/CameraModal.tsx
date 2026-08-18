@@ -8,7 +8,11 @@ import { ZoneEditor } from "./ZoneEditor";
 import { useCreateCamera, useUpdateCamera, useDeleteCamera, useTestCamera } from "../hooks/useCameras";
 import { useHA, useHASensors } from "../hooks/useSystem";
 import { useCameraGroups, useSetCameraGroups } from "../hooks/useGroups";
-import { useStorageLocations } from "../hooks/useStorageLocations";
+import {
+  useStorageLocations,
+  useCameraDestinations,
+  useSetCameraDestinations,
+} from "../hooks/useStorageLocations";
 import type { Camera, RecordMode } from "../lib/types";
 
 const SENS: { v: number; label: string }[] = [
@@ -38,6 +42,8 @@ export function CameraModal({
   const setGroups = useSetCameraGroups();
   const { data: locData } = useStorageLocations();
   const locations = locData?.locations ?? [];
+  const { data: destData } = useCameraDestinations(camera?.id);
+  const setDest = useSetCameraDestinations();
   const del = useDeleteCamera();
   const test = useTestCamera();
   const { data: ha } = useHA();
@@ -61,7 +67,9 @@ export function CameraModal({
   const [audioThreshold, setAudioThreshold] = useState(0);
   const [detectMethod, setDetectMethod] = useState("");
   const [tempSensor, setTempSensor] = useState("");
-  const [locationId, setLocationId] = useState("");
+  const [locationId, setLocationId] = useState(""); // the PRIMARY destination
+  // Mirror destinations: locationId -> per-location retention days (0 = inherit).
+  const [mirrors, setMirrors] = useState<Map<string, number>>(new Map());
   const [groupIds, setGroupIds] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
@@ -113,6 +121,18 @@ export function CameraModal({
     }
   }, [open, camera]);
 
+  // Seed the destination set (primary + mirrors) once loaded.
+  useEffect(() => {
+    if (!open) return;
+    if (camera && destData) {
+      const m = new Map<string, number>();
+      for (const d of destData.destinations) if (!d.primary) m.set(d.locationId, d.retentionDays);
+      setMirrors(m);
+    } else if (!camera) {
+      setMirrors(new Map());
+    }
+  }, [open, camera, destData]);
+
   // Seed the camera's group membership once groups + camera are known.
   useEffect(() => {
     if (!open) return;
@@ -154,6 +174,16 @@ export function CameraModal({
         camId = created?.id;
       }
       if (camId && groups) await setGroups.mutateAsync({ cameraId: camId, groupIds });
+      if (camId) {
+        await setDest.mutateAsync({
+          cameraId: camId,
+          primaryLocationId: locationId,
+          destinations: [
+            { locationId, retentionDays: 0 },
+            ...[...mirrors.entries()].filter(([l]) => l !== locationId).map(([l, days]) => ({ locationId: l, retentionDays: days })),
+          ],
+        });
+      }
       onClose();
     } catch {
       setError("Could not save the camera.");
@@ -294,7 +324,7 @@ export function CameraModal({
               as the setting not existing at all. */}
           {locations.length > 0 && (
             <div>
-              <label className="label">Storage location</label>
+              <label className="label">Storage</label>
               <select className="input" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
                 {locations.map((loc) => (
                   <option key={loc.id || "default"} value={loc.id}>
@@ -304,8 +334,60 @@ export function CameraModal({
                 ))}
               </select>
               <p className="text-[11px] text-fg-faint mt-1">
-                Where new footage for this camera is written. Existing recordings stay where they are.
+                Where new footage is written. Existing recordings stay where they are.
               </p>
+              {locations.length > 1 && (
+                <div className="mt-2 space-y-1.5">
+                  <p className="text-[11px] text-fg-muted">
+                    Also mirror to — same footage kept in more places, each with its own retention:
+                  </p>
+                  {locations
+                    .filter((l) => l.id !== locationId)
+                    .map((l) => {
+                      const on = mirrors.has(l.id);
+                      const days = mirrors.get(l.id) ?? 0;
+                      return (
+                        <div key={l.id || "default"} className="flex items-center gap-2 text-xs">
+                          <label className="flex flex-1 cursor-pointer items-center gap-2 text-fg-muted">
+                            <input
+                              type="checkbox"
+                              className="accent-brand"
+                              checked={on}
+                              onChange={() =>
+                                setMirrors((m) => {
+                                  const n = new Map(m);
+                                  if (on) n.delete(l.id);
+                                  else n.set(l.id, 0);
+                                  return n;
+                                })
+                              }
+                            />
+                            <span className="truncate">{l.name}{l.isDefault ? " (default)" : ""}</span>
+                          </label>
+                          {on && (
+                            <>
+                              <input
+                                type="number"
+                                min={0}
+                                className="input h-7 w-20 text-xs"
+                                placeholder={String(retention)}
+                                value={days === 0 ? "" : days}
+                                onChange={(e) =>
+                                  setMirrors((m) => {
+                                    const n = new Map(m);
+                                    n.set(l.id, Math.max(0, Number(e.target.value) || 0));
+                                    return n;
+                                  })
+                                }
+                              />
+                              <span className="text-[11px] text-fg-faint">days here (blank = {retention})</span>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
             </div>
           )}
           {mode === "scheduled" &&

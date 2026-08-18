@@ -93,6 +93,9 @@ export function useTestLocation() {
       type: string;
       config: Record<string, unknown>;
       secret?: string;
+      // Re-test an EXISTING location without re-entering its credential: the
+      // server decrypts the stored secret for the probe when secret is empty.
+      locationId?: string;
     }) => api.post<TestResult>("/api/system/storage/locations/test", input),
   });
 }
@@ -145,5 +148,44 @@ export function usePreviewAllocation() {
   return useMutation({
     mutationFn: (input: { locationId: string; allocationBytes: number }) =>
       api.post<EvictionPreview>("/api/system/storage/locations/allocate/preview", input),
+  });
+}
+
+// Mirrored destinations of one camera: exactly one primary (ffmpeg's target)
+// plus any number of mirrors, each with an optional per-location retention.
+export interface CameraDestination {
+  locationId: string;
+  retentionDays: number; // 0 = the camera's own retentionDays
+  primary: boolean;
+}
+
+export function useCameraDestinations(cameraId: string | undefined) {
+  return useQuery({
+    queryKey: ["camera-destinations", cameraId],
+    queryFn: () =>
+      api.get<{ cameraId: string; destinations: CameraDestination[] }>(
+        `/api/cameras/${cameraId}/destinations`,
+      ),
+    enabled: !!cameraId,
+  });
+}
+
+export function useSetCameraDestinations() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      cameraId: string;
+      primaryLocationId: string;
+      destinations: { locationId: string; retentionDays: number }[];
+    }) =>
+      api.put<{ cameraId: string; destinations: CameraDestination[] }>(
+        `/api/cameras/${input.cameraId}/destinations`,
+        { primaryLocationId: input.primaryLocationId, destinations: input.destinations },
+      ),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["camera-destinations", v.cameraId] });
+      qc.invalidateQueries({ queryKey: ["cameras"] });
+      invalidate(qc);
+    },
   });
 }

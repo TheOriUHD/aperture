@@ -26,8 +26,13 @@ import {
   useAssignCameras,
   useDeleteLocation,
   useTestLocation,
+  useUpdateLocation,
+  useAllocateLocation,
+  usePreviewAllocation,
+  type EvictionPreview,
   type TestStep,
 } from "../../hooks/useStorageLocations";
+import { EvictionConfirm } from "./EvictionConfirm";
 import { useCameras } from "../../hooks/useCameras";
 import { StorageWizard } from "../StorageWizard";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
@@ -65,6 +70,12 @@ interface Draft {
   cameraIds: string[];
   diskFreeBytes: number;
   diskTotalBytes: number;
+  // Edit mode: reconfiguring an EXISTING destination through the same probe-gated
+  // flow (empty secret = keep the stored credential; the probe uses it via
+  // locationId). Base setup and credentials are ONLY changeable through here.
+  editId?: string;
+  editEtag?: string;
+  editAllocation?: number; // current allocation, to detect a decrease
 }
 
 const emptyDraft: Draft = {
@@ -82,16 +93,24 @@ export function StorageSetupWizard({
   open,
   onClose,
   initialStep = "overview",
+  edit = null,
 }: {
   open: boolean;
   onClose: () => void;
   initialStep?: Step;
+  // A network destination to reconfigure: the wizard prefills from it, probes the
+  // (possibly unchanged) connection, and APPLIES as an update instead of a create.
+  edit?: StorageLocation | null;
 }) {
   const { data } = useStorageLocations();
   const { data: cameras } = useCameras();
   const { data: storage } = useStorage();
   const create = useCreateLocation();
   const assign = useAssignCameras();
+  const update = useUpdateLocation();
+  const allocate = useAllocateLocation();
+  const previewAlloc = usePreviewAllocation();
+  const [pendingEvict, setPendingEvict] = useState<EvictionPreview | null>(null);
   const [step, setStep] = useState<Step>(initialStep);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [reserveOpen, setReserveOpen] = useState(false);
@@ -100,12 +119,27 @@ export function StorageSetupWizard({
 
   useEffect(() => {
     if (open) {
-      setStep(initialStep);
+      if (edit) {
+        setDraft({
+          ...emptyDraft,
+          type: edit.type,
+          name: edit.name,
+          config: { ...(edit.config as Record<string, string | number>) },
+          allocationBytes: edit.allocationBytes,
+          editId: edit.id,
+          editEtag: edit.etag,
+          editAllocation: edit.allocationBytes,
+        });
+        setStep("details");
+      } else {
+        setStep(initialStep);
+      }
     } else {
       setDraft(emptyDraft);
       setSaveErr("");
+      setPendingEvict(null);
     }
-  }, [open, initialStep]);
+  }, [open, initialStep, edit]);
 
   const locations = data?.locations ?? [];
   // Average per-camera byte rate, to estimate how long an allocation holds.
@@ -121,6 +155,22 @@ export function StorageSetupWizard({
   async function finishSave() {
     setSaveErr("");
     try {
+      if (draft.editId) {
+        // Shrinking the allocation destroys footage immediately — confirm with the
+        // server-computed impact first, exactly like the edit modal does.
+        if (draft.allocationBytes < (draft.editAllocation ?? 0)) {
+          const p = await previewAlloc.mutateAsync({
+            locationId: draft.editId,
+            allocationBytes: draft.allocationBytes,
+          });
+          if (p.willEvict) {
+            setPendingEvict(p);
+            return;
+          }
+        }
+        await applyEdit();
+        return;
+      }
       const loc = await create.mutateAsync({
         name: draft.name.trim(),
         type: draft.type,
@@ -134,6 +184,23 @@ export function StorageSetupWizard({
       setStep("done");
     } catch (e) {
       setSaveErr(e instanceof Error ? e.message : "Could not save the destination.");
+    }
+  }
+
+  async function applyEdit() {
+    setPendingEvict(null);
+    try {
+      await update.mutateAsync({
+        id: draft.editId!,
+        etag: draft.editEtag,
+        name: draft.name.trim() || undefined,
+        config: draft.config,
+        secret: draft.secret || undefined, // empty = keep the stored credential
+      });
+      await allocate.mutateAsync({ locationId: draft.editId!, allocationBytes: draft.allocationBytes });
+      setStep("done");
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Could not apply the changes.");
     }
   }
 
@@ -186,7 +253,7 @@ export function StorageSetupWizard({
             <DetailsStep
               draft={draft}
               setDraft={setDraft}
-              onBack={() => setStep("type")}
+              onBack={() => (draft.editId ? onClose() : setStep("type"))}
               onNext={() => setStep("testing")}
             />
           )}
@@ -217,7 +284,7 @@ export function StorageSetupWizard({
               cameras={cameras ?? []}
               locations={locations}
               perCamBps={perCamBps}
-              saving={create.isPending || assign.isPending}
+              saving={create.isPending || assign.isPending || update.isPending || allocate.isPending || previewAlloc.isPending}
               error={saveErr}
               onBack={() => setStep("testing")}
               onSave={finishSave}
@@ -230,6 +297,12 @@ export function StorageSetupWizard({
       </div>
 
       <StorageWizard open={reserveOpen} onClose={() => setReserveOpen(false)} />
+      <EvictionConfirm
+        preview={pendingEvict}
+        busy={update.isPending || allocate.isPending}
+        onCancel={() => setPendingEvict(null)}
+        onConfirm={applyEdit}
+      />
     </div>
   );
 }
@@ -703,6 +776,9 @@ function TestingStep({
           type: draft.type,
           config: draft.config,
           secret: draft.secret || undefined,
+          // Editing an existing destination: an empty secret means "keep the
+          // stored one" — the server decrypts it for the probe.
+          locationId: draft.editId || undefined,
         });
         if (cancelled) return;
         setSteps(res.steps);
@@ -841,6 +917,7 @@ function AllocateStep({
   onBack: () => void;
   onSave: () => void;
 }) {
+  const editing = !!draft.editId;
   const isNetwork = draft.type === "smb" || draft.type === "sftp";
   // Known free space caps the slider; when a share doesn't report capacity, allow
   // a generous soft-cap range.
@@ -898,7 +975,14 @@ function AllocateStep({
         </div>
       </div>
 
-      {/* Camera picker */}
+      {/* Camera picker (adding only — while editing, memberships are managed on
+          the destination cards, where mirrors are visible too) */}
+      {editing ? (
+        <p className="mt-4 text-[11px] text-fg-faint">
+          Cameras keep their current assignments — manage them on the destination card.
+        </p>
+      ) : (
+      <>
       <p className="mt-4 mb-2 text-xs font-medium text-fg-muted">Cameras to record here</p>
       <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
         {cameras.length === 0 && <p className="text-sm text-fg-faint">No cameras yet.</p>}
@@ -923,6 +1007,8 @@ function AllocateStep({
           );
         })}
       </div>
+      </>
+      )}
 
       {error && <p className="mt-3 text-xs text-rec">{error}</p>}
 
@@ -933,7 +1019,7 @@ function AllocateStep({
         </button>
         <button className="btn-primary h-9 flex-1" onClick={onSave} disabled={saving}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          {saving ? "Saving…" : "Save destination"}
+          {saving ? "Saving…" : editing ? "Apply changes" : "Save destination"}
         </button>
       </div>
     </div>

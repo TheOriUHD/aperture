@@ -381,6 +381,9 @@ func (s *Server) routes() http.Handler {
 		// What a LOWER allocation would evict — read-only, so the UI can confirm a
 		// destructive change with real numbers instead of applying it blind.
 		g.Post("/system/storage/locations/allocate/preview", adminScoped(ScopeStorageRead), s.handleAllocatePreview)
+		// Mirrored destinations: which locations a camera records/mirrors to.
+		g.Get("/cameras/{id}/destinations", scopedCam(ScopeStorageRead), s.handleGetCameraDestinations)
+		g.Put("/cameras/{id}/destinations", adminScopedCam(ScopeStorageWrite), s.handleSetCameraDestinations)
 		g.Post("/system/storage/locations/reorder", adminScoped(ScopeStorageWrite), s.handleReorderLocations)
 		g.Post("/system/storage/locations/assign", adminScoped(ScopeStorageWrite), s.handleAssignCameras)
 		g.Put("/system/storage/locations/{id}", adminScoped(ScopeStorageWrite), s.handleUpdateLocation)
