@@ -46,7 +46,6 @@ export function VerticalTimeline({
   following = false,
   shadeBands,
   ribbon,
-  gaps,
   playheadFrac = 0.2,
   onScrubTo,
   onScrubEnd,
@@ -65,7 +64,6 @@ export function VerticalTimeline({
   following?: boolean;
   shadeBands?: ShadeBand[];
   ribbon?: { ts: number; tempC?: number; precipMm?: number }[];
-  gaps?: TR[];
   playheadFrac?: number;
   onScrubTo: (ms: number) => void;
   onScrubEnd?: () => void;
@@ -108,6 +106,12 @@ export function VerticalTimeline({
   const atLive = live || selectedMs >= nowMs;
   const visible = (r: TR) => r.end > bottomTime && r.start < topTime;
   const railX = 58;
+  // One flat rail, three states, no patterns or hatching:
+  //   grey  = nothing recorded   blue = recorded   lighter blue = motion/event
+  // Absence of blue IS the "no recording" state, which is why there is no
+  // separate gap layer any more — a stale or fragmented coverage fetch can no
+  // longer paint a scary "no footage" stripe over footage that exists.
+  const RAIL_W = 6;
 
   // Non-passive wheel so scrubbing doesn't scroll the page; accumulate on a ref
   // for lag-free response to fast scrolls.
@@ -298,41 +302,40 @@ export function VerticalTimeline({
         </div>
       ))}
 
-      <div className="absolute top-0 bottom-0 w-[3px] rounded-full bg-ink-850" style={{ left: railX }} />
+      <div
+        className="absolute top-0 bottom-0 rounded-full bg-rail-idle"
+        style={{ left: railX, width: RAIL_W }}
+      />
 
       {segments.filter(visible).map((s, i) => (
         <div
           key={`s${i}`}
-          className="absolute w-[3px] rounded-full bg-brand-deep"
-          style={{ left: railX, top: `${pct(s.end)}%`, height: `${Math.max(pct(s.start) - pct(s.end), 0.2)}%` }}
-        />
-      ))}
-      {/* "No recording" gaps (continuous cameras only) — hatched red over the rail. */}
-      {gaps?.filter(visible).map((g, i) => (
-        <div
-          key={`g${i}`}
-          className="absolute w-[3px] rounded-full"
+          className="absolute rounded-full bg-rail-rec"
           style={{
             left: railX,
-            top: `${pct(g.end)}%`,
-            height: `${Math.max(pct(g.start) - pct(g.end), 0.2)}%`,
-            background: "repeating-linear-gradient(180deg, rgba(224,80,80,0.65) 0 3px, transparent 3px 6px)",
+            width: RAIL_W,
+            top: `${pct(s.end)}%`,
+            height: `${Math.max(pct(s.start) - pct(s.end), 0.2)}%`,
           }}
-          title="No recording"
         />
       ))}
-      {/* motion: lighter-blue highlight over the rail + dot + thumbnail square */}
+      {/* motion/event duration: a step lighter than the recorded blue */}
       {visEvents.map((e) => {
         const cy = pct((e.start + e.end) / 2);
         return (
           <div key={e.id}>
             <div
-              className="absolute w-[3px] rounded-full bg-motion"
-              style={{ left: railX, top: `${pct(e.end)}%`, height: `${Math.max(pct(e.start) - pct(e.end), 0.5)}%` }}
+              className="absolute rounded-full bg-rail-event"
+              style={{
+                left: railX,
+                width: RAIL_W,
+                top: `${pct(e.end)}%`,
+                height: `${Math.max(pct(e.start) - pct(e.end), 0.5)}%`,
+              }}
             />
             <div
-              className="absolute h-2 w-2 rounded-full bg-motion border border-ink-900"
-              style={{ left: railX + 1.5, top: `${cy}%`, transform: "translate(-50%,-50%)" }}
+              className="absolute h-2.5 w-2.5 rounded-full bg-rail-event border border-ink-900"
+              style={{ left: railX + RAIL_W / 2, top: `${cy}%`, transform: "translate(-50%,-50%)" }}
             />
             {thumbIds.has(e.id) && (
               <button
@@ -342,7 +345,7 @@ export function VerticalTimeline({
                   onEventClick(e.start);
                 }}
                 className="absolute rounded-sm overflow-hidden border border-motion/70 hover:border-motion bg-ink-800 shadow"
-                style={{ left: railX + 12, top: `${cy}%`, transform: "translateY(-50%)", width: 38, height: 26 }}
+                style={{ left: railX + RAIL_W + 9, top: `${cy}%`, transform: "translateY(-50%)", width: 38, height: 26 }}
                 aria-label="Jump to motion event"
               >
                 {e.thumbUrl ? (

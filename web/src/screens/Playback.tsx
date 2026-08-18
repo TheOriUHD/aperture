@@ -57,7 +57,7 @@ import { usePrefs } from "../lib/prefs";
 import { api } from "../lib/api";
 import { warmLive, stopWarmLive } from "../lib/liveWarm";
 import { fmtTimeSec, fmtDate } from "../lib/format";
-import { wallToOffset, offsetToWall, computeGaps, type Seg } from "../lib/playlist";
+import { wallToOffset, offsetToWall, type Seg } from "../lib/playlist";
 import type { MotionEvent } from "../lib/types";
 
 interface Segment extends Seg {
@@ -262,7 +262,7 @@ export function Playback() {
   const { data: railRanges = [] } = useQuery({
     queryKey: ["rail-coverage", selectedId, dayStart],
     queryFn: () =>
-      api.get<TR[]>(`/api/cameras/${selectedId}/coverage?from=${railFrom}&to=${railTo}&tolerance_ms=2000`),
+      api.get<TR[]>(`/api/cameras/${selectedId}/coverage?from=${railFrom}&to=${railTo}&tolerance_ms=15000`),
     enabled: !!selectedId,
     refetchInterval: followingToday ? 15000 : false,
     placeholderData: keepPreviousData,
@@ -276,13 +276,11 @@ export function Playback() {
   });
 
   const recorded: TR[] = railRanges;
-  // "No recording" gaps only make sense for continuous cameras, and only up to
-  // the present moment (the future isn't a gap). Computed across the wide rail
-  // window so they, too, stay continuous across midnight.
-  const gaps: TR[] =
-    selected?.recordMode === "continuous"
-      ? computeGaps(recorded, railFrom, Math.min(railTo, nowMs))
-      : [];
+  // No gap layer: the rail's grey track IS "nothing recorded", so absence of blue
+  // says it without a separate stripe. The old hatched-red gaps were computed from
+  // a coverage fetch that is briefly stale after a camera/day switch (keepPrevious)
+  // and fragments on every recorder restart, so they regularly painted "no footage"
+  // straight over footage that existed.
   // Grid Search: when a motion area is drawn, restrict events to those whose
   // motion overlapped it. Feeds both the timeline markers and the events panel.
   const filteredEvents = filterByRegion(events, region);
@@ -843,7 +841,6 @@ export function Playback() {
               following={following}
               shadeBands={shadeBands}
               ribbon={ribbon}
-              gaps={gaps}
               onScrubTo={scrubToTime}
               onScrubEnd={endScrub}
               onSeekAbs={seekToTime}
@@ -986,7 +983,6 @@ export function Playback() {
             following={following}
             shadeBands={shadeBands}
             ribbon={ribbon}
-            gaps={gaps}
             onScrubTo={scrubToTime}
             onScrubEnd={endScrub}
             onSeekAbs={seekToTime}
