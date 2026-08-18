@@ -34,6 +34,7 @@ import {
   Film,
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
+import { CameraImagingOverlay } from "../components/CameraImagingOverlay";
 import { VerticalTimeline, type TR, type TLEvent } from "../components/VerticalTimeline";
 import { EventStrip } from "../components/EventStrip";
 import { LiveVideo } from "../components/LiveVideo";
@@ -1133,6 +1134,11 @@ export function Playback() {
           )}
           {selected && !gridOpen && !multiActive && (
             <div className="absolute top-3 right-3 flex items-center gap-1">
+              {/* Picture controls — only rendered when this camera's ONVIF is on
+                  and actually reporting adjustable settings. */}
+              <div className="relative">
+                <CameraImagingOverlay cameraId={selected.id} VidBtn={VidBtn} />
+              </div>
               <VidBtn
                 onClick={() => setBoxesOn((v) => !v)}
                 label={boxesOn ? "Hide object boxes" : "Show object boxes"}

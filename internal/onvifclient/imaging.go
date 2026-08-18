@@ -63,7 +63,7 @@ func Probe(ctx context.Context, host, user, pass string, ports []int, timeout ti
 		}
 		c := New(fmt.Sprintf("%s:%d", host, p), user, pass, timeout)
 		caps, err := c.call(ctx, "device_service",
-			`<GetCapabilities xmlns="http://www.onvif.org/ver10/device/wsdl"><Category>All</Category></GetCapabilities>`)
+			`<tds:GetCapabilities><tds:Category>All</tds:Category></tds:GetCapabilities>`)
 		if err != nil && caps == "" {
 			lastErr = err.Error()
 			continue
@@ -98,7 +98,7 @@ func firstNonEmpty(a, b string) string {
 
 // DeviceInfo reads the camera's make/model/firmware.
 func (c *Client) DeviceInfo(ctx context.Context) (DeviceInfo, error) {
-	out, err := c.call(ctx, "device_service", `<GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/>`)
+	out, err := c.call(ctx, "device_service", `<tds:GetDeviceInformation/>`)
 	if err != nil {
 		return DeviceInfo{}, err
 	}
@@ -112,7 +112,7 @@ func (c *Client) DeviceInfo(ctx context.Context) (DeviceInfo, error) {
 
 // VideoSourceToken finds the token every imaging call is addressed to.
 func (c *Client) VideoSourceToken(ctx context.Context) (string, error) {
-	out, err := c.call(ctx, "media_service", `<GetVideoSources xmlns="http://www.onvif.org/ver10/media/wsdl"/>`)
+	out, err := c.call(ctx, "media_service", `<trt:GetVideoSources/>`)
 	if err != nil {
 		return "", err
 	}
@@ -129,8 +129,8 @@ func (c *Client) VideoSourceToken(ctx context.Context) (string, error) {
 // Imaging reads current settings plus the ranges the camera allows.
 func (c *Client) Imaging(ctx context.Context, videoSource string) (*Imaging, error) {
 	cur, err := c.call(ctx, "imaging_service",
-		`<GetImagingSettings xmlns="http://www.onvif.org/ver20/imaging/wsdl"><VideoSourceToken>`+
-			xmlEscape(videoSource)+`</VideoSourceToken></GetImagingSettings>`)
+		`<timg:GetImagingSettings><timg:VideoSourceToken>`+
+			xmlEscape(videoSource)+`</timg:VideoSourceToken></timg:GetImagingSettings>`)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +144,8 @@ func (c *Client) Imaging(ctx context.Context, videoSource string) (*Imaging, err
 	// Options are advisory: a camera that won't report ranges still gets sliders,
 	// using its own values as the bound hint.
 	if opts, err := c.call(ctx, "imaging_service",
-		`<GetOptions xmlns="http://www.onvif.org/ver20/imaging/wsdl"><VideoSourceToken>`+
-			xmlEscape(videoSource)+`</VideoSourceToken></GetOptions>`); err == nil {
+		`<timg:GetOptions><timg:VideoSourceToken>`+
+			xmlEscape(videoSource)+`</timg:VideoSourceToken></timg:GetOptions>`); err == nil {
 		for name, key := range map[string]string{
 			"Brightness": "brightness", "Contrast": "contrast",
 			"ColorSaturation": "saturation", "Sharpness": "sharpness",
@@ -190,12 +190,12 @@ func (c *Client) SetImaging(ctx context.Context, videoSource string, cur, next *
 		return b
 	}
 	b := &strings.Builder{}
-	b.WriteString(`<SetImagingSettings xmlns="http://www.onvif.org/ver20/imaging/wsdl"><VideoSourceToken>`)
+	b.WriteString(`<timg:SetImagingSettings><timg:VideoSourceToken>`)
 	b.WriteString(xmlEscape(videoSource))
-	b.WriteString(`</VideoSourceToken><ImagingSettings xmlns="http://www.onvif.org/ver10/schema">`)
+	b.WriteString(`</timg:VideoSourceToken><timg:ImagingSettings>`)
 	writeNum := func(tag string, v *float64) {
 		if v != nil {
-			fmt.Fprintf(b, "<%s>%s</%s>", tag, strconv.FormatFloat(*v, 'f', -1, 64), tag)
+			fmt.Fprintf(b, "<tt:%s>%s</tt:%s>", tag, strconv.FormatFloat(*v, 'f', -1, 64), tag)
 		}
 	}
 	// Schema sequence order matters to strict firmware.
@@ -207,10 +207,10 @@ func (c *Client) SetImaging(ctx context.Context, videoSource string, cur, next *
 		ir = cur.IrCutFilter
 	}
 	if ir != "" {
-		b.WriteString("<IrCutFilter>" + xmlEscape(ir) + "</IrCutFilter>")
+		b.WriteString("<tt:IrCutFilter>" + xmlEscape(ir) + "</tt:IrCutFilter>")
 	}
 	writeNum("Sharpness", pick(next.Sharpness, cur.Sharpness))
-	b.WriteString(`</ImagingSettings><ForcePersistence>true</ForcePersistence></SetImagingSettings>`)
+	b.WriteString(`</timg:ImagingSettings><timg:ForcePersistence>true</timg:ForcePersistence></timg:SetImagingSettings>`)
 
 	_, err := c.call(ctx, "imaging_service", b.String())
 	return err

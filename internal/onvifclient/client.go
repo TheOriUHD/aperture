@@ -39,11 +39,24 @@ type Client struct {
 
 // New builds a client with a bounded HTTP timeout — a camera that hangs must
 // never hold a request open.
+//
+// Keep-alive is DISABLED deliberately. These cameras run small gSOAP stacks that
+// close the connection after a response; Go would happily reuse the pooled socket
+// for the next call and the camera then reads a truncated message, failing with
+// "End of file or no input: message transfer interrupted". Reads early in a
+// sequence succeed and a later write fails, which looks like an auth or encoding
+// bug and is neither. One connection per call costs nothing at this call rate.
 func New(host, user, pass string, timeout time.Duration) *Client {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	return &Client{Host: host, User: user, Pass: pass, HTTP: &http.Client{Timeout: timeout}}
+	return &Client{
+		Host: host, User: user, Pass: pass,
+		HTTP: &http.Client{
+			Timeout:   timeout,
+			Transport: &http.Transport{DisableKeepAlives: true},
+		},
+	}
 }
 
 // wsSecurity builds the WS-UsernameToken header ONVIF expects:
@@ -76,8 +89,18 @@ var ErrUnauthorized = fmt.Errorf("the camera rejected this account for that acti
 
 // call posts a SOAP body to one of the camera's services and returns the body.
 func (c *Client) call(ctx context.Context, service, body string) (string, error) {
+	// Namespaces are declared ONCE on the envelope and referenced by prefix in
+	// every body. This is not cosmetic: the Reolink's SOAP stack rejects a
+	// default-namespace declaration on an inner element (xmlns="…" on
+	// ImagingSettings) with "End of file or no input: message transfer
+	// interrupted" — a parse error that reads like a transport fault — while
+	// accepting the identical content written with prefixes.
 	env := `<?xml version="1.0" encoding="UTF-8"?>` +
-		`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">` +
+		`<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"` +
+		` xmlns:tt="http://www.onvif.org/ver10/schema"` +
+		` xmlns:tds="http://www.onvif.org/ver10/device/wsdl"` +
+		` xmlns:trt="http://www.onvif.org/ver10/media/wsdl"` +
+		` xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl">` +
 		c.wsSecurity() + `<s:Body>` + body + `</s:Body></s:Envelope>`
 	u := "http://" + c.Host + "/onvif/" + service
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(env))
@@ -85,6 +108,9 @@ func (c *Client) call(ctx context.Context, service, body string) (string, error)
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/soap+xml; charset=utf-8")
+	// Ask the camera to close too, so neither side keeps a socket the other has
+	// already dropped.
+	req.Close = true
 	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return "", err
