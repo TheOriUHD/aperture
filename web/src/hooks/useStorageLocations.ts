@@ -116,3 +116,34 @@ export function useAllocateLocation() {
     onSuccess: () => invalidate(qc),
   });
 }
+
+// What LOWERING a destination's allocation would destroy. Allocation applies
+// immediately — the janitor evicts oldest-first as soon as a cap drops — so the UI
+// must confirm a decrease against real numbers. Computed server-side so the dialog
+// can never disagree with what the janitor actually does.
+export interface EvictionPreview {
+  locationId: string;
+  currentAllocationBytes: number;
+  proposedAllocationBytes: number;
+  usedBytes: number;
+  willEvict: boolean;
+  evictBytes: number;
+  evictSegments: number;
+  oldestTs: number;
+  newestTs: number;
+  cameras: {
+    cameraId: string;
+    name: string;
+    bytes: number;
+    segments: number;
+    oldestTs: number;
+    newestTs: number;
+  }[];
+}
+
+export function usePreviewAllocation() {
+  return useMutation({
+    mutationFn: (input: { locationId: string; allocationBytes: number }) =>
+      api.post<EvictionPreview>("/api/system/storage/locations/allocate/preview", input),
+  });
+}

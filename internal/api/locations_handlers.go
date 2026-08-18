@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -498,4 +499,83 @@ func (s *Server) handleAssignCameras(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logAudit(r, "storage.location.assign", req.LocationID, "")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "moved": moved})
+}
+
+// handleAllocatePreview reports what LOWERING a destination's allocation would
+// destroy, without changing anything.
+//
+// Allocation is applied immediately (the janitor evicts oldest-first the moment a
+// cap drops), so a decrease is a destructive, irreversible action taken with a
+// slider. The old reserve wizard fronted its restart with a countdown and an
+// abort; the unified allocate endpoint needs no restart and lost that moment of
+// ceremony along with it. This restores the honesty: the UI asks for confirmation
+// using REAL numbers computed here, never an estimate made in the browser.
+func (s *Server) handleAllocatePreview(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		LocationID      string `json:"locationId"`
+		AllocationBytes int64  `json:"allocationBytes"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	isDefault := req.LocationID == store.DefaultLocationID
+	var current int64
+	if isDefault {
+		current = s.st.GetSettingInt64("storage_cap_bytes")
+	} else {
+		loc, err := s.st.GetStorageLocation(req.LocationID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "unknown location")
+			return
+		}
+		current = loc.AllocationBytes
+	}
+
+	// The default location shares its allocation with Aperture's own files, so the
+	// footage target is the cap minus those — same as the janitor.
+	target := req.AllocationBytes
+	if isDefault {
+		target -= s.appFilesBytes()
+	}
+	if target < 0 {
+		target = 0
+	}
+
+	prev, err := s.st.PreviewEvictionInLocation(req.LocationID, target)
+	if err != nil {
+		s.log.Error("preview eviction", "location", req.LocationID, "err", err)
+		writeError(w, http.StatusInternalServerError, "could not compute the impact")
+		return
+	}
+
+	cams := make([]map[string]any, 0, len(prev.PerCamera))
+	for id, c := range prev.PerCamera {
+		name := id
+		if cam, err := s.st.GetCamera(id); err == nil {
+			name = cam.Name
+		}
+		cams = append(cams, map[string]any{
+			"cameraId": id, "name": name,
+			"bytes": c.Bytes, "segments": c.Segments,
+			"oldestTs": c.OldestTS, "newestTs": c.NewestTS,
+		})
+	}
+	sort.Slice(cams, func(i, j int) bool {
+		return cams[i]["bytes"].(int64) > cams[j]["bytes"].(int64)
+	})
+
+	used, _ := s.st.TotalBytesInLocation(req.LocationID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"locationId":              req.LocationID,
+		"currentAllocationBytes":  current,
+		"proposedAllocationBytes": req.AllocationBytes,
+		"usedBytes":               used,
+		"willEvict":               prev.Bytes > 0,
+		"evictBytes":              prev.Bytes,
+		"evictSegments":           prev.Segments,
+		"oldestTs":                prev.OldestTS,
+		"newestTs":                prev.NewestTS,
+		"cameras":                 cams,
+	})
 }

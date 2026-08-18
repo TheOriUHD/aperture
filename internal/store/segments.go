@@ -389,3 +389,74 @@ func collectSegments(rows *sql.Rows) ([]*Segment, error) {
 	}
 	return out, rows.Err()
 }
+
+// EvictionPreview describes what lowering a location's allocation would destroy.
+// It mirrors the janitor's oldest-first arithmetic (see Janitor.enforceLocationCap)
+// WITHOUT deleting anything, so the UI can state real numbers before the user
+// commits — lowering an allocation removes footage immediately and irreversibly.
+type EvictionPreview struct {
+	Bytes    int64
+	Segments int64
+	OldestTS int64
+	NewestTS int64
+	PerCamera map[string]*EvictionCamera
+}
+
+// EvictionCamera is the per-camera share of an eviction.
+type EvictionCamera struct {
+	Bytes    int64
+	Segments int64
+	OldestTS int64
+	NewestTS int64
+}
+
+// PreviewEvictionInLocation walks a location's segments oldest-first and reports
+// which would be removed to bring usage down to targetBytes. Locked segments (held
+// by an active export) are skipped, exactly as the janitor skips them.
+func (s *Store) PreviewEvictionInLocation(locationID string, targetBytes int64) (*EvictionPreview, error) {
+	total, err := s.TotalBytesInLocation(locationID)
+	if err != nil {
+		return nil, err
+	}
+	p := &EvictionPreview{PerCamera: map[string]*EvictionCamera{}}
+	if total <= targetBytes {
+		return p, nil // nothing to do — this is a no-op or an increase
+	}
+	rows, err := s.db.Query(segmentSelect+
+		` WHERE location_id = ? AND locked = 0 ORDER BY start_ts ASC`, locationID)
+	if err != nil {
+		return nil, err
+	}
+	segs, err := collectSegments(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, seg := range segs {
+		if total <= targetBytes {
+			break
+		}
+		total -= seg.SizeBytes
+		p.Bytes += seg.SizeBytes
+		p.Segments++
+		if p.OldestTS == 0 || seg.StartTS < p.OldestTS {
+			p.OldestTS = seg.StartTS
+		}
+		if seg.EndTS > p.NewestTS {
+			p.NewestTS = seg.EndTS
+		}
+		c := p.PerCamera[seg.CameraID]
+		if c == nil {
+			c = &EvictionCamera{}
+			p.PerCamera[seg.CameraID] = c
+		}
+		c.Bytes += seg.SizeBytes
+		c.Segments++
+		if c.OldestTS == 0 || seg.StartTS < c.OldestTS {
+			c.OldestTS = seg.StartTS
+		}
+		if seg.EndTS > c.NewestTS {
+			c.NewestTS = seg.EndTS
+		}
+	}
+	return p, nil
+}

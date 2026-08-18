@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
-import { Loader2, KeyRound } from "lucide-react";
+import { Loader2, KeyRound, AlertTriangle } from "lucide-react";
 import { Modal } from "../ui/Modal";
 import { Switch } from "../ui/Switch";
 import { useDiskStats } from "../../hooks/useStorage";
 import type { StorageLocation } from "../../hooks/useStorage";
-import { useUpdateLocation, useAllocateLocation } from "../../hooks/useStorageLocations";
+import {
+  useUpdateLocation,
+  useAllocateLocation,
+  usePreviewAllocation,
+  type EvictionPreview,
+} from "../../hooks/useStorageLocations";
 import { formatBytes } from "../../lib/format";
 
 const GiB = 1024 ** 3;
@@ -20,6 +25,7 @@ export function EditLocationModal({ loc, onClose }: { loc: StorageLocation | nul
   const { data: disk } = useDiskStats(open && isDefault);
   const update = useUpdateLocation();
   const allocate = useAllocateLocation();
+  const preview = usePreviewAllocation();
 
   const [name, setName] = useState("");
   const [alloc, setAlloc] = useState(0);
@@ -28,6 +34,8 @@ export function EditLocationModal({ loc, onClose }: { loc: StorageLocation | nul
   const [changePw, setChangePw] = useState(false);
   const [secret, setSecret] = useState("");
   const [err, setErr] = useState("");
+  // Non-null once a DECREASE has been previewed and is awaiting confirmation.
+  const [pending, setPending] = useState<EvictionPreview | null>(null);
 
   useEffect(() => {
     if (!loc) return;
@@ -38,6 +46,7 @@ export function EditLocationModal({ loc, onClose }: { loc: StorageLocation | nul
     setChangePw(false);
     setSecret("");
     setErr("");
+    setPending(null);
   }, [loc]);
 
   if (!loc) return null;
@@ -51,10 +60,31 @@ export function EditLocationModal({ loc, onClose }: { loc: StorageLocation | nul
       : 8 * 1024 ** 4;
   const setC = (k: string, v: string | number) => setCfg((c) => ({ ...c, [k]: v }));
   const cfgS = (k: string) => String(cfg[k] ?? "");
-  const busy = update.isPending || allocate.isPending;
+  const busy = update.isPending || allocate.isPending || preview.isPending;
 
+  // Lowering an allocation evicts footage the instant it is applied, with no undo.
+  // Ask the server exactly what would be destroyed and make the user confirm it
+  // before anything is written. An increase destroys nothing, so it saves directly.
   async function save() {
     setErr("");
+    if (alloc < loc!.allocationBytes) {
+      try {
+        const p = await preview.mutateAsync({ locationId: loc!.id, allocationBytes: alloc });
+        if (p.willEvict) {
+          setPending(p);
+          return;
+        }
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "Could not check what this would delete.");
+        return;
+      }
+    }
+    await commit();
+  }
+
+  async function commit() {
+    setErr("");
+    setPending(null);
     try {
       if (isDefault) {
         await allocate.mutateAsync({ locationId: "", allocationBytes: alloc });
@@ -210,6 +240,83 @@ export function EditLocationModal({ loc, onClose }: { loc: StorageLocation | nul
             The app and database always live with the install and aren’t affected by this limit.
           </p>
         )}
+      </div>
+
+      <EvictionConfirm
+        preview={pending}
+        busy={busy}
+        onCancel={() => setPending(null)}
+        onConfirm={commit}
+      />
+    </Modal>
+  );
+}
+
+// EvictionConfirm states, in plain numbers, exactly what a lower allocation will
+// destroy — how much, how many recordings, which cameras and back to when. The
+// figures come from the server (the same oldest-first walk the janitor performs),
+// never from an estimate made here, so the dialog cannot promise something
+// different from what actually happens.
+function EvictionConfirm({
+  preview,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  preview: EvictionPreview | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!preview) return null;
+  const day = (ts: number) => (ts > 0 ? new Date(ts).toLocaleString() : "—");
+  return (
+    <Modal open onClose={onCancel} title="Delete footage to shrink this destination?">
+      <div className="space-y-4">
+        <div className="flex items-start gap-2.5 rounded-lg border border-rec/40 bg-rec/10 p-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rec" />
+          <div className="text-xs leading-relaxed text-fg">
+            Lowering this limit deletes the oldest recordings straight away to fit.
+            <strong className="text-fg"> This cannot be undone.</strong>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-lg border border-line bg-ink-850 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-fg-faint">Will be deleted</p>
+            <p className="mt-0.5 text-lg font-semibold tabular-nums text-rec">{formatBytes(preview.evictBytes)}</p>
+            <p className="text-[11px] text-fg-faint">{preview.evictSegments.toLocaleString()} recordings</p>
+          </div>
+          <div className="rounded-lg border border-line bg-ink-850 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-fg-faint">New limit</p>
+            <p className="mt-0.5 text-lg font-semibold tabular-nums text-fg">
+              {formatBytes(preview.proposedAllocationBytes)}
+            </p>
+            <p className="text-[11px] text-fg-faint">was {formatBytes(preview.currentAllocationBytes)}</p>
+          </div>
+        </div>
+
+        <div>
+          <p className="label mb-1.5">Footage from {day(preview.oldestTs)} up to {day(preview.newestTs)} goes</p>
+          <div className="space-y-1">
+            {preview.cameras.map((c) => (
+              <div key={c.cameraId} className="flex items-center gap-2 text-xs">
+                <span className="w-32 truncate text-fg">{c.name}</span>
+                <span className="flex-1 text-fg-faint">{c.segments.toLocaleString()} recordings</span>
+                <span className="tabular-nums text-fg-muted">{formatBytes(c.bytes)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button className="btn-ghost" onClick={onCancel} disabled={busy}>
+            Keep my footage
+          </button>
+          <button className="btn-danger" onClick={onConfirm} disabled={busy}>
+            {busy ? "Deleting…" : `Delete ${formatBytes(preview.evictBytes)}`}
+          </button>
+        </div>
       </div>
     </Modal>
   );

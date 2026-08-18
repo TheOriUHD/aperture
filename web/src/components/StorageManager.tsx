@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Trash2, RefreshCw, Plus, HardDrive, Server, Cloud, Lock, Pencil, Timer, PauseCircle } from "lucide-react";
+import { Trash2, RefreshCw, Plus, HardDrive, Server, Cloud, Lock, Pencil, Timer, PauseCircle, Video, ChevronDown } from "lucide-react";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { StorageSetupWizard } from "./storage/StorageSetupWizard";
 import { EditLocationModal } from "./storage/EditLocationModal";
 import { useStorage, type StorageLocation } from "../hooks/useStorage";
-import { useStorageLocations, useDeleteLocation } from "../hooks/useStorageLocations";
+import { useStorageLocations, useDeleteLocation, useAssignCameras } from "../hooks/useStorageLocations";
 import { useCameras } from "../hooks/useCameras";
 import { usePurge, useReindex, type PurgeResult } from "../hooks/useSystem";
 import { ApiError } from "../lib/api";
@@ -88,15 +88,25 @@ function locIcon(type: string) {
 
 function DestinationCard({
   loc,
-  camNames,
+  cams,
+  allCams,
   onEdit,
   onRemove,
+  onAssign,
+  assigning,
 }: {
   loc: StorageLocation;
-  camNames: string[];
+  cams: { id: string; name: string }[];
+  allCams: { id: string; name: string }[];
   onEdit: () => void;
   onRemove: () => void;
+  onAssign: (cameraIds: string[]) => void;
+  assigning: boolean;
 }) {
+  // Which cameras record here is edited ON the card. It used to be reachable only
+  // from Settings → Cameras → edit a camera, so clicking through from a card that
+  // listed camera names led to the location editor and a dead end.
+  const [picking, setPicking] = useState(false);
   const Icon = locIcon(loc.type);
   const path = (loc.config?.path as string) || "";
   const host = (loc.config?.host as string) || "";
@@ -151,11 +161,48 @@ function DestinationCard({
         </span>
         {loc.diskFreeBytes != null && loc.diskFreeBytes > 0 && <span>{formatBytes(loc.diskFreeBytes)} free on {loc.type === "local" ? "disk" : "share"}</span>}
       </div>
-      {camNames.length > 0 && (
-        <p className="mt-1.5 truncate text-[11px] text-fg-muted">
-          {camNames.length} {camNames.length === 1 ? "camera" : "cameras"}: {camNames.join(", ")}
-        </p>
-      )}
+      <div className="mt-2 border-t border-line/60 pt-2">
+        <button
+          className="flex w-full items-center gap-1.5 text-left text-[11px] text-fg-muted hover:text-fg"
+          onClick={() => setPicking((v) => !v)}
+          disabled={assigning}
+        >
+          <Video className="h-3 w-3 shrink-0" />
+          <span className="truncate">
+            {cams.length === 0
+              ? "No cameras — click to assign"
+              : `${cams.length} ${cams.length === 1 ? "camera" : "cameras"}: ${cams.map((c) => c.name).join(", ")}`}
+          </span>
+          <ChevronDown className={`ml-auto h-3 w-3 shrink-0 transition-transform ${picking ? "rotate-180" : ""}`} />
+        </button>
+
+        {picking && (
+          <div className="mt-2 space-y-1 rounded-lg border border-line bg-ink-900 p-2">
+            <p className="px-0.5 pb-1 text-[10px] text-fg-faint">
+              New footage goes here. Existing recordings stay where they are.
+            </p>
+            {allCams.map((c) => {
+              const here = cams.some((x) => x.id === c.id);
+              return (
+                <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-0.5 py-1 text-xs text-fg-muted hover:text-fg">
+                  <input
+                    type="checkbox"
+                    className="accent-brand"
+                    checked={here}
+                    disabled={assigning}
+                    onChange={() => !here && onAssign([c.id])}
+                  />
+                  <span className="truncate">{c.name}</span>
+                  {here && <span className="ml-auto text-[10px] text-fg-faint">here</span>}
+                </label>
+              );
+            })}
+            <p className="px-0.5 pt-1 text-[10px] text-fg-faint">
+              To move a camera away, tick it on another destination.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -167,6 +214,7 @@ export function StorageManager() {
   const purge = usePurge();
   const reindex = useReindex();
   const del = useDeleteLocation();
+  const assign = useAssignCameras();
 
   const [cameraId, setCameraId] = useState("");
   const [preset, setPreset] = useState<Preset>("24h");
@@ -191,7 +239,8 @@ export function StorageManager() {
   const freeInAlloc = Math.max(0, totalAlloc - totalUsed);
 
   // Which cameras record to each location (by id).
-  const camsByLoc = (id: string) => (cameras ?? []).filter((c) => (c.locationId || "") === id).map((c) => c.name);
+  const camsByLoc = (id: string) =>
+    (cameras ?? []).filter((c) => (c.locationId || "") === id).map((c) => ({ id: c.id, name: c.name }));
 
   // Per-camera footage donut (footage by camera + app data = total footprint).
   const camSegs = (storage?.cameras ?? []).map((c, i) => ({ value: c.bytes, color: CAM_COLORS[i % CAM_COLORS.length] }));
@@ -305,9 +354,12 @@ export function StorageManager() {
             <DestinationCard
               key={loc.id || "default"}
               loc={loc}
-              camNames={camsByLoc(loc.id)}
+              cams={camsByLoc(loc.id)}
+              allCams={(cameras ?? []).map((c) => ({ id: c.id, name: c.name }))}
               onEdit={() => setEditLoc(loc)}
               onRemove={() => setDelLoc(loc)}
+              assigning={assign.isPending}
+              onAssign={(ids) => assign.mutate({ locationId: loc.id, cameraIds: ids })}
             />
           ))}
         </div>

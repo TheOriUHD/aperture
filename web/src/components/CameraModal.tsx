@@ -289,7 +289,10 @@ export function CameraModal({
               />
             </div>
           </div>
-          {locations.length > 1 && (
+          {/* Shown even with a single destination: hiding it made "where does this
+              camera record?" invisible until a second location existed, which read
+              as the setting not existing at all. */}
+          {locations.length > 0 && (
             <div>
               <label className="label">Storage location</label>
               <select className="input" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
