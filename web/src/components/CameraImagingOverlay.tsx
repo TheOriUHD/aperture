@@ -123,27 +123,11 @@ export function CameraImagingOverlay({ cameraId, VidBtn }: {
 
           {hasVendor && vendor?.spotlight && (
             <div className="mt-3 border-t border-white/10 pt-2.5">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-[11px] text-white/70">
-                  <Lightbulb className="h-3.5 w-3.5" /> Spotlight
-                </span>
-                <button
-                  disabled={setVendor.isPending}
-                  onClick={() =>
-                    setVendor.mutate({
-                      id: cameraId,
-                      spotlight: { state: vendor.spotlight!.state === 1 ? 0 : 1 },
-                    })
-                  }
-                  className={`rounded px-2.5 py-1 text-[11px] font-medium ${
-                    vendor.spotlight.state === 1
-                      ? "bg-[#e6b45a] text-black"
-                      : "bg-white/10 text-white/70 hover:text-white"
-                  }`}
-                >
-                  {vendor.spotlight.state === 1 ? "On" : "Off"}
-                </button>
-              </div>
+              {/* On/off lives in the overlay bar as its own button — this panel
+                  keeps the settings you tune rather than flick. */}
+              <span className="flex items-center gap-1.5 text-[11px] text-white/70">
+                <Lightbulb className="h-3.5 w-3.5" /> Spotlight
+              </span>
               <div className="mt-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-white/50">Brightness</span>

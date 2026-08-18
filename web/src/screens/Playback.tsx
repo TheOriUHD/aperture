@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
 import { CameraImagingOverlay } from "../components/CameraImagingOverlay";
+import { CameraSpotlightButton } from "../components/CameraSpotlightButton";
 import { VerticalTimeline, type TR, type TLEvent } from "../components/VerticalTimeline";
 import { EventStrip } from "../components/EventStrip";
 import { LiveVideo } from "../components/LiveVideo";
@@ -1149,6 +1150,7 @@ export function Playback() {
               <VidBtn onClick={snapshot} label="Take snapshot">
                 <CameraIcon className="h-4 w-4" />
               </VidBtn>
+              <CameraSpotlightButton cameraId={selected.id} VidBtn={VidBtn} />
               {isAdmin ? (
                 <VidBtn onClick={() => setSettingsOpen(true)} label="Camera settings">
                   <Settings className="h-4 w-4" />
