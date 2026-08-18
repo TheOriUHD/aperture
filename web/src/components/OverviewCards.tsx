@@ -149,7 +149,9 @@ function SystemBody({ cameras }: { cameras: Camera[] }) {
   const oldestList = storage?.cameras.filter((c) => c.oldestTs > 0).map((c) => c.oldestTs) ?? [];
   const oldest = oldestList.length ? Math.min(...oldestList) : 0;
   const used = storage?.usedBytes ?? 0;
-  const cap = storage?.allocatedBytes ?? 0;
+  // Total allocation across ALL destinations; `allocatedBytes` is local-only and
+  // would understate capacity whenever a network location exists.
+  const cap = storage?.totalAllocatedBytes ?? storage?.allocatedBytes ?? 0;
   const total = cap > 0 ? cap : storage?.diskTotalBytes ?? 0;
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
 

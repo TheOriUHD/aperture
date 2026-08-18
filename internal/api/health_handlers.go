@@ -99,6 +99,7 @@ func (s *Server) buildStatus(ctx context.Context) map[string]any {
 	if allocation > 0 && allocation > used {
 		allocFree = allocation - used
 	}
+	totalAllocated, _, totalFree := s.storageTotals()
 	ha := s.ha.LoadSettings()
 
 	return map[string]any{
@@ -107,7 +108,15 @@ func (s *Server) buildStatus(ctx context.Context) map[string]any {
 		"go2rtc":        map[string]any{"reachable": health.Reachable, "streams": len(health.Registered)},
 		"liveDownCount": liveDown,
 		"recDownCount":  recDown,
-		"storage":       map[string]any{"allocatedBytes": allocation, "usedBytes": used, "freeBytes": allocFree},
+		// allocatedBytes/freeBytes stay LOCAL-only (frozen v1 meaning); the total*
+		// fields span every enabled destination — see Server.storageTotals.
+		"storage": map[string]any{
+			"allocatedBytes":      allocation,
+			"usedBytes":           used,
+			"freeBytes":           allocFree,
+			"totalAllocatedBytes": totalAllocated,
+			"totalFreeBytes":      totalFree,
+		},
 		"homeAssistant": map[string]any{"enabled": ha.Enabled, "connected": s.ha.Connected()},
 		"weather":       s.weather.Status(),
 		"cameras":       camStatus,

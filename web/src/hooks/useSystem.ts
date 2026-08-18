@@ -79,7 +79,15 @@ export interface SystemStatus {
   go2rtc: { reachable: boolean; streams: number };
   liveDownCount: number;
   recDownCount: number;
-  storage: { allocatedBytes: number; usedBytes: number; freeBytes: number };
+  // allocatedBytes/freeBytes are the LOCAL location only; total* spans every
+  // enabled destination (see StorageInfo in useStorage.ts).
+  storage: {
+    allocatedBytes: number;
+    usedBytes: number;
+    freeBytes: number;
+    totalAllocatedBytes?: number;
+    totalFreeBytes?: number;
+  };
   homeAssistant: { enabled: boolean; connected: boolean };
   weather: { configured: boolean; enabled: boolean; connected: boolean; lastUpdated: number; source: string };
   cameras: CameraHealth[];

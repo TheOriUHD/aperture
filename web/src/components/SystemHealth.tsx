@@ -63,8 +63,11 @@ export function SystemHealth() {
   }
 
   const issues = issueCount(s);
-  const hasAlloc = s.storage.allocatedBytes > 0;
-  const usedPct = hasAlloc ? Math.min(100, Math.round((s.storage.usedBytes / s.storage.allocatedBytes) * 100)) : 0;
+  // Total across every enabled destination (local + network shares); the plain
+  // allocatedBytes is the local location only.
+  const totalAlloc = s.storage.totalAllocatedBytes ?? s.storage.allocatedBytes;
+  const hasAlloc = totalAlloc > 0;
+  const usedPct = hasAlloc ? Math.min(100, Math.round((s.storage.usedBytes / totalAlloc) * 100)) : 0;
   const go2rtcLevel: Level = !s.go2rtc.reachable ? "down" : s.go2rtc.streams === 0 ? "warn" : "ok";
 
   return (
@@ -137,7 +140,7 @@ export function SystemHealth() {
             <>
               <Dot level="ok" />
               <span className="text-xs text-fg-muted">
-                {formatBytes(s.storage.usedBytes)} of {formatBytes(s.storage.allocatedBytes)}
+                {formatBytes(s.storage.usedBytes)} of {formatBytes(totalAlloc)}
               </span>
             </>
           ) : (

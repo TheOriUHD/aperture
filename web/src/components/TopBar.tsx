@@ -60,8 +60,14 @@ export function TopBar({ title, right }: { title: ReactNode; right?: ReactNode }
           <div className="hidden sm:flex items-center gap-1.5 text-xs text-fg-faint px-2">
             <HardDrive className="h-3.5 w-3.5" />
             <span>
-              {storage.allocatedBytes > 0
-                ? `${formatBytes(storage.usedBytes)} / ${formatBytes(storage.allocatedBytes)}`
+              {/* Total across every destination (local + any network share), not the
+                  local allocation — usedBytes already counts all locations, so
+                  pairing it with allocatedBytes read as >100% once a camera
+                  recorded to a share. */}
+              {(storage.totalAllocatedBytes ?? storage.allocatedBytes) > 0
+                ? `${formatBytes(storage.usedBytes)} / ${formatBytes(
+                    storage.totalAllocatedBytes ?? storage.allocatedBytes,
+                  )}`
                 : formatBytes(storage.usedBytes)}
             </span>
           </div>

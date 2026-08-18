@@ -27,6 +27,14 @@ export interface Storage {
   capBytes: number;
   dataDir?: string; // fixed install location (app + database), read-only
   locations?: StorageLocation[];
+  // Totals across EVERY enabled destination (local + SMB/SFTP). The fields above
+  // describe the default local location only, so any global "used of total"
+  // display must use these — otherwise all-locations usage is compared against
+  // local-only capacity and reads as >100%. 0 = at least one destination is
+  // unlimited.
+  totalAllocatedBytes?: number;
+  totalUsedBytes?: number;
+  totalFreeInAllocationBytes?: number;
 }
 
 // A recording destination. The built-in default (id "") is virtual — it maps to

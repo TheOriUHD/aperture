@@ -546,6 +546,7 @@ func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Capacity estimate: at the actual encode bitrate of every recording camera
 	// (continuous), how long the whole allocation holds.
+	totalAllocated, totalUsed, totalFree := s.storageTotals()
 	rateBps, recCams, _ := s.st.RecordingRateBps()
 	var estFullSeconds int64
 	if rateBps > 0 && allocated > 0 {
@@ -568,6 +569,11 @@ func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 		"capBytes":              allocated,
 		"dataDir":               s.cfg.DataDir, // fixed install location (read-only in UI)
 		"locations":             s.allLocationViews(),
+		// Totals across ALL enabled destinations (see storageTotals). Use these for
+		// any global "used of total" display; the fields above are local-only.
+		"totalAllocatedBytes":        totalAllocated,
+		"totalUsedBytes":             totalUsed,
+		"totalFreeInAllocationBytes": totalFree,
 	})
 }
 
@@ -711,4 +717,43 @@ func (s *Server) scheduleRestart(reason string) {
 		s.log.Warn("restarting service", "reason", reason)
 		os.Exit(0)
 	}()
+}
+
+// storageTotals sums allocation across EVERY enabled destination — the default
+// local location plus each configured remote (SMB/SFTP) — and pairs it with the
+// global usage figure.
+//
+// Why this exists: `recordedBytes`/`usedBytes` have always counted segments in
+// ALL locations, but `allocatedBytes`/`capBytes` are only the DEFAULT location's
+// `storage_cap_bytes`. Anything that rendered "used of allocated" was therefore
+// comparing every-location usage against local-only capacity, which reads as
+// wildly over 100% the moment a camera records to a network share. The frozen v1
+// fields keep their original (local) meaning; these totals are additive.
+//
+// A 0 allocation means "unlimited" for that destination, and unlimited anywhere
+// makes the total unlimited — reported as 0, matching the existing convention.
+func (s *Server) storageTotals() (allocated, used, free int64) {
+	recorded, _ := s.st.TotalBytes()
+	used = recorded + s.appFilesBytes()
+
+	allocated = s.st.GetSettingInt64("storage_cap_bytes")
+	unlimited := allocated <= 0
+	locs, _ := s.st.ListStorageLocations()
+	for _, l := range locs {
+		if !l.Enabled {
+			continue
+		}
+		if l.AllocationBytes <= 0 {
+			unlimited = true
+			continue
+		}
+		allocated += l.AllocationBytes
+	}
+	if unlimited {
+		return 0, used, 0
+	}
+	if allocated > used {
+		free = allocated - used
+	}
+	return allocated, used, free
 }
