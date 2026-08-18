@@ -100,18 +100,14 @@ function DestinationCard({
   cams,
   onEdit,
   onRemove,
-  onAddMirror,
-  onRemoveMirror,
-  onMakePrimary,
+  onToggle,
   busy,
 }: {
   loc: StorageLocation;
   cams: CardCam[];
   onEdit: () => void;
   onRemove: () => void;
-  onAddMirror: (cameraId: string) => void;
-  onRemoveMirror: (cameraId: string) => void;
-  onMakePrimary: (cameraId: string) => void;
+  onToggle: (cameraId: string) => void;
   busy: boolean;
 }) {
   // Which cameras record or mirror here is edited ON the card. It used to be
@@ -184,7 +180,7 @@ function DestinationCard({
               const members = cams.filter((c) => c.member);
               if (members.length === 0) return "No cameras — click to assign";
               return `${members.length} ${members.length === 1 ? "camera" : "cameras"}: ${members
-                .map((c) => c.name + (c.primary ? "" : " (mirror)"))
+                .map((c) => c.name)
                 .join(", ")}`;
             })()}
           </span>
@@ -194,44 +190,26 @@ function DestinationCard({
         {picking && (
           <div className="mt-2 space-y-1 rounded-lg border border-line bg-ink-900 p-2">
             <p className="px-0.5 pb-1 text-[10px] text-fg-faint">
-              A camera <span className="text-fg-muted">records</span> to its primary destination and can{" "}
-              <span className="text-fg-muted">mirror</span> to any others at the same time — same footage,
-              per-destination retention (set the days in the camera&apos;s settings).
+              Tick the cameras that record here. A camera ticked on several destinations records
+              to all of them at the same time.
             </p>
             {cams.map((c) => (
-              <div key={c.id} className="flex items-center gap-2 rounded px-0.5 py-1 text-xs text-fg-muted">
+              <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-0.5 py-1 text-xs text-fg">
                 <input
                   type="checkbox"
                   className="accent-brand"
                   checked={c.member}
-                  disabled={busy || (c.member && c.primary)}
-                  title={c.member && c.primary ? "This is the camera's recording destination — make another destination primary first" : undefined}
-                  onChange={() => (c.member ? onRemoveMirror(c.id) : onAddMirror(c.id))}
+                  disabled={busy}
+                  onChange={() => onToggle(c.id)}
                 />
-                <span className="truncate text-fg">{c.name}</span>
-                {c.member && c.primary && (
-                  <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand">records here</span>
-                )}
-                {c.member && !c.primary && (
-                  <span className="rounded bg-ink-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-faint">mirror</span>
-                )}
+                <span className="truncate">{c.name}</span>
                 {c.member && c.retentionDays > 0 && (
-                  <span className="text-[10px] text-fg-faint">{c.retentionDays}d here</span>
+                  <span className="ml-auto text-[10px] text-fg-faint">{c.retentionDays}d here</span>
                 )}
-                {c.member && !c.primary && (
-                  <button
-                    className="ml-auto text-[10px] text-brand hover:underline disabled:opacity-50"
-                    disabled={busy}
-                    onClick={() => onMakePrimary(c.id)}
-                    title="Record here instead (the current destination becomes a mirror)"
-                  >
-                    make primary
-                  </button>
-                )}
-              </div>
+              </label>
             ))}
             <p className="px-0.5 pt-1 text-[10px] text-fg-faint">
-              Existing recordings stay where they are; mirrors fill in automatically.
+              New footage only — existing recordings stay where they are.
             </p>
           </div>
         )}
@@ -298,36 +276,31 @@ export function StorageManager() {
         retentionDays: m?.retentionDays ?? 0,
       };
     });
-  const addMirror = (camId: string, locId: string) => {
+  // toggleCamera: tick/untick a camera on a destination. Ticked on several =
+  // records to all of them. The write target (internal "primary") follows
+  // automatically: it only moves when its own destination is unticked, and a
+  // camera left with nothing falls back to Primary storage.
+  const toggleCamera = (camId: string, locId: string) => {
     const ms = membershipsOf(camId);
-    const primary = ms.find((m) => m.primary)?.locationId ?? "";
-    setDest.mutate({
-      cameraId: camId,
-      primaryLocationId: primary,
-      destinations: [...ms.map((m) => ({ locationId: m.locationId, retentionDays: m.retentionDays })), { locationId: locId, retentionDays: 0 }],
-    });
-  };
-  const removeMirror = (camId: string, locId: string) => {
-    const ms = membershipsOf(camId);
-    const primary = ms.find((m) => m.primary)?.locationId ?? "";
-    if (locId === primary) return; // the card disables this; belt and braces
-    setDest.mutate({
-      cameraId: camId,
-      primaryLocationId: primary,
-      destinations: ms.filter((m) => m.locationId !== locId).map((m) => ({ locationId: m.locationId, retentionDays: m.retentionDays })),
-    });
-  };
-  const makePrimary = (camId: string, locId: string) => {
-    const ms = membershipsOf(camId);
-    const dests = ms.some((m) => m.locationId === locId)
-      ? ms
+    const member = ms.some((m) => m.locationId === locId);
+    let next = member
+      ? ms.filter((m) => m.locationId !== locId)
       : [...ms, { locationId: locId, retentionDays: 0, primary: false }];
+    if (next.length === 0) next = [{ locationId: "", retentionDays: 0, primary: true }];
+    const prevPrimary = ms.find((m) => m.primary)?.locationId;
+    const primary =
+      prevPrimary !== undefined && next.some((m) => m.locationId === prevPrimary)
+        ? prevPrimary
+        : next.some((m) => m.locationId === "")
+          ? ""
+          : next[0].locationId;
     setDest.mutate({
       cameraId: camId,
-      primaryLocationId: locId,
-      destinations: dests.map((m) => ({ locationId: m.locationId, retentionDays: m.retentionDays })),
+      primaryLocationId: primary,
+      destinations: next.map((m) => ({ locationId: m.locationId, retentionDays: m.retentionDays })),
     });
   };
+
 
   // Per-camera footage donut (footage by camera + app data = total footprint).
   const camSegs = (storage?.cameras ?? []).map((c, i) => ({ value: c.bytes, color: CAM_COLORS[i % CAM_COLORS.length] }));
@@ -445,9 +418,7 @@ export function StorageManager() {
               onEdit={() => setEditLoc(loc)}
               onRemove={() => setDelLoc(loc)}
               busy={setDest.isPending}
-              onAddMirror={(camId) => addMirror(camId, loc.id)}
-              onRemoveMirror={(camId) => removeMirror(camId, loc.id)}
-              onMakePrimary={(camId) => makePrimary(camId, loc.id)}
+              onToggle={(camId) => toggleCamera(camId, loc.id)}
             />
           ))}
         </div>

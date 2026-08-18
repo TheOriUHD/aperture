@@ -339,7 +339,7 @@ export function CameraModal({
               {locations.length > 1 && (
                 <div className="mt-2 space-y-1.5">
                   <p className="text-[11px] text-fg-muted">
-                    Also mirror to — same footage kept in more places, each with its own retention:
+                    Also record to — the same footage kept in more places, each with its own retention:
                   </p>
                   {locations
                     .filter((l) => l.id !== locationId)

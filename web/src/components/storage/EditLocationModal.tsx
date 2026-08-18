@@ -8,8 +8,11 @@ import {
   useUpdateLocation,
   useAllocateLocation,
   usePreviewAllocation,
+  useSetCameraDestinations,
+  useStorageLocations,
   type EvictionPreview,
 } from "../../hooks/useStorageLocations";
+import { useCameras } from "../../hooks/useCameras";
 import { formatBytes } from "../../lib/format";
 import { EvictionConfirm } from "./EvictionConfirm";
 
@@ -35,11 +38,17 @@ export function EditLocationModal({
   const update = useUpdateLocation();
   const allocate = useAllocateLocation();
   const preview = usePreviewAllocation();
+  const setDest = useSetCameraDestinations();
+  const { data: locData } = useStorageLocations();
+  const { data: allCameras } = useCameras();
 
   const [name, setName] = useState("");
   const [alloc, setAlloc] = useState(0);
   const [enabled, setEnabled] = useState(true);
   const [err, setErr] = useState("");
+  // Which cameras record to THIS destination. A camera ticked on several
+  // destinations records to all of them at once (same footage everywhere).
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
   // Non-null once a DECREASE has been previewed and is awaiting confirmation.
   const [pending, setPending] = useState<EvictionPreview | null>(null);
 
@@ -48,6 +57,7 @@ export function EditLocationModal({
     setName(loc.name);
     setAlloc(loc.allocationBytes);
     setEnabled(loc.enabled);
+    setTicked(new Set((loc.cameras ?? []).map((c) => c.cameraId)));
     setErr("");
     setPending(null);
   }, [loc]);
@@ -61,7 +71,7 @@ export function EditLocationModal({
     : loc.diskFreeBytes && loc.diskFreeBytes > 0
       ? loc.diskFreeBytes
       : 8 * 1024 ** 4;
-  const busy = update.isPending || allocate.isPending || preview.isPending;
+  const busy = update.isPending || allocate.isPending || preview.isPending || setDest.isPending;
 
   // Lowering an allocation evicts footage the instant it is applied, with no undo.
   // Ask the server exactly what would be destroyed and make the user confirm it
@@ -83,12 +93,54 @@ export function EditLocationModal({
     await commit();
   }
 
+  // membershipsOf: every destination a camera currently records to, across all
+  // locations (each location lists its cameras, so the union is authoritative).
+  function membershipsOf(camId: string) {
+    const out: { locationId: string; retentionDays: number; primary: boolean }[] = [];
+    for (const l of locData?.locations ?? []) {
+      const m = (l.cameras ?? []).find((c) => c.cameraId === camId);
+      if (m) out.push({ locationId: l.id, retentionDays: m.retentionDays, primary: m.primary });
+    }
+    return out;
+  }
+
+  // applyCameraChanges: make each camera's membership match the checkboxes. The
+  // "primary" (ffmpeg's write target) is an internal detail — if it was unticked,
+  // another ticked destination silently takes over; a camera left with nothing
+  // falls back to Primary storage so it always records somewhere.
+  async function applyCameraChanges() {
+    const before = new Set((loc!.cameras ?? []).map((c) => c.cameraId));
+    for (const cam of allCameras ?? []) {
+      const was = before.has(cam.id);
+      const is = ticked.has(cam.id);
+      if (was === is) continue;
+      const ms = membershipsOf(cam.id);
+      let next = is
+        ? [...ms, { locationId: loc!.id, retentionDays: 0, primary: false }]
+        : ms.filter((m) => m.locationId !== loc!.id);
+      if (next.length === 0) next = [{ locationId: "", retentionDays: 0, primary: true }];
+      const prevPrimary = ms.find((m) => m.primary)?.locationId;
+      const primary =
+        prevPrimary !== undefined && next.some((m) => m.locationId === prevPrimary)
+          ? prevPrimary
+          : next.some((m) => m.locationId === "")
+            ? ""
+            : next[0].locationId;
+      await setDest.mutateAsync({
+        cameraId: cam.id,
+        primaryLocationId: primary,
+        destinations: next.map((m) => ({ locationId: m.locationId, retentionDays: m.retentionDays })),
+      });
+    }
+  }
+
   async function commit() {
     setErr("");
     setPending(null);
     try {
       if (isDefault) {
         await allocate.mutateAsync({ locationId: "", allocationBytes: alloc });
+        await applyCameraChanges();
       } else {
         await update.mutateAsync({
           id: loc!.id,
@@ -97,6 +149,7 @@ export function EditLocationModal({
           enabled,
         });
         await allocate.mutateAsync({ locationId: loc!.id, allocationBytes: alloc });
+        await applyCameraChanges();
       }
       onClose();
     } catch (e) {
@@ -161,6 +214,37 @@ export function EditLocationModal({
               : isNetwork
                 ? "Oldest footage on this share is deleted to stay under the cap. 0 = unlimited."
                 : "Hard-reserved on this disk. 0 = unlimited."}
+          </p>
+        </div>
+
+
+        {/* Cameras recording to this destination. Ticked on two destinations =
+            recorded to both at once, each keeping its own retention. */}
+        <div>
+          <label className="label">Cameras recording here</label>
+          <div className="space-y-1 rounded-lg border border-line bg-ink-850 p-2.5">
+            {(allCameras ?? []).map((c) => (
+              <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-0.5 py-1 text-sm text-fg">
+                <input
+                  type="checkbox"
+                  className="accent-brand"
+                  checked={ticked.has(c.id)}
+                  onChange={() =>
+                    setTicked((t) => {
+                      const n = new Set(t);
+                      n.has(c.id) ? n.delete(c.id) : n.add(c.id);
+                      return n;
+                    })
+                  }
+                />
+                <span className="truncate">{c.name}</span>
+              </label>
+            ))}
+            {(allCameras ?? []).length === 0 && <p className="text-xs text-fg-faint">No cameras yet.</p>}
+          </div>
+          <p className="mt-1 text-[11px] text-fg-faint">
+            A camera can be ticked on several destinations — it records to all of them at the
+            same time. New footage only; existing recordings stay where they are.
           </p>
         </div>
 
