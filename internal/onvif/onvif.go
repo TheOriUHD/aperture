@@ -42,14 +42,10 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger) *Server {
 	}
 }
 
-// Run starts the ONVIF HTTP SOAP server and the WS-Discovery listener, blocking
-// until ctx is cancelled. When ONVIF is disabled it logs and returns immediately.
+// Run starts the SOAP server and blocks until ctx is cancelled. Whether ONVIF
+// should be running at all is the CALLER's decision (it is a UI toggle now, not
+// a boot-time env read), so this no longer self-gates.
 func (s *Server) Run(ctx context.Context) {
-	if !s.cfg.ONVIFEnabled {
-		s.log.Info("onvif disabled")
-		return
-	}
-
 	addr := s.cfg.ONVIFAddr
 	if addr == "" {
 		addr = ":10101"

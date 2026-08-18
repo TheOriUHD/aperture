@@ -41,3 +41,18 @@ func (s *Store) RecordingsPathOverride() string {
 	v, _ := s.GetSetting("recordings_path")
 	return v
 }
+
+// GetSettingBool reads a boolean setting; anything other than "1"/"true" (and a
+// missing key) is false.
+func (s *Store) GetSettingBool(key string) bool {
+	v, _ := s.GetSetting(key)
+	return v == "1" || v == "true"
+}
+
+// SetSettingBool stores a boolean setting as "1"/"0".
+func (s *Store) SetSettingBool(key string, v bool) error {
+	if v {
+		return s.SetSetting(key, "1")
+	}
+	return s.SetSetting(key, "0")
+}

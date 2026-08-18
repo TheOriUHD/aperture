@@ -10,6 +10,7 @@ import { UserModal } from "../components/UserModal";
 import { StorageManager } from "../components/StorageManager";
 import { HomeAssistant } from "../components/HomeAssistant";
 import { LiveViewCard } from "../components/LiveViewCard";
+import { Interop } from "../components/Interop";
 import { LocationWeather } from "../components/LocationWeather";
 import { SystemHealth } from "../components/SystemHealth";
 import { OidcSettings } from "../components/OidcSettings";
@@ -129,6 +130,7 @@ export function Settings() {
               <>
                 <HomeAssistant />
                 <LiveViewCard />
+                <Interop />
                 <Webhooks />
                 <ApiTokens />
                 <InteropEgress />

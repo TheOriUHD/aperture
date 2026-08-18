@@ -267,3 +267,35 @@ export function useRollLiveKey() {
     onSuccess: (data) => qc.setQueryData(["live-key"], data),
   });
 }
+
+// ONVIF / HomeKit interop toggles. `enabled` is what the operator asked for;
+// `running` is what the subsystem actually reports, so a failed start shows as
+// enabled-but-not-running rather than a false green light.
+export interface InteropService {
+  available: boolean;
+  enabled: boolean;
+  running: boolean;
+  addr?: string; // ONVIF listen address
+  pin?: string; // HomeKit pairing code
+}
+export interface InteropConfig {
+  onvif: InteropService;
+  homekit: InteropService;
+}
+
+export function useInterop() {
+  return useQuery({
+    queryKey: ["interop"],
+    queryFn: () => api.get<InteropConfig>("/api/system/interop"),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useSetInterop() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { onvif?: boolean; homekit?: boolean }) =>
+      api.put<InteropConfig>("/api/system/interop", input),
+    onSuccess: (data) => qc.setQueryData(["interop"], data),
+  });
+}

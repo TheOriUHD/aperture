@@ -74,6 +74,9 @@ type Server struct {
 	// scopes-per-operation can never drift from what the enforce layer checks.
 	routeSpecs map[string]access
 
+	// Togglable interop subsystems (ONVIF / HomeKit), driven from the UI.
+	interopHolder
+
 	// limiter is the per-(class,id) request rate limiter (T2.6).
 	limiter *rateLimiter
 
@@ -286,17 +289,17 @@ func (s *Server) routes() http.Handler {
 		g.Get("/cameras/{id}/frame", scopedCam(ScopeMediaRead), s.handleFrame)
 		g.Get("/cameras/{id}/segments", access{scopes: []string{ScopeSegmentsRead}, camera: camScopeParam}, s.handleSegmentsList)
 		g.Get("/cameras/{id}/coverage", scopedCam(ScopeCoverageRead), s.handleCoverage)
-			g.Post("/cameras/{id}/lease", access{scopes: []string{ScopeMediaRead}, camera: camScopeParam}, s.handleCreateLease)       // T2.8
-			g.Delete("/cameras/{id}/lease/{leaseId}", access{scopes: []string{ScopeMediaRead}, camera: camScopeParam}, s.handleReleaseLease)
+		g.Post("/cameras/{id}/lease", access{scopes: []string{ScopeMediaRead}, camera: camScopeParam}, s.handleCreateLease) // T2.8
+		g.Delete("/cameras/{id}/lease/{leaseId}", access{scopes: []string{ScopeMediaRead}, camera: camScopeParam}, s.handleReleaseLease)
 		g.Get("/cameras/{id}/events", scopedCam(ScopeEventsRead), s.handleCameraEvents)
 		g.Get("/cameras/{id}/hls", scopedCam(ScopeMediaRead), s.handleHLS)
 		g.Get("/cameras/{id}/seg/{seg}", scopedCam(ScopeMediaRead), s.handleSegmentFile)
 		g.Delete("/cameras/{id}/recordings", scopedCam(ScopeMediaWrite), s.handleDeleteRecordings) // + internal admin check
 		g.Get("/events", scoped(ScopeEventsRead), s.handleEventsAll)
-			g.Get("/feed", scoped(ScopeEventsRead), s.handleFeed) // T2.5 change feed (SSE)
+		g.Get("/feed", scoped(ScopeEventsRead), s.handleFeed) // T2.5 change feed (SSE)
 		g.Get("/events/{id}", scoped(ScopeEventsRead), s.handleGetEvent)
 		g.Get("/events/{id}/detections", scoped(ScopeEventsRead), s.handleEventDetections)
-		g.Get("/events/{id}/thumb.jpg", scoped(ScopeEventsRead), s.handleEventThumb) // camera resolved from the event row (hand-checked)
+		g.Get("/events/{id}/thumb.jpg", scoped(ScopeEventsRead), s.handleEventThumb)        // camera resolved from the event row (hand-checked)
 		g.Post("/export", scoped(ScopeMediaWrite), s.withIdempotency(s.handleCreateExport)) // cameras validated from the body (hand-checked)
 		g.Get("/export", scoped(ScopeMediaRead), s.handleListExports)
 		g.Get("/export/{id}", scoped(ScopeMediaRead), s.handleGetExport)
@@ -316,7 +319,7 @@ func (s *Server) routes() http.Handler {
 		g.Delete("/notify/rules/{id}", scoped(ScopeAutomationWrite), s.handleDeleteRule)
 		g.Post("/notify/rules/{id}/test", scoped(ScopeAutomationWrite), s.handleTestRule)
 		g.Get("/notify/stream", scoped(ScopeEventsRead), s.handleNotifyStream) // delivers events
-		g.Get("/alarm", scoped(ScopeAlarmArm), s.handleGetAlarm) // 3.4 in-app arm/disarm
+		g.Get("/alarm", scoped(ScopeAlarmArm), s.handleGetAlarm)               // 3.4 in-app arm/disarm
 		g.Put("/alarm", scoped(ScopeAlarmArm), s.handleSetAlarm)
 		g.Get("/push/key", scoped(ScopeAutomationRead), s.handlePushKey)
 		g.Post("/push/subscribe", scoped(ScopeAutomationWrite), s.handlePushSubscribe)
@@ -393,6 +396,9 @@ func (s *Server) routes() http.Handler {
 		g.Put("/system/ha", adminScoped(ScopeSiteWrite), s.handleSetHA)
 		g.Get("/system/ha/sensors", adminScoped(ScopeSiteRead), s.handleHASensors)
 		g.Get("/system/oidc", adminScoped(ScopeSiteRead), s.handleGetOIDC)
+		// ONVIF / HomeKit: settings-backed, started and stopped in place.
+		g.Get("/system/interop", adminScoped(ScopeSiteRead), s.handleGetInterop)
+		g.Put("/system/interop", adminScoped(ScopeSiteWrite), s.handleSetInterop)
 		g.Put("/system/oidc", adminScoped(ScopeSiteWrite), s.handleSetOIDC)
 		g.Get("/system/detection", adminScoped(ScopeDetectionRead), s.handleGetDetection)
 		g.Put("/system/detection", adminScoped(ScopeDetectionWrite), s.handleSetDetection)

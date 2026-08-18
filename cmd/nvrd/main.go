@@ -25,12 +25,10 @@ import (
 	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ext"
 	"github.com/TheOriUHD/aperture/internal/ha"
-	"github.com/TheOriUHD/aperture/internal/homekit"
 	"github.com/TheOriUHD/aperture/internal/logbuf"
 	"github.com/TheOriUHD/aperture/internal/motion"
 	"github.com/TheOriUHD/aperture/internal/notify"
 	"github.com/TheOriUHD/aperture/internal/oidc"
-	"github.com/TheOriUHD/aperture/internal/onvif"
 	"github.com/TheOriUHD/aperture/internal/record"
 	"github.com/TheOriUHD/aperture/internal/retention"
 	"github.com/TheOriUHD/aperture/internal/secret"
@@ -254,17 +252,10 @@ func main() {
 	// webhook, MQTT publish, set record mode).
 	automateEng := automate.New(st, notifyEng, haPub, reconcile, cfg.PublicURL, log)
 
-	// HomeKit bridge (Apple Home app), off unless APERTURE_HOMEKIT_ENABLED=true.
-	var hkBridge *homekit.Bridge
-	if cfg.HomeKitEnabled {
-		if b, err := homekit.New(cfg, st, log); err == nil {
-			hkBridge = b
-			hkBridge.SetOnArmed(notifyEng.OnAlarmState) // alarm.state on HomeKit arms (Item 3)
-			go hkBridge.Run(bgCtx)
-		} else {
-			log.Error("homekit: init failed", "err", err)
-		}
-	}
+	// HomeKit bridge (Apple Home app) — a UI toggle backed by a setting. The env
+	// var only SEEDS that setting on first boot, so existing env-configured
+	// deployments keep working while the operator can now flip it from the app.
+	hkSvc := newHomeKitService(bgCtx, cfg, st, log, notifyEng.OnAlarmState)
 
 	// Event-gated object detection (opt-in; no-op when mode=off). Runs before
 	// notify/automations so both can filter on the detected labels.
@@ -274,8 +265,8 @@ func main() {
 		notifyEng.OnEvent(ev)
 		webhookDisp.OnEvent(ev)
 		automateEng.OnEvent(ev)
-		if hkBridge != nil {
-			hkBridge.MotionPulse(ev.CameraID)
+		if b := hkSvc.Bridge(); b != nil {
+			b.MotionPulse(ev.CameraID)
 		}
 	})
 	// Change-feed domain emitters (Phase 3): event.closed, detection.created.
@@ -300,10 +291,25 @@ func main() {
 	wd.SetOnCameraState(notifyEng.OnCameraState)
 	go wd.Run(bgCtx)
 
-	// ONVIF Profile S provider (external VMS/NVR consumption). No-op unless
-	// APERTURE_ONVIF_ENABLED=true.
-	onvifSrv := onvif.New(cfg, st, log)
-	go onvifSrv.Run(bgCtx)
+	// ONVIF Profile S provider (external VMS/NVR consumption) — same toggle model
+	// as HomeKit above.
+	onvifSvc := newONVIFService(bgCtx, cfg, st, log)
+
+	// Seed each setting from its env var the first time only, then start whatever
+	// the settings say. A start failure is logged and leaves the service stopped —
+	// the UI reports enabled-but-not-running rather than a false green light.
+	seedInterop(st, "onvif.enabled", cfg.ONVIFEnabled)
+	seedInterop(st, "homekit.enabled", cfg.HomeKitEnabled)
+	if st.GetSettingBool("onvif.enabled") {
+		if err := onvifSvc.SetEnabled(true); err != nil {
+			log.Error("onvif: start failed", "err", err)
+		}
+	}
+	if st.GetSettingBool("homekit.enabled") {
+		if err := hkSvc.SetEnabled(true); err != nil {
+			log.Error("homekit: start failed", "err", err)
+		}
+	}
 
 	// Backend-extension supervisor (T1.3). Constructed here so it can be drained on
 	// shutdown; the install/manager handlers drive it in T1.5.
@@ -326,6 +332,7 @@ func main() {
 	srv.StartEnabledExtensions() // (re)start enabled backend extensions across the restart
 	srv.SetStorage(storageRegistry, storageCipher)
 	srv.SetReconcile(janitor.EnforceNow)
+	srv.SetInterop(onvifSvc, hkSvc) // ONVIF / HomeKit toggles reach the running services
 	srv.StartRateLimitSweeper()
 	httpSrv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -359,4 +366,15 @@ func main() {
 	if err := httpSrv.Shutdown(ctx); err != nil {
 		log.Error("graceful shutdown", "err", err)
 	}
+}
+
+// seedInterop writes an interop toggle's initial value from its env var the FIRST
+// time only (the settings row is then the source of truth). This keeps a
+// deployment that set APERTURE_ONVIF_ENABLED / APERTURE_HOMEKIT_ENABLED working
+// unchanged, while letting the UI own the switch from then on.
+func seedInterop(st *store.Store, key string, envDefault bool) {
+	if _, err := st.GetSetting(key); err == nil {
+		return // already chosen by the operator
+	}
+	_ = st.SetSettingBool(key, envDefault)
 }
