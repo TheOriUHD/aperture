@@ -389,6 +389,9 @@ func (s *Server) routes() http.Handler {
 		g.Get("/cameras/{id}/onvif", adminScopedCam(ScopeCamerasRead), s.handleGetCameraONVIF)
 		g.Put("/cameras/{id}/onvif", adminScopedCam(ScopeCamerasWrite), s.handleSetCameraONVIF)
 		g.Put("/cameras/{id}/onvif/imaging", adminScopedCam(ScopeCamerasWrite), s.handleSetCameraImaging)
+		// Vendor-specific extras (Reolink spotlight / IR).
+		g.Get("/cameras/{id}/vendor", adminScopedCam(ScopeCamerasRead), s.handleGetCameraVendor)
+		g.Put("/cameras/{id}/vendor", adminScopedCam(ScopeCamerasWrite), s.handleSetCameraVendor)
 		g.Get("/cameras/{id}/destinations", scopedCam(ScopeStorageRead), s.handleGetCameraDestinations)
 		g.Put("/cameras/{id}/destinations", adminScopedCam(ScopeStorageWrite), s.handleSetCameraDestinations)
 		g.Post("/system/storage/locations/reorder", adminScoped(ScopeStorageWrite), s.handleReorderLocations)

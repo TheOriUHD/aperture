@@ -153,3 +153,35 @@ export function useSetCameraImaging() {
     onSuccess: (d, v) => qc.setQueryData(["camera-onvif", v.id], d),
   });
 }
+
+// Vendor-specific camera extras (Reolink LED spotlight / IR illuminators) —
+// controls the ONVIF standard doesn't model. Only present for cameras the ONVIF
+// probe identified as that vendor.
+export interface CameraVendor {
+  vendor: string;
+  supported: boolean;
+  spotlight?: { state: number; mode: number; bright: number };
+  ir?: { state: string };
+  error?: string;
+}
+
+export function useCameraVendor(cameraId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["camera-vendor", cameraId],
+    queryFn: () => api.get<CameraVendor>(`/api/cameras/${cameraId}/vendor`),
+    enabled: !!cameraId && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useSetCameraVendor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: {
+      id: string;
+      spotlight?: { state?: number; mode?: number; bright?: number };
+      ir?: string;
+    }) => api.put<CameraVendor>(`/api/cameras/${id}/vendor`, body),
+    onSuccess: (d, v) => qc.setQueryData(["camera-vendor", v.id], d),
+  });
+}
