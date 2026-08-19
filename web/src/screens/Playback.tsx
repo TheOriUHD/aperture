@@ -1135,11 +1135,15 @@ export function Playback() {
           )}
           {selected && !gridOpen && !multiActive && (
             <div className="absolute top-3 right-3 flex items-center gap-1">
-              {/* Picture controls — only rendered when this camera's ONVIF is on
-                  and actually reporting adjustable settings. */}
-              <div className="relative">
-                <CameraImagingOverlay cameraId={selected.id} VidBtn={VidBtn} />
-              </div>
+              {/* Camera controls — LIVE only. They act on the camera as it is
+                  right now, so offering them while reviewing the past would
+                  invite changing a setting that has nothing to do with the
+                  footage on screen. */}
+              {isLive && (
+                <div className="relative">
+                  <CameraImagingOverlay cameraId={selected.id} VidBtn={VidBtn} />
+                </div>
+              )}
               <VidBtn
                 onClick={() => setBoxesOn((v) => !v)}
                 label={boxesOn ? "Hide object boxes" : "Show object boxes"}
@@ -1150,7 +1154,7 @@ export function Playback() {
               <VidBtn onClick={snapshot} label="Take snapshot">
                 <CameraIcon className="h-4 w-4" />
               </VidBtn>
-              <CameraSpotlightButton cameraId={selected.id} VidBtn={VidBtn} />
+              {isLive && <CameraSpotlightButton cameraId={selected.id} VidBtn={VidBtn} />}
               {isAdmin ? (
                 <VidBtn onClick={() => setSettingsOpen(true)} label="Camera settings">
                   <Settings className="h-4 w-4" />
