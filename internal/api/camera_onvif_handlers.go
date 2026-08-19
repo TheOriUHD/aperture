@@ -247,7 +247,31 @@ func (s *Server) handleSetCameraImaging(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.logAudit(r, "camera.imaging", id, "")
-	s.handleGetCameraONVIF(w, r)
+
+	// Report the values just applied rather than re-reading: like the spotlight,
+	// a read issued immediately after a write can still return the old value and
+	// would make a slider jump back under the operator's finger.
+	merged := *cur
+	if next.Brightness != nil {
+		merged.Brightness = next.Brightness
+	}
+	if next.Contrast != nil {
+		merged.Contrast = next.Contrast
+	}
+	if next.Saturation != nil {
+		merged.Saturation = next.Saturation
+	}
+	if next.Sharpness != nil {
+		merged.Sharpness = next.Sharpness
+	}
+	if next.IrCutFilter != "" {
+		merged.IrCutFilter = next.IrCutFilter
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": res.cfg.Enabled, "port": res.cfg.Port, "user": res.cfg.User,
+		"host": res.host, "hasPassword": res.cfg.PassEnc != "",
+		"probe": probe, "imaging": merged,
+	})
 }
 
 func hostPort(host string, port int) string {

@@ -117,6 +117,13 @@ func (s *Server) handleSetCameraVendor(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "validation", "this camera has no vendor controls available")
 		return
 	}
+	// The response reports what was APPLIED, not an immediate read-back. These
+	// cameras answer a read issued straight after a write with the PREVIOUS value
+	// (verified: state reads 0 for about a second after being set to 1), so
+	// echoing that read made the UI snap back to the old state before the next
+	// poll corrected it. The camera accepted the command; the poll a few seconds
+	// later is what proves it stuck.
+	applied := map[string]any{}
 	if req.Spotlight != nil {
 		cur, err := c.GetSpotlight(ctx)
 		if err != nil {
@@ -142,13 +149,31 @@ func (s *Server) handleSetCameraVendor(w http.ResponseWriter, r *http.Request) {
 			writeErrorCode(w, http.StatusBadGateway, "unreachable", err.Error())
 			return
 		}
+		applied["spotlight"] = next
 	}
 	if req.IR != nil {
 		if err := c.SetIR(ctx, *req.IR); err != nil {
 			writeErrorCode(w, http.StatusBadGateway, "unreachable", err.Error())
 			return
 		}
+		applied["ir"] = map[string]any{"state": *req.IR}
 	}
 	s.logAudit(r, "camera.vendor", id, "")
-	s.handleGetCameraVendor(w, r)
+
+	out := map[string]any{"vendor": "REOLINK", "supported": true}
+	for k, v := range applied {
+		out[k] = v
+	}
+	// Fill in whichever half wasn't touched so the client keeps a complete view.
+	if _, ok := out["spotlight"]; !ok {
+		if sp, err := c.GetSpotlight(ctx); err == nil {
+			out["spotlight"] = sp
+		}
+	}
+	if _, ok := out["ir"]; !ok {
+		if ir, err := c.GetIR(ctx); err == nil {
+			out["ir"] = ir
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
