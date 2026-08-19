@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -31,12 +32,39 @@ func (s *Server) reolinkFor(ctx context.Context, camID string) (*reolink.Client,
 	if res.cfg.Port > 0 {
 		ports = []int{res.cfg.Port}
 	}
-	probe := onvifclient.Probe(ctx, res.host, res.user, res.pass, ports, onvifTimeout)
+	probe := cachedOnvifProbe(ctx, camID, res.host, res.user, res.pass, ports)
 	if !probe.OK || !strings.EqualFold(probe.Device.Manufacturer, "REOLINK") {
 		return nil, probe.Device.Manufacturer, nil
 	}
 	// The vendor API lives on the camera's plain HTTP port, not the ONVIF one.
-	return reolink.New(res.host, res.user, res.pass, 6*time.Second), probe.Device.Manufacturer, nil
+	// The client is cached per camera so its login token is reused across calls
+	// (a fresh client would log in every single time).
+	return cachedReolink(camID, res.host, res.user, res.pass), probe.Device.Manufacturer, nil
+}
+
+var (
+	reolinkMu      sync.Mutex
+	reolinkClients = map[string]*reolink.Client{}
+)
+
+// cachedReolink returns a per-camera client, rebuilt when the endpoint or login
+// changes so a credential edit takes effect immediately.
+func cachedReolink(camID, host, user, pass string) *reolink.Client {
+	key := camID + "|" + host + "|" + user + "|" + pass
+	reolinkMu.Lock()
+	defer reolinkMu.Unlock()
+	if c, ok := reolinkClients[key]; ok {
+		return c
+	}
+	c := reolink.New(host, user, pass, 6*time.Second)
+	// Drop any client for this camera under an older key.
+	for k := range reolinkClients {
+		if strings.HasPrefix(k, camID+"|") {
+			delete(reolinkClients, k)
+		}
+	}
+	reolinkClients[key] = c
+	return c
 }
 
 func (s *Server) handleGetCameraVendor(w http.ResponseWriter, r *http.Request) {

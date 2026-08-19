@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +21,45 @@ import (
 // recorder, every call is made on demand with a short timeout, and a camera that
 // is unreachable or refuses the account degrades to a clear message instead of
 // an error state anywhere else.
+
+// probeCache memoises the ONVIF discovery step. A probe walks candidate ports and
+// makes several SOAP calls; doing that on every read made a spotlight toggle feel
+// laggy and made polling for state changes too expensive to contemplate. The
+// result only changes when the camera or its config does, so a short TTL is
+// plenty — and any config write clears the entry outright.
+type cachedProbe struct {
+	res onvifclient.ProbeResult
+	at  time.Time
+}
+
+var (
+	probeMu    sync.Mutex
+	probeCache = map[string]cachedProbe{}
+)
+
+const probeTTL = 2 * time.Minute
+
+func cachedOnvifProbe(ctx context.Context, camID, host, user, pass string, ports []int) onvifclient.ProbeResult {
+	probeMu.Lock()
+	if c, ok := probeCache[camID]; ok && time.Since(c.at) < probeTTL && c.res.OK {
+		probeMu.Unlock()
+		return c.res
+	}
+	probeMu.Unlock()
+
+	res := onvifclient.Probe(ctx, host, user, pass, ports, onvifTimeout)
+	probeMu.Lock()
+	probeCache[camID] = cachedProbe{res: res, at: time.Now()}
+	probeMu.Unlock()
+	return res
+}
+
+// invalidateProbe drops a camera's cached discovery (credentials/port changed).
+func invalidateProbe(camID string) {
+	probeMu.Lock()
+	delete(probeCache, camID)
+	probeMu.Unlock()
+}
 
 // onvifTimeout bounds a single camera call. Cameras on a busy LAN answer in
 // well under a second; anything slower must not hold an API request open.
@@ -85,7 +125,7 @@ func (s *Server) handleGetCameraONVIF(w http.ResponseWriter, r *http.Request) {
 	if res.cfg.Port > 0 {
 		ports = []int{res.cfg.Port}
 	}
-	probe := onvifclient.Probe(ctx, res.host, res.user, res.pass, ports, onvifTimeout)
+	probe := cachedOnvifProbe(ctx, id, res.host, res.user, res.pass, ports)
 	out["probe"] = probe
 	if probe.OK && probe.HasImaging && probe.VideoSource != "" {
 		c := onvifclient.New(hostPort(res.host, probe.Port), res.user, res.pass, onvifTimeout)
@@ -145,6 +185,7 @@ func (s *Server) handleSetCameraONVIF(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	invalidateProbe(id) // credentials or port may have changed
 	s.logAudit(r, "camera.onvif", id, "")
 	s.handleGetCameraONVIF(w, r)
 }
@@ -178,7 +219,7 @@ func (s *Server) handleSetCameraImaging(w http.ResponseWriter, r *http.Request) 
 	if res.cfg.Port > 0 {
 		ports = []int{res.cfg.Port}
 	}
-	probe := onvifclient.Probe(ctx, res.host, res.user, res.pass, ports, onvifTimeout)
+	probe := cachedOnvifProbe(ctx, id, res.host, res.user, res.pass, ports)
 	if !probe.OK || probe.VideoSource == "" {
 		writeErrorCode(w, http.StatusBadGateway, "unreachable", firstNonEmptyStr(probe.Error, "the camera did not answer"))
 		return

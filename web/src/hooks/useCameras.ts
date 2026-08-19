@@ -165,12 +165,16 @@ export interface CameraVendor {
   error?: string;
 }
 
+// Polled, because the spotlight also changes without us: motion can trigger it,
+// the camera's own schedule can, and so can the vendor app. Server-side probe and
+// login caching make this read cheap enough to poll at this rate.
 export function useCameraVendor(cameraId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: ["camera-vendor", cameraId],
     queryFn: () => api.get<CameraVendor>(`/api/cameras/${cameraId}/vendor`),
     enabled: !!cameraId && enabled,
-    staleTime: 10_000,
+    staleTime: 2_000,
+    refetchInterval: 4_000,
   });
 }
 
@@ -182,6 +186,27 @@ export function useSetCameraVendor() {
       spotlight?: { state?: number; mode?: number; bright?: number };
       ir?: string;
     }) => api.put<CameraVendor>(`/api/cameras/${id}/vendor`, body),
+    // Reflect the change immediately: the request takes about a second against a
+    // camera, and a light switch that visibly lags feels broken. The rollback and
+    // the poll below keep the optimistic value honest.
+    onMutate: async (v) => {
+      const key = ["camera-vendor", v.id];
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<CameraVendor>(key);
+      if (prev?.spotlight && v.spotlight) {
+        qc.setQueryData<CameraVendor>(key, {
+          ...prev,
+          spotlight: { ...prev.spotlight, ...v.spotlight },
+        });
+      }
+      if (prev?.ir && v.ir) {
+        qc.setQueryData<CameraVendor>(key, { ...prev, ir: { state: v.ir } });
+      }
+      return { prev };
+    },
+    onError: (_e, v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["camera-vendor", v.id], ctx.prev);
+    },
     onSuccess: (d, v) => qc.setQueryData(["camera-vendor", v.id], d),
   });
 }
