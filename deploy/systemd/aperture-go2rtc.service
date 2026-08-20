@@ -3,6 +3,9 @@ Description=go2rtc (Aperture stream broker)
 Documentation=https://github.com/AlexxIT/go2rtc
 After=network-online.target
 Wants=network-online.target
+# Only honoured in [Unit]; in [Service] systemd ignores it. Without it the
+# default 5-starts-per-10s limit would leave the broker permanently dead.
+StartLimitIntervalSec=0
 
 [Service]
 Type=exec
@@ -10,7 +13,6 @@ Type=exec
 ExecStart=/usr/lib/aperture/bin/go2rtc -config /var/lib/aperture/go2rtc.yaml
 Restart=always
 RestartSec=2
-StartLimitIntervalSec=0
 
 User=aperture-go2rtc
 Group=aperture-go2rtc

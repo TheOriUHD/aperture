@@ -3,6 +3,10 @@ Description=Aperture NVR daemon
 Documentation=file:/usr/share/doc/aperture/ONBOARDING.md
 Wants=network-online.target aperture-go2rtc.service mosquitto.service
 After=network-online.target aperture-go2rtc.service mosquitto.service
+# An NVR must never be given up on. Without this, systemd's default rate limit
+# (5 starts / 10s) turns a crash loop into a permanently dead unit, which would
+# silently defeat Restart=always below. This key is only honoured in [Unit].
+StartLimitIntervalSec=0
 
 [Service]
 Type=exec
@@ -21,8 +25,8 @@ ExecStart=/usr/bin/nvrd
 # leave the NVR down.
 Restart=always
 RestartSec=2
-# An NVR must never be given up on; without this a crash loop ends in a dead unit.
-StartLimitIntervalSec=0
+# NOTE: the rate-limit that would otherwise defeat Restart=always lives in
+# [Unit] as StartLimitIntervalSec — systemd silently ignores it in [Service].
 
 # --- shutdown --------------------------------------------------------------
 # cmd/nvrd/main.go:355-368 drains extensions (5s) then HTTP (10s) => ~15s worst case.

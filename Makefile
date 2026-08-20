@@ -8,7 +8,7 @@ LDFLAGS := -s -w \
 	-X $(PKG)/internal/version.Version=$(VERSION) \
 	-X $(PKG)/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build build-go build-web tidy run dev web-dev test lint up down logs clean fmt install-cli examples
+.PHONY: all build build-go build-native build-web tidy run dev web-dev test lint up down logs clean fmt install-cli examples vendor install uninstall
 
 all: build
 
@@ -23,6 +23,15 @@ build-web:
 build-go:
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrd ./cmd/nvrd
 	$(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrctl ./cmd/nvrctl
+
+## Build everything the systemd install needs, including apdiscovery — which
+## build-go deliberately omits because under Docker only the Dockerfile built it.
+## CGO_ENABLED=0 keeps the binaries static (modernc SQLite is pure Go), so they
+## do not depend on the build host's libc.
+build-native: build-web
+	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrd ./cmd/nvrd
+	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrctl ./cmd/nvrctl
+	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o bin/apdiscovery ./cmd/apdiscovery
 
 ## Install the nvrctl admin console natively to ~/.local/bin (on PATH)
 install-cli:
@@ -61,7 +70,19 @@ test:
 lint:
 	$(GO) vet ./...
 
-## Docker Compose stack
+## Native systemd install (the deployment target; see MIGRATION.md).
+## `install` needs root and does not start the units — pass --start yourself for
+## a fresh box, or start them deliberately during a migration cutover.
+vendor:
+	sudo FFMPEG_MODE=$${FFMPEG_MODE:-system} deploy/vendor.sh
+
+install: build-native
+	sudo deploy/install.sh
+
+uninstall:
+	sudo deploy/uninstall.sh
+
+## Docker Compose stack (the OLD deployment shape — being retired, see MIGRATION.md)
 up:
 	cd deploy && docker compose up -d --build
 	$(MAKE) prune

@@ -3,6 +3,9 @@ Description=Aperture mDNS/DNS-SD advertisement
 After=network-online.target
 Wants=network-online.target
 
+# Same rate-limit caveat as the other units; must be in [Unit] to take effect.
+StartLimitIntervalSec=0
+
 [Service]
 Type=exec
 ExecStart=/usr/lib/aperture/bin/apdiscovery
