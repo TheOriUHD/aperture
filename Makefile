@@ -8,7 +8,7 @@ LDFLAGS := -s -w \
 	-X $(PKG)/internal/version.Version=$(VERSION) \
 	-X $(PKG)/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build build-go build-native build-web tidy run dev web-dev test lint up down logs clean fmt install-cli examples vendor install uninstall
+.PHONY: all build build-go build-native build-web check-web-fresh tidy run dev web-dev test lint up down logs clean fmt install-cli examples vendor install uninstall
 
 all: build
 
@@ -28,6 +28,20 @@ build-go:
 ## build-go deliberately omits because under Docker only the Dockerfile built it.
 ## CGO_ENABLED=0 keeps the binaries static (modernc SQLite is pure Go), so they
 ## do not depend on the build host's libc.
+## Fail if the embedded web bundle is older than the frontend source. The bundle
+## is a GITIGNORED build artifact, so a checkout can carry a months-old dist that
+## `go build` will embed silently — shipping an ancient UI against a current
+## backend. That happened on 2026-08-20: a June bundle went to production and the
+## Playback page simply was not there.
+check-web-fresh:
+	@newest_src=$$(find web/src web/index.html -type f -newer internal/webassets/dist/index.html 2>/dev/null | head -1); \
+	if [ ! -f internal/webassets/dist/index.html ]; then \
+		echo "ERROR: internal/webassets/dist is missing. Run: make build-web"; exit 1; \
+	elif [ -n "$$newest_src" ]; then \
+		echo "ERROR: embedded web bundle is STALE (older than $$newest_src)."; \
+		echo "       Run 'make build-web' — do not 'go build' directly."; exit 1; \
+	else echo "web bundle is current"; fi
+
 build-native: build-web
 	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrd ./cmd/nvrd
 	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrctl ./cmd/nvrctl
