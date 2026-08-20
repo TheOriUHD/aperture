@@ -12,7 +12,7 @@
 set -euo pipefail
 
 DEST="${DEST:-/usr/lib/aperture/bin}"
-FFMPEG_MODE="${FFMPEG_MODE:-pinned}"   # pinned | system
+FFMPEG_MODE="${FFMPEG_MODE:-system}"   # system | pinned
 
 DENO_VERSION="2.9.5"
 DENO_URL="https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-x86_64-unknown-linux-gnu.zip"
@@ -22,21 +22,26 @@ GO2RTC_VERSION="1.9.14"
 GO2RTC_URL="https://github.com/AlexxIT/go2rtc/releases/download/v${GO2RTC_VERSION}/go2rtc_linux_amd64"
 GO2RTC_SHA="32d616af226bd731678ffde328b94cfb94e30339bfefc469cfb76323144615a6"
 
-# ffmpeg is PINNED by default, for two independent reasons:
-#   1. Parity. The recorder depends on `-f segment` + `-strftime 1` + `-c copy`
-#      muxer behaviour. Production runs 5.1.9; Debian 13 ships 7.x. A subtle
-#      change there produces gaps that only surface in the timeline days later,
-#      so the host move and an ffmpeg major bump must not happen together.
-#   2. Footprint. Debian's `ffmpeg` package pulls ~180 dependencies onto a
-#      headless NVR — mesa, X11, SDL2, jackd, pulseaudio. The static build is
-#      one file with none of that.
+# ffmpeg comes from the DISTRO by default. The migration originally pinned a
+# static 5.1.1 build for parity with production 5.1.9 — and that pin was wrong:
 #
-# The trade-off, stated plainly: a pinned static build receives no security
-# updates, and this publisher serves no signature or checksum of its own (the
-# .md5 alongside the archive is 404), so the hash below pins WHAT WAS
-# DOWNLOADED AND TESTED — it proves reproducibility, not provenance. Since
-# ffmpeg parses RTSP from cameras, revisit this after the migration settles:
-# upgrading is its own change, with its own recording test.
+#   johnvansickle 5.1.1-static SIGSEGVs (exit 139) probing our MPEG-TS segments.
+#
+# The recorder probes every finished segment with `ffprobe -show_entries
+# format=duration` (internal/record/recorder.go:661). A crashing ffprobe returns
+# no duration, so EVERY segment is discarded as "unreadable, skipping": files
+# accumulate on disk, nothing is registered in the database, the timeline stops
+# advancing and the watchdog restarts streams in a loop. Recording looks healthy
+# from the outside the whole time. Debian's 7.1.5 reads the identical files fine.
+#
+# So the parity argument lost to a simpler one: the pinned build has to actually
+# work, and a distro package gets security updates — which matters for a component
+# parsing RTSP from cameras. The cost is that Debian's ffmpeg pulls ~180 packages
+# onto a headless box.
+#
+# If you do pin, VALIDATE THE PIN: probe a real segment and check the exit code.
+# "It reports the right --version" proves nothing, which is exactly how this got
+# through review.
 FFMPEG_URL="${FFMPEG_URL:-https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-5.1.1-amd64-static.tar.xz}"
 FFMPEG_SHA="${FFMPEG_SHA:-2d848c37f7f276be0262d9123a84fbfe72bb159921ffcce3bd7106f143d29f42}"
 
@@ -97,6 +102,37 @@ case "$FFMPEG_MODE" in
     ;;
   *) die "FFMPEG_MODE must be 'system' or 'pinned'" ;;
 esac
+
+# --- ffmpeg smoke test ------------------------------------------------------
+# Verify the chosen ffmpeg/ffprobe can actually do the ONE thing the recorder
+# needs: segment to MPEG-TS, then report a duration. The pinned 5.1.1 build
+# passed --version and SIGSEGV'd here, which cost a cutover.
+ffmpeg_check() {
+  local FF FP t
+  FF=$( [ -x "$DEST/ffmpeg" ]  && echo "$DEST/ffmpeg"  || command -v ffmpeg )
+  FP=$( [ -x "$DEST/ffprobe" ] && echo "$DEST/ffprobe" || command -v ffprobe )
+  t=$(mktemp -d)
+  set +e
+  "$FF" -v error -f lavfi -i testsrc=size=128x72:rate=10:duration=2 \
+        -c:v libx264 -f mpegts "$t/probe.ts" </dev/null >/dev/null 2>&1
+  local erc=$?
+  set -e
+  [ $erc -eq 0 ] || { rm -rf "$t"; die "$FF exited $erc producing an MPEG-TS segment (139 = SIGSEGV)."; }
+  local dur rc
+  # errexit off deliberately: a SIGSEGV here must produce the diagnostic below,
+  # not kill the script at the assignment with a bare exit 139 and no explanation.
+  set +e
+  dur=$("$FP" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$t/probe.ts" 2>/dev/null); rc=$?
+  set -e
+  rm -rf "$t"
+  [ $rc -eq 0 ] || die "$FP exited $rc probing an MPEG-TS segment (139 = SIGSEGV).
+  The recorder probes every finished segment this way; a crashing ffprobe makes it
+  discard all of them as 'unreadable' while files pile up untracked on disk."
+  case "$dur" in ''|0|N/A) die "$FP returned no duration for an MPEG-TS segment ('$dur').
+  Every recorded segment would be dropped as unreadable." ;; esac
+  log "ffmpeg smoke test passed (probed ${dur}s from a generated MPEG-TS)"
+}
+ffmpeg_check
 
 log "vendored runtime in $DEST:"
 for b in deno go2rtc ffmpeg ffprobe; do

@@ -16,7 +16,7 @@ BIN_DIR="${BIN_DIR:-$REPO/bin}"
 
 DO_START=0
 DO_VENDOR=1
-FFMPEG_MODE="${FFMPEG_MODE:-pinned}"
+FFMPEG_MODE="${FFMPEG_MODE:-system}"
 for a in "$@"; do
   case "$a" in
     --start)        DO_START=1 ;;
