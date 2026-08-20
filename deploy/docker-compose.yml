@@ -46,6 +46,21 @@ services:
       - "host.docker.internal:host-gateway"
     networks: [aperture]
 
+  # Advertises this install on the LAN over mDNS/DNS-SD so it appears as
+  # "Aperture NVR" in scanners and Bonjour browsers rather than as an anonymous
+  # host. Host networking is REQUIRED: mDNS is link-local multicast and does not
+  # cross a Docker bridge. Stateless and independent — stopping it affects
+  # nothing else, and it shares nvrd's image so there is no extra build.
+  discovery:
+    image: aperture/nvrd:latest
+    container_name: aperture-discovery
+    restart: unless-stopped
+    network_mode: host
+    entrypoint: ["/usr/bin/tini", "--", "/usr/local/bin/apdiscovery"]
+    environment:
+      APERTURE_ADVERTISE_NAME: "${APERTURE_ADVERTISE_NAME:-Aperture NVR}"
+      APERTURE_ADVERTISE_PORT: "${APERTURE_PORT:-8971}"
+
   go2rtc:
     image: alexxit/go2rtc:latest
     container_name: aperture-go2rtc
