@@ -34,3 +34,4 @@
 /internal/webassets/dist/*
 !/internal/webassets/dist/.gitkeep
 .backups/
+apdiscovery
