@@ -12,8 +12,13 @@
 #      exists because the alternative is a system that looks healthy and is not.
 set -eu
 
-DATA="${APERTURE_DATA_DIR:-/var/lib/aperture}"
-REC="${APERTURE_RECORDINGS_DIR:-$DATA/recordings}"
+# DATA and REC MUST NOT NEST. internal/retention/janitor.go:387 computes the app's
+# footprint as dirBytes(DataDir) and subtracts it from the storage cap. If the
+# recordings tree sits inside the data dir, every byte of footage is counted as
+# "app data", the cap target goes negative, and the janitor deletes ALL footage on
+# the first pass. That is not hypothetical — it happened on 2026-08-20.
+DATA="${APERTURE_DATA_DIR:-/var/lib/aperture/data}"
+REC="${APERTURE_RECORDINGS_DIR:-/var/lib/aperture/recordings}"
 SDK="${APERTURE_EXT_SDK:-/usr/lib/aperture/sdk/mod.ts}"
 DENO="${APERTURE_DENO_PATH:-/usr/lib/aperture/bin/deno}"
 NVRD="${APERTURE_BIN:-/usr/bin/nvrd}"
@@ -29,6 +34,26 @@ for f in secrets.json cli.token aperture.db aperture.db-wal aperture.db-shm go2r
 done
 
 # --- 2. guards --------------------------------------------------------------
+
+# (0) THE DATA/RECORDINGS NESTING GUARD. internal/retention/janitor.go:387 computes
+# the app's own footprint as dirBytes(DataDir) and subtracts it from the storage cap
+# (enforceLocationCap, janitor.go:235-246). If the recordings tree lives INSIDE the
+# data dir, every byte of footage is counted as app overhead, the cap target goes
+# negative, is clamped to 0, and the janitor deletes EVERY recording on its first
+# pass -- within seconds of starting, with only a WARN line to show for it.
+# This is not theoretical: it destroyed 21,953 segments on 2026-08-20 during the
+# first cutover attempt. Under Docker /data and /recordings were separate mounts,
+# so the condition could never arise and the code never had to defend against it.
+case "$REC/" in
+    "$DATA"/*)
+        die "APERTURE_RECORDINGS_DIR is inside APERTURE_DATA_DIR.
+      data:       $DATA
+      recordings: $REC
+  The retention janitor counts everything under the data dir as app overhead and
+  subtracts it from the storage cap, so nesting these makes the cap target negative
+  and DELETES ALL FOOTAGE on the first pass. Point them at sibling directories."
+        ;;
+esac
 
 # (a) THE important one. If a database exists but secrets.json does not, config.Load()
 # SILENTLY REGENERATES enc_key (internal/config/config.go:166-168). Every SMB/SFTP

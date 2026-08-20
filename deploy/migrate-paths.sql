@@ -17,7 +17,7 @@ UPDATE segments        SET path          = '/var/lib/aperture/recordings/' || su
 UPDATE segment_copies  SET path          = '/var/lib/aperture/recordings/' || substr(path, 13)          WHERE path          LIKE '/recordings/%';
 UPDATE events          SET thumb_path    = '/var/lib/aperture/recordings/' || substr(thumb_path, 13)    WHERE thumb_path    LIKE '/recordings/%';
 UPDATE events          SET snapshot_path = '/var/lib/aperture/recordings/' || substr(snapshot_path, 13) WHERE snapshot_path LIKE '/recordings/%';
-UPDATE export_jobs     SET output_path   = '/var/lib/aperture/'            || substr(output_path, 7)    WHERE output_path   LIKE '/data/%';
+UPDATE export_jobs     SET output_path   = '/var/lib/aperture/data/'       || substr(output_path, 7)    WHERE output_path   LIKE '/data/%';
 
 -- Operator override of the recordings root; if it equals the new default we drop it entirely
 -- rather than pin a redundant absolute path.
