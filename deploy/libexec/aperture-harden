@@ -1,0 +1,67 @@
+#!/bin/sh
+# Aperture pre-start hardening and preflight guards. Runs as root via ExecStartPre=,
+# before nvrd; a non-zero exit aborts the start (matching the `exec "$@"` semantics of
+# the old container entrypoint).
+#
+# Two jobs:
+#   1. Re-apply the filesystem hardening the Docker entrypoint used to do. Backend
+#      extensions share this filesystem, so these modes are part of the security model,
+#      not housekeeping. nvrd re-creates some of these files at runtime, so this must run
+#      on every start -- tmpfiles.d handles creation, not enforcement.
+#   2. Refuse to start on conditions whose failure mode is SILENT. Each guard below
+#      exists because the alternative is a system that looks healthy and is not.
+set -eu
+
+DATA="${APERTURE_DATA_DIR:-/var/lib/aperture}"
+REC="${APERTURE_RECORDINGS_DIR:-$DATA/recordings}"
+SDK="${APERTURE_EXT_SDK:-/usr/lib/aperture/sdk/mod.ts}"
+DENO="${APERTURE_DENO_PATH:-/usr/lib/aperture/bin/deno}"
+NVRD="${APERTURE_BIN:-/usr/bin/nvrd}"
+
+die() { echo "aperture-harden: FATAL: $*" >&2; exit 1; }
+
+# --- 1. filesystem hardening ------------------------------------------------
+mkdir -p "$DATA/ext"
+# Traversable but not listable: a child reaches its own ext/<id>, cannot enumerate siblings.
+chmod 0711 "$DATA" "$DATA/ext" 2>/dev/null || true
+for f in secrets.json cli.token aperture.db aperture.db-wal aperture.db-shm go2rtc.yaml; do
+    [ -e "$DATA/$f" ] && chmod 0600 "$DATA/$f" 2>/dev/null || true
+done
+
+# --- 2. guards --------------------------------------------------------------
+
+# (a) THE important one. If a database exists but secrets.json does not, config.Load()
+# SILENTLY REGENERATES enc_key (internal/config/config.go:166-168). Every SMB/SFTP
+# storage credential then fails GCM authentication: network recording stops and remote
+# footage becomes unreadable, with no error at boot. Refusing to start is strictly better
+# than starting into that state -- this is the single highest-value line in the migration.
+if [ -e "$DATA/aperture.db" ] && [ ! -e "$DATA/secrets.json" ]; then
+    die "$DATA/aperture.db exists but secrets.json is missing.
+  Starting now would silently regenerate enc_key and permanently break every stored
+  network-storage credential. Restore secrets.json from backup before starting."
+fi
+
+# (b) The rlimit trampoline re-execs /proc/self/exe AFTER dropping to the extension uid
+# (internal/ext/supervisor.go:270-280), so a dropped uid must still be able to read and
+# execute the nvrd binary. A 0700 "hardening" here breaks every extension with an rlimit
+# spec, and the error surfaces only as a crash-looping child.
+[ -r "$NVRD" ] && [ -x "$NVRD" ] || die "$NVRD must stay world-readable and executable (0755) for the extension rlimit trampoline."
+if [ -e "$DENO" ]; then
+    [ -r "$DENO" ] && [ -x "$DENO" ] || die "$DENO must be readable and executable by extension uids."
+fi
+
+# (c) The supervisor grants extensions --allow-read on the SDK's PARENT directory
+# (internal/ext/spec.go:33-48). Anything else placed there becomes readable by every
+# installed extension.
+if [ -e "$SDK" ]; then
+    n=$(ls -A "$(dirname "$SDK")" 2>/dev/null | wc -l)
+    [ "$n" -eq 1 ] || die "$(dirname "$SDK") must contain ONLY the SDK module (found $n entries); extensions can read that whole directory."
+fi
+
+# (d) If recordings is meant to be its own mount, refuse to record onto the root
+# filesystem when it failed to mount. Opt in with APERTURE_REQUIRE_REC_MOUNT=1.
+if [ "${APERTURE_REQUIRE_REC_MOUNT:-0}" = "1" ]; then
+    mountpoint -q "$REC" || die "$REC is not a mountpoint and APERTURE_REQUIRE_REC_MOUNT=1."
+fi
+
+exit 0

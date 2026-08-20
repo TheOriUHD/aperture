@@ -1,0 +1,27 @@
+[Unit]
+Description=Aperture mDNS/DNS-SD advertisement
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/usr/lib/aperture/bin/apdiscovery
+EnvironmentFile=-/etc/aperture/aperture.env
+Restart=always
+RestartSec=5
+
+# Stateless: no database handle, no credentials, no files. DynamicUser is free hardening.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=128M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,85 @@
+[Unit]
+Description=Aperture NVR daemon
+Documentation=file:/usr/share/doc/aperture/ONBOARDING.md
+Wants=network-online.target aperture-go2rtc.service mosquitto.service
+After=network-online.target aperture-go2rtc.service mosquitto.service
+
+[Service]
+Type=exec
+EnvironmentFile=/etc/aperture/aperture.env
+# The vendored runtime MUST win over any distro ffmpeg: internal/record/recorder.go:215,662
+# invoke bare `ffmpeg`/`ffprobe` through PATH. Debian 13 ships ffmpeg 7.x while the recorder
+# is validated against 5.1.9, and `-f segment` behaviour is what the whole timeline rests on.
+Environment=PATH=/usr/lib/aperture/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStartPre=/usr/libexec/aperture/aperture-harden
+ExecStart=/usr/bin/nvrd
+
+# --- restart ---------------------------------------------------------------
+# The in-app restart button calls os.Exit(0) 900ms after responding
+# (internal/api/recordings_handlers.go:732-748) and relies on the supervisor to
+# bring the daemon back. Restart=on-failure would treat that as a clean exit and
+# leave the NVR down.
+Restart=always
+RestartSec=2
+# An NVR must never be given up on; without this a crash loop ends in a dead unit.
+StartLimitIntervalSec=0
+
+# --- shutdown --------------------------------------------------------------
+# cmd/nvrd/main.go:355-368 drains extensions (5s) then HTTP (10s) => ~15s worst case.
+TimeoutStopSec=45
+# 'mixed' = SIGTERM to nvrd alone so its ordered shutdown runs undisturbed, SIGKILL to
+# the whole cgroup only at timeout. 'control-group' would signal ffmpeg and every
+# extension in parallel, racing that ordering; 'process' would ORPHAN the recorders,
+# which carry no Pdeathsig (internal/record/recorder.go:215).
+KillMode=mixed
+KillSignal=SIGTERM
+FinalKillSignal=SIGKILL
+
+# --- resource limits: replaces compose mem_limit/pids_limit/cpus -----------
+# Documented "Layer 2" containment for a runaway or escaped extension.
+MemoryHigh=1800M
+MemoryMax=2G
+TasksMax=1024
+CPUQuota=300%
+LimitNOFILE=65536
+# MANDATORY. Extensions carry a raised oom_score_adj so they die first under memory
+# pressure (internal/ext/supervisor.go:406-414). systemd's default OOMPolicy=stop would
+# take nvrd down WITH the extension it just sacrificed -- i.e. a leaking third-party
+# extension would stop recording. This restores the intended behaviour.
+OOMPolicy=continue
+
+# --- sandboxing ------------------------------------------------------------
+# NoNewPrivileges does NOT block the extension setuid drop: it prevents GAINING
+# privilege across execve, while syscall.Credential is a root process DROPPING to
+# uid 65600. It is required here because, unlike the slim container, a real host has
+# setuid-root binaries an escaped extension could exec.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aperture
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+# HomeKit/mDNS advertise the hostname, so this stays off.
+ProtectHostname=no
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+#
+# Deliberately NOT set, with reasons:
+#   User=/DynamicUser=          nvrd must be root (setuid-drops children, chowns ext dirs)
+#   PrivateUsers=yes            breaks chown to host uid 65600 -- extension isolation collapses
+#   MemoryDenyWriteExecute=yes  Deno's V8 JIT needs W^X transitions
+#   SystemCallFilter=           interaction with setresuid/setgroups/fchownat + Deno is not
+#                               worth guessing during a migration; phase-2 hardening
+#   CapabilityBoundingSet=      needs >= CAP_SETUID SETGID CHOWN FOWNER KILL DAC_OVERRIDE
+#                               SYS_RESOURCE; trim later, gated on an extension test
+#   WatchdogSec=                nvrd does not sd_notify
+
+[Install]
+WantedBy=multi-user.target
