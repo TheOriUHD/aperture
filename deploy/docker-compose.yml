@@ -60,6 +60,9 @@ services:
     environment:
       APERTURE_ADVERTISE_NAME: "${APERTURE_ADVERTISE_NAME:-Aperture NVR}"
       APERTURE_ADVERTISE_PORT: "${APERTURE_PORT:-8971}"
+      # Published as <host>.local. Overridable; the interface is auto-detected
+      # (LAN only — container bridges are excluded).
+      APERTURE_ADVERTISE_HOST: "${APERTURE_ADVERTISE_HOST:-aperture}"
 
   go2rtc:
     image: alexxit/go2rtc:latest
