@@ -8,6 +8,7 @@ import { Plus, UserPlus, Shield, User as UserIcon } from "lucide-react";
 import { TopBar } from "../components/TopBar";
 import { UserModal } from "../components/UserModal";
 import { StorageManager } from "../components/StorageManager";
+import { EufyBridge } from "../components/EufyBridge";
 import { HomeAssistant } from "../components/HomeAssistant";
 import { LiveViewCard } from "../components/LiveViewCard";
 import { Interop } from "../components/Interop";
@@ -129,6 +130,7 @@ export function Settings() {
             {active === "integrations" && isAdmin && (
               <>
                 <HomeAssistant />
+                <EufyBridge />
                 <LiveViewCard />
                 <Interop />
                 <Webhooks />

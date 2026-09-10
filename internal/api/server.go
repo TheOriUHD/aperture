@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,6 +16,7 @@ import (
 	"github.com/TheOriUHD/aperture/internal/automate"
 	"github.com/TheOriUHD/aperture/internal/config"
 	"github.com/TheOriUHD/aperture/internal/detect"
+	"github.com/TheOriUHD/aperture/internal/eufy"
 	"github.com/TheOriUHD/aperture/internal/export"
 	"github.com/TheOriUHD/aperture/internal/ext"
 	"github.com/TheOriUHD/aperture/internal/ha"
@@ -35,16 +38,20 @@ const sessionTTL = 7 * 24 * time.Hour
 
 // Server wires the HTTP API and the embedded web UI.
 type Server struct {
-	cfg       *config.Config
-	st        *store.Store
-	am        *auth.Manager
-	sm        *stream.Manager
-	rec       *record.Recorder
-	det       *motion.Detector
-	detect    *detect.Engine
-	webhook   *webhook.Dispatcher
-	automate  *automate.Engine
-	ha        *ha.Publisher
+	cfg      *config.Config
+	st       *store.Store
+	am       *auth.Manager
+	sm       *stream.Manager
+	rec      *record.Recorder
+	det      *motion.Detector
+	detect   *detect.Engine
+	webhook  *webhook.Dispatcher
+	automate *automate.Engine
+	ha       *ha.Publisher
+	// Eufy bridge session, started on first use of the integration endpoints.
+	eufyOnce  sync.Once
+	eufyCli   *eufy.Client
+	eufyCtx   context.Context
 	oidc      *oidc.Authenticator
 	audit     *audit.Logger
 	exp       *export.Manager
@@ -112,7 +119,7 @@ func (s *Server) triggerReconcile() {
 
 // NewServer builds a Server and its routes.
 func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, detectEng *detect.Engine, webhookDisp *webhook.Dispatcher, automateEng *automate.Engine, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, wd *watchdog.Watchdog, logs *logbuf.Ring, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, detect: detectEng, webhook: webhookDisp, automate: automateEng, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
+	s := &Server{eufyCtx: context.Background(), cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, detect: detectEng, webhook: webhookDisp, automate: automateEng, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
 	s.limiter = newRateLimiter()
 	s.router = s.routes()
 	return s
@@ -401,6 +408,14 @@ func (s *Server) routes() http.Handler {
 		g.Post("/system/restart", adminSessionOnly, s.handleRestart)
 		g.Get("/system/ha", adminScoped(ScopeSiteRead), s.handleGetHA)
 		g.Put("/system/ha", adminScoped(ScopeSiteWrite), s.handleSetHA)
+		// Eufy bridge. The GET is scoped like other integration reads; the writes are
+		// adminSessionOnly because they carry a cloud account password and answer its
+		// sign-in challenges — the same class as users/tokens/backup, which no API
+		// token may ever reach.
+		g.Get("/system/integrations/eufy", adminScoped(ScopeSiteRead), s.handleGetEufy)
+		g.Put("/system/integrations/eufy", adminSessionOnly, s.handleSetEufy)
+		g.Post("/system/integrations/eufy/verify-code", adminSessionOnly, s.handleEufyVerifyCode)
+		g.Post("/system/integrations/eufy/captcha", adminSessionOnly, s.handleEufyCaptcha)
 		g.Get("/system/ha/sensors", adminScoped(ScopeSiteRead), s.handleHASensors)
 		g.Get("/system/oidc", adminScoped(ScopeSiteRead), s.handleGetOIDC)
 		// ONVIF / HomeKit: settings-backed, started and stopped in place.
