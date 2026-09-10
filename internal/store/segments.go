@@ -381,7 +381,48 @@ func scanSegment(row rowScanner) (*Segment, error) {
 	}
 	seg.HasMotion = motion != 0
 	seg.Locked = locked != 0
+	clampSegmentDuration(&seg)
 	return &seg, nil
+}
+
+// maxSaneSegmentMS is the longest duration a recorded segment can honestly have.
+// The recorder cuts every 10s; the largest legitimate row in production is ~22s
+// (a segment that spans a recorder restart), so 60s is generous headroom.
+const maxSaneSegmentMS = 60_000
+
+// nominalSegmentMS is the recorder's -segment_time, used when neither the probed
+// duration nor the wall-clock span is believable.
+const nominalSegmentMS = 10_000
+
+// clampSegmentDuration repairs rows whose duration came back absurd from ffprobe.
+//
+// A segment whose file contains a 33-bit MPEG-TS PTS wrap probes as hours long:
+// four Schlafzimmer rows carry 12.7-13.8h for 306 KB, 10-second files, with
+// end_ts leaking a day into the future. Left alone such a row poisons
+// EXT-X-TARGETDURATION (49698 instead of 13), inflates the media timeline, drags
+// itself into later days' playlists, and parks every wall-clock offset for that
+// day inside a dead fragment interior — which the player shows as a black
+// rectangle. Trust the wall clock, not the container.
+//
+// This is applied in scanSegment because it is the single funnel for
+// ListSegments, ListSegmentsPage and SegmentByID. Clamping here keeps /segments
+// (which wallToOffset sums) and /hls (which the player plays) in exact
+// agreement; clamping only one would desynchronise the offset mapping and make
+// seeking worse rather than better. Stored rows are not modified.
+func clampSegmentDuration(seg *Segment) {
+	span := seg.EndTS - seg.StartTS
+	if seg.DurationMS <= 0 || seg.DurationMS > maxSaneSegmentMS {
+		// Prefer the wall-clock span when it is itself believable, since it comes
+		// from the recorder's own filenames rather than from probing the container.
+		if span > 0 && span <= maxSaneSegmentMS {
+			seg.DurationMS = span
+		} else {
+			seg.DurationMS = nominalSegmentMS
+		}
+	}
+	if span < 0 || span > maxSaneSegmentMS {
+		seg.EndTS = seg.StartTS + seg.DurationMS
+	}
 }
 
 func collectSegments(rows *sql.Rows) ([]*Segment, error) {

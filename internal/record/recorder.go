@@ -203,7 +203,22 @@ func (r *Recorder) superviseFFmpeg(ctx context.Context, cam store.Camera) {
 			// all yields an mpegts the segment muxer can't rotate (one ever-growing
 			// file). Mapping the first video track keeps segmenting reliable.
 			"-map", "0:v:0", "-map", "0:a?",
-			"-c", "copy", "-f", "segment",
+			// Video is stream-copied — the recording path stays transcode-free and
+			// near-zero CPU, which is the whole design.
+			"-c:v", "copy",
+			// Audio is NOT copied, and this is deliberate. ffmpeg 7.x announces the
+			// AAC track in the PMT and then writes zero packets to it when copying
+			// AAC out of RTSP into mpegts: the PID exists, carries no PES at all,
+			// and every downstream reader sees a declared track with sample_rate=0.
+			// ffmpeg 5.x wrote proper ADTS. The switch to the distro ffmpeg
+			// (47cb6f3) therefore silenced every recording from 2026-08-20 21:13
+			// onward, with no error anywhere — ffprobe still prints "aac".
+			// Re-encoding is the only thing that restores it (verified against the
+			// live restream: copy -> aac,0,0; re-encode -> aac,16000,1). At 16 kHz
+			// mono this costs a rounding error of CPU. Revert to "-c", "copy" only
+			// after confirming a future ffmpeg writes audio packets again.
+			"-c:a", "aac", "-b:a", "32k",
+			"-f", "segment",
 			"-segment_time", strconv.Itoa(segmentSeconds),
 			"-segment_format", "mpegts",
 			// No -reset_timestamps: keep PTS continuous within a recording

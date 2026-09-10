@@ -347,6 +347,24 @@ func (s *Server) handleDeleteRecordings(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// discontinuityGapMS is how large a hole between two segments must be before the playlist
+// declares a discontinuity.
+//
+// It cannot be 1s. Segment start times come from the recorder's `-strftime 1 %s.ts`
+// filenames, which are epoch SECONDS (`startMs := f.epoch * 1000`, record/recorder.go:336),
+// so every boundary carries up to 999 ms of pure truncation error while end_ts carries a
+// probed duration in milliseconds. A 1s threshold therefore fires on rounding, and it was
+// producing ~30 phantom discontinuities per camera per day on this deployment.
+//
+// Phantom markers are not cosmetic. At a discontinuity hls.js resets its PTS anchoring and
+// places the next fragment by playlist time (the EXTINF sum) rather than by its true PTS —
+// so a marker where the media is actually continuous mis-places the fragment by exactly the
+// truncation error and manufactures the buffer hole it was supposed to describe. The
+// recorder writes continuous PTS across segment files within one run (there is deliberately
+// no -reset_timestamps), so genuine gaps only come from a recorder restart and are never
+// sub-second: the measured cost of one is ~10s.
+const discontinuityGapMS = 2500
+
 // handleHLS generates a VOD HLS playlist from the stored segments in a range.
 // Time gaps (e.g. an ffmpeg restart) become EXT-X-DISCONTINUITY markers.
 func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request) {
@@ -371,7 +389,7 @@ func (s *Server) handleHLS(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
 	var prevEnd int64
 	for i, seg := range segs {
-		disc := i > 0 && seg.StartTS-prevEnd > 1000
+		disc := i > 0 && seg.StartTS-prevEnd > discontinuityGapMS
 		if disc {
 			b.WriteString("#EXT-X-DISCONTINUITY\n")
 		}
@@ -430,6 +448,13 @@ func (s *Server) handleSegmentFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "video/mp2t")
+	// Segments recorded while ffmpeg wrote a declared-but-empty AAC track get a silent
+	// track substituted as they are served, so hls.js can build its init segment and the
+	// archive keeps one uniform track layout. Healthy segments fall straight through to
+	// the zero-copy path below. See segment_fixup.go. Stored files are never modified.
+	if s.serveSegmentRepaired(w, r, seg) {
+		return
+	}
 	// Local segments store an absolute path → serve straight from disk. Network
 	// segments store a backend-relative path → stream through the backend with full
 	// HTTP range support (seeking, partial content) via ServeContent. If the
