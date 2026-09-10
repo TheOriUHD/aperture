@@ -3,6 +3,7 @@ import { api } from "./api";
 import { useAuth } from "./auth";
 import { setClock24 } from "./format";
 import { setLanguage } from "./i18n";
+import { applyOsdOpacity } from "./osd";
 import { DEFAULT_PREFS, type Preferences } from "./types";
 
 interface PrefsState {
@@ -30,6 +31,12 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setLanguage(prefs.language);
   }, [prefs.language]);
+
+  // Publish OSD opacity as a CSS variable so every overlay — including extension
+  // panels rendered in their own sandboxed document — reads one value.
+  useEffect(() => {
+    applyOsdOpacity(prefs.osdOpacity);
+  }, [prefs.osdOpacity]);
 
   function setPref(partial: Partial<Preferences>) {
     setPrefs((cur) => {

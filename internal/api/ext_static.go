@@ -74,15 +74,44 @@ func (s *Server) handleExtAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 func injectSDK(html string) []byte {
+	inject := extPanelBase + extSDKBootstrap
 	low := strings.ToLower(html)
 	if i := strings.Index(low, "</head>"); i >= 0 {
-		return []byte(html[:i] + extSDKBootstrap + html[i:])
+		return []byte(html[:i] + inject + html[i:])
 	}
 	if i := strings.Index(low, "<body>"); i >= 0 {
-		return []byte(html[:i+6] + extSDKBootstrap + html[i+6:])
+		return []byte(html[:i+6] + inject + html[i+6:])
 	}
-	return []byte(extSDKBootstrap + html)
+	// A panel with no <head> or <body> is legal HTML and the docs' own starter
+	// omits both. Prepending here would put a <script> BEFORE the doctype, which
+	// drops the document into quirks mode — and a quirks-mode panel loses the
+	// transparent canvas that overlay slots depend on, so it paints an opaque
+	// rectangle over the video instead of floating on it. Insert after the doctype
+	// so the declaration stays first.
+	if i := strings.Index(low, "<!doctype"); i >= 0 {
+		if end := strings.Index(html[i:], ">"); end >= 0 {
+			at := i + end + 1
+			return []byte(html[:at] + inject + html[at:])
+		}
+	}
+	return []byte(inject + html)
 }
+
+// extPanelBase pins a panel document to the app's own colour scheme.
+//
+// This is what keeps an overlay panel TRANSPARENT, and it is not obvious: per CSS
+// Color Adjust §2.4 the UA must paint an OPAQUE canvas whenever an iframe ELEMENT's
+// used color-scheme differs from the embedded document's root element. color-scheme
+// INHERITS, so a panel frame computes `dark` from the app's :root while a panel that
+// declares nothing computes light — and on that mismatch the spec replaces the
+// transparent canvas outright. The panel's own `background: transparent` is
+// necessary but NOT sufficient; without this the frame paints a white rectangle over
+// the video no matter what the panel does.
+//
+// Injected for every panel so third-party bundles get it without changing their code.
+// `:root` (specificity 0-1-0) outranks a panel's own `html` rule (0-0-1), so it holds
+// regardless of which branch above placed it.
+const extPanelBase = `<style>:root{color-scheme:dark}</style>`
 
 // extSDKBootstrap is the @aperture/sdk runtime for a UI panel (T1.7, iframe side).
 // It exposes window.aperture, whose calls postMessage to the host; the host relays
@@ -117,7 +146,12 @@ const extSDKBootstrap = `<script>(function(){
     net:{
       fetch:function(url,init){init=init||{};return call('net.fetch',{url:url,method:init.method,headers:init.headers,body:init.body});}
     },
-    resize:function(h){parent.postMessage({__apReq:true,type:'ui.resize',payload:{height:h}},'*');}
+    resize:function(h,w){parent.postMessage({__apReq:true,type:'ui.resize',payload:{height:h,width:w}},'*');}
   };
-  try{var ro=new ResizeObserver(function(){window.aperture.resize(document.documentElement.scrollHeight);});ro.observe(document.documentElement);}catch(e){}
+  try{
+    var measure=function(){var b=document.body;window.aperture.resize(b?b.scrollHeight:document.documentElement.scrollHeight);};
+    var ro=new ResizeObserver(measure);
+    ro.observe(document.documentElement);
+    document.addEventListener("DOMContentLoaded",function(){if(document.body)ro.observe(document.body);measure();});
+  }catch(e){}
 })();</script>`

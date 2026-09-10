@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../lib/api";
+import { OSD_ALPHA_VAR } from "../lib/osd";
 import { panelsForSlot, type ExtPanel } from "./panels";
 import { useExtPanels } from "./useExtPanels";
 
@@ -27,9 +28,38 @@ export function ExtensionSlot({ slot, cameraId }: { slot: string; cameraId?: str
 // sandbox="allow-scripts" WITHOUT allow-same-origin, so it is an opaque origin
 // with no cookies and no access to this window — it can reach Aperture only
 // through this bridge.
-export function ExtensionPanel({ panel, cameraId }: { panel: ExtPanel; cameraId?: string }) {
+// Chrome decides what the host wraps a panel in:
+//   "card" — the default flow layout: a bordered card in a column of cards.
+//   "bare" — no wrapper and a transparent background, for a panel that is itself
+//     the widget (a player OSD, or the body of a toolbar dropdown). The host still
+//     owns position and size; the panel only asks for a height.
+export type ExtChrome = "card" | "bare";
+
+export function ExtensionPanel({
+  panel,
+  cameraId,
+  chrome = "card",
+  width,
+  initialHeight = 180,
+}: {
+  panel: ExtPanel;
+  cameraId?: string;
+  chrome?: ExtChrome;
+  width?: number | string;
+  initialHeight?: number;
+}) {
   const ref = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(180);
+  // An overlay panel starts at zero height and is revealed only once it asks for a
+  // size via resize(), so a conditional OSD that decides it has nothing to show on
+  // this camera occupies nothing at all. Card panels instead keep their reserved
+  // height, because there an empty frame sits inside a card and reads as "loading"
+  // rather than as damage.
+  const overlay = chrome === "bare";
+  const [height, setHeight] = useState(overlay ? 0 : initialHeight);
+  // An overlay also negotiates its WIDTH. Without this a widget that collapses to a
+  // small button still occupies the host's full reserved width, and that invisible
+  // column sits over the video swallowing clicks meant for the picture.
+  const [negotiatedWidth, setNegotiatedWidth] = useState<number>();
 
   useEffect(() => {
     const iframe = ref.current;
@@ -38,8 +68,22 @@ export function ExtensionPanel({ panel, cameraId }: { panel: ExtPanel; cameraId?
       const m = e.data as { __apReq?: boolean; id?: number; type?: string; payload?: Record<string, unknown> };
       if (!m || !m.__apReq) return;
       if (m.type === "ui.resize") {
-        const h = Number(m.payload?.height) || 180;
-        setHeight(Math.max(80, Math.min(h, 4000)));
+        // NOT `Number(x) || 180`: zero is falsy, so that coerced a panel's explicit
+        // "I have nothing to show" into a 180px frame — defeating the zero-height
+        // path below and leaving an empty box sitting on the video. Only a value
+        // that is not a number at all falls back.
+        const asked = Number(m.payload?.height);
+        const h = Number.isFinite(asked) ? asked : 180;
+        // Width is optional. The SDK's automatic sizing reports height only, so an
+        // absent width must LEAVE the current one alone rather than reset it.
+        const askedW = Number(m.payload?.width);
+        if (overlay && Number.isFinite(askedW) && askedW > 0) {
+          setNegotiatedWidth(Math.min(askedW, 4000));
+        }
+        // An overlay may legitimately ask for nothing — a conditional widget that has
+        // decided it has no controls for this camera. Honour a zero rather than
+        // clamping it up to 80, or it leaves a blank strip sitting on the video.
+        setHeight(overlay ? Math.min(Math.max(0, h), 4000) : Math.max(80, Math.min(h, 4000)));
         return;
       }
       const reply = (result: unknown) =>
@@ -107,16 +151,57 @@ export function ExtensionPanel({ panel, cameraId }: { panel: ExtPanel; cameraId?
     return () => window.removeEventListener("message", onMessage);
   }, [panel.extId]);
 
-  const src = `/ext/${panel.extId}/${panel.entry}` + (cameraId ? `?camera=${encodeURIComponent(cameraId)}` : "");
-  return (
-    <div className="card overflow-hidden">
-      <iframe
-        ref={ref}
-        title={panel.title || panel.extName}
-        sandbox="allow-scripts"
-        src={src}
-        style={{ width: "100%", height, border: 0, display: "block" }}
-      />
-    </div>
+  // The panel is a separate document, so it cannot inherit :root variables or read
+  // React context. The host's overlay opacity is therefore handed over in the URL,
+  // alongside the camera — the same one-way host→panel channel that already exists.
+  // A panel that ignores it simply looks like every other panel that ignores it;
+  // one that honours it matches first-party chrome exactly.
+  const params = new URLSearchParams();
+  if (cameraId) params.set("camera", cameraId);
+  if (chrome === "bare") {
+    params.set(
+      "osdAlpha",
+      typeof document !== "undefined"
+        ? getComputedStyle(document.documentElement).getPropertyValue(OSD_ALPHA_VAR).trim() || "0.55"
+        : "0.55",
+    );
+  }
+  const qs = params.toString();
+  const src = `/ext/${panel.extId}/${panel.entry}` + (qs ? `?${qs}` : "");
+
+  const frame = (
+    <iframe
+      ref={ref}
+      title={panel.title || panel.extName}
+      sandbox="allow-scripts"
+      src={src}
+      // allowTransparency is non-standard but still required by some engines for an
+      // iframe to composite over what is behind it; the modern path is the panel
+      // setting `background: transparent` on its own body, which the docs mandate.
+      style={{
+        width: negotiatedWidth ?? width ?? "100%",
+        height,
+        border: 0,
+        // An unsized or zero-height overlay is hidden by its HEIGHT, never by
+        // display:none. display:none suppresses layout inside the frame, so
+        // documentElement.scrollHeight there is always 0 — a panel hidden that way
+        // can never measure itself back into view, and the SDK's ResizeObserver
+        // would keep reporting 0 forever. At height 0 the frame still lays out (and
+        // so can measure) while painting nothing.
+        display: "block",
+        // The overlay slots composite over live video, so the frame itself must not
+        // paint — and background:transparent is only half of that. color-scheme
+        // INHERITS, so this element otherwise computes `dark` from the app's :root
+        // while a panel document that declares nothing computes light; on that
+        // mismatch the UA is REQUIRED to give the frame an opaque canvas (CSS Color
+        // Adjust §2.4), which is what painted a white rectangle over the picture.
+        // Pin this side explicitly and inject the matching :root rule into every
+        // panel (extPanelBase, internal/api/ext_static.go) so the two always agree.
+        colorScheme: "dark",
+        background: "transparent",
+      }}
+    />
   );
+  if (chrome === "bare") return frame;
+  return <div className="card overflow-hidden">{frame}</div>;
 }

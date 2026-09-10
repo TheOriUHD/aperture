@@ -1,0 +1,87 @@
+{
+  "manifest": 1,
+  "id": "com.example.tapo-control",
+  "name": "Tapo Control",
+  "version": "0.2.0",
+  "author": "Aperture",
+  "description": "Pan/tilt control for TP-Link Tapo cameras, spoken directly to the camera over ONVIF on your own network. Adds a jog wheel over the picture and a device menu to the player toolbar. No cloud account and no vendor bridge.",
+  "minApiVersion": "v1",
+  "permissions": {
+    "data": {
+      "cameras": "read"
+    },
+    "cameras": "all",
+    "network": [
+      "{{setting:cameras.address}}",
+      "http://127.0.0.1:8788"
+    ]
+  },
+  "settings": [
+    {
+      "key": "username",
+      "label": "Camera account username",
+      "type": "text",
+      "required": true,
+      "help": "The Tapo CAMERA ACCOUNT, not your TP-Link cloud login. Create it in the Tapo app under the camera's Advanced Settings → Camera Account. It is the same account the RTSP stream uses."
+    },
+    {
+      "key": "password",
+      "label": "Camera account password",
+      "type": "secret",
+      "required": true,
+      "help": "Stored server-side and never returned to the browser. It is sent only to the camera addresses listed below."
+    },
+    {
+      "key": "cameras",
+      "label": "Camera mapping",
+      "type": "group",
+      "help": "Which Tapo camera each Aperture camera is. The address is the camera's ONVIF endpoint — Tapo serves it on port 2020, so http://<camera-ip>:2020. Only the addresses listed here may ever be contacted.",
+      "fields": [
+        {
+          "key": "camera",
+          "label": "Aperture camera",
+          "type": "camera"
+        },
+        {
+          "key": "address",
+          "label": "ONVIF address",
+          "type": "url",
+          "placeholder": "http://192.168.1.50:2020"
+        }
+      ]
+    },
+    {
+      "key": "step_ms",
+      "label": "Jog step (ms)",
+      "type": "number",
+      "default": 400,
+      "help": "How long one nudge of the jog wheel moves the camera. ONVIF pans continuously until told to stop, so this is the unit of movement."
+    },
+    {
+      "key": "speed",
+      "label": "Jog speed (%)",
+      "type": "number",
+      "default": 60,
+      "help": "How fast a nudge moves, as a percentage of the camera's maximum pan/tilt velocity."
+    }
+  ],
+  "ui": {
+    "panels": [
+      {
+        "slot": "player-osd",
+        "entry": "ui/jog.html",
+        "title": "Pan / tilt",
+        "anchor": "bottom-left"
+      },
+      {
+        "slot": "player-toolbar",
+        "entry": "ui/menu.html",
+        "title": "Tapo"
+      }
+    ]
+  },
+  "backend": {
+    "entry": "backend/main.ts",
+    "denoVersion": "2"
+  }
+}

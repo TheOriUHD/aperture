@@ -229,6 +229,12 @@ func (s *Server) handleExtPanels(w http.ResponseWriter, r *http.Request) {
 			for _, p := range m.UI.Panels {
 				out = append(out, map[string]any{
 					"extId": ex.ID, "extName": ex.Name, "slot": p.Slot, "entry": p.Entry, "title": p.Title,
+					// Corner a player-osd widget asks for; empty for every other slot.
+					"anchor": p.Anchor,
+					// Icon path for slots that render a control rather than a card: a
+					// player-toolbar entry is an icon button, so it needs the extension's
+					// own PNG the same way the nav rail does.
+					"icon": panelIcon(ex.ID, m),
 					// The camera grant gates a camera-detail panel's PRESENCE: a specific
 					// grant makes it render only on those cameras; an empty grant (an "all"
 					// request, or no camera request — a pure-UI control) renders everywhere.
@@ -573,4 +579,17 @@ func chownR(dir string, uid int) {
 		}
 		return nil
 	})
+}
+
+// panelIcon is the URL of an extension's icon, or "" when it ships none. Mirrors
+// the path built for the nav rail (ext_manager.go) — the icon is served as an
+// <img> from the CSP'd asset route, never inlined as markup.
+func panelIcon(extID string, m *ext.Manifest) string {
+	if m == nil || m.Icon == "" {
+		return ""
+	}
+	if _, err := m.Validate(); err != nil {
+		return ""
+	}
+	return "/ext/" + extID + "/" + m.Icon
 }

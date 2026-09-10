@@ -1,0 +1,76 @@
+{
+  "manifest": 1,
+  "id": "com.example.eufy-control",
+  "name": "Eufy Control",
+  "version": "0.2.0",
+  "author": "Aperture",
+  "description": "Pan/tilt and device control for Eufy cameras, through a eufy-security-ws server on your network. Adds a jog wheel over the picture and a device menu to the player toolbar.",
+  "minApiVersion": "v1",
+  "permissions": {
+    "data": {
+      "cameras": "read"
+    },
+    "cameras": "all",
+    "network": [
+      "{{setting:ws_url}}",
+      "http://127.0.0.1:8787"
+    ]
+  },
+  "settings": [
+    {
+      "key": "ws_url",
+      "label": "eufy-security-ws address",
+      "type": "url",
+      "required": true,
+      "placeholder": "http://127.0.0.1:3000",
+      "help": "Address of the eufy-security-ws bridge. On this deployment it is hosted locally as the eufy-security-ws service, so leave this as http://127.0.0.1:3000. Use http:// (not ws://) — the extension opens the WebSocket itself. Your Eufy credentials live in that service, never in this extension."
+    },
+    {
+      "key": "devices",
+      "label": "Camera mapping",
+      "type": "group",
+      "help": "Which Eufy device each Aperture camera is. The serial number is shown in the Eufy app under device settings.",
+      "fields": [
+        {
+          "key": "camera",
+          "label": "Aperture camera",
+          "type": "camera"
+        },
+        {
+          "key": "serial",
+          "label": "Eufy serial number",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "key": "step_ms",
+      "label": "Jog step (ms)",
+      "type": "number",
+      "default": 500,
+      "help": "How long one nudge of the jog wheel moves the camera. Eufy pans in timed bursts rather than to an angle, so this is the unit of movement."
+    }
+  ],
+  "ui": {
+    "panels": [
+      {
+        "slot": "player-osd",
+        "entry": "ui/jog.html",
+        "title": "Pan / tilt",
+        "anchor": "bottom-left"
+      },
+      {
+        "slot": "player-toolbar",
+        "entry": "ui/menu.html",
+        "title": "Eufy"
+      }
+    ]
+  },
+  "backend": {
+    "entry": "backend/main.ts",
+    "denoVersion": "2"
+  },
+  "update": {
+    "url": "http://127.0.0.1:8975/eufy-control/manifest.json"
+  }
+}

@@ -11,10 +11,13 @@ package reolink
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,6 +34,7 @@ type Client struct {
 	mu      sync.Mutex
 	token   string
 	expires time.Time
+	scheme  string // "https" or "http", learned on first contact
 }
 
 func New(host, user, pass string, timeout time.Duration) *Client {
@@ -39,7 +43,26 @@ func New(host, user, pass string, timeout time.Duration) *Client {
 	}
 	return &Client{
 		Host: host, User: user, Pass: pass,
-		HTTP: &http.Client{Timeout: timeout, Transport: &http.Transport{DisableKeepAlives: true}},
+		HTTP: &http.Client{
+			Timeout: timeout,
+			Transport: &http.Transport{
+				DisableKeepAlives: true,
+				// A camera's certificate CANNOT be verified, and no amount of
+				// configuration changes that: it is self-signed, for a LAN address,
+				// with no IP SANs — and no public CA will ever vouch for
+				// 192.168.x.y. Refusing it does not make anything safer, it just
+				// means the feature never works. What HTTPS still buys here is
+				// confidentiality for the camera password on the wire, which plain
+				// HTTP does not, so we keep TLS and drop only the identity check.
+				// The peer is one LAN hop away at an address the operator typed in.
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec G402
+			},
+			// Current firmware answers http:// with a redirect to https://. Go turns
+			// a redirected POST into a GET, which would quietly break every command
+			// while looking like a malformed reply, so redirects are never followed —
+			// the scheme is resolved explicitly instead (see post).
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 	}
 }
 
@@ -53,12 +76,62 @@ type apiResp struct {
 	} `json:"error"`
 }
 
+// post sends one API call, resolving the camera's scheme on first contact.
+//
+// Firmware varies: older cameras serve the API over http, current ones force https
+// and answer http with a redirect. Rather than guess, try the remembered scheme
+// first and fall back to the other one, then remember whichever answered. That costs
+// one extra request once per client, and none afterwards.
 func (c *Client) post(ctx context.Context, query string, payload any) ([]apiResp, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	url := "http://" + c.Host + "/cgi-bin/api.cgi?" + query
+	var lastErr error
+	for _, scheme := range c.schemes() {
+		out, err := c.postVia(ctx, scheme, query, body)
+		if err == nil {
+			c.rememberScheme(scheme)
+			return out, nil
+		}
+		// A reply the camera actually produced (an API error) is the answer; only a
+		// transport failure or a redirect means "wrong scheme, try the other one".
+		if !errors.Is(err, errWrongScheme) {
+			return out, err
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("the camera did not answer on http or https")
+	}
+	return nil, lastErr
+}
+
+// errWrongScheme marks a failure that justifies retrying on the other scheme.
+var errWrongScheme = errors.New("wrong scheme")
+
+func (c *Client) schemes() []string {
+	c.mu.Lock()
+	known := c.scheme
+	c.mu.Unlock()
+	switch known {
+	case "https":
+		return []string{"https", "http"}
+	case "http":
+		return []string{"http", "https"}
+	default:
+		return []string{"https", "http"} // current firmware first
+	}
+}
+
+func (c *Client) rememberScheme(s string) {
+	c.mu.Lock()
+	c.scheme = s
+	c.mu.Unlock()
+}
+
+func (c *Client) postVia(ctx context.Context, scheme, query string, body []byte) ([]apiResp, error) {
+	url := scheme + "://" + c.Host + "/cgi-bin/api.cgi?" + query
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -67,15 +140,24 @@ func (c *Client) post(ctx context.Context, query string, payload any) ([]apiResp
 	req.Close = true
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errWrongScheme, err)
 	}
 	defer res.Body.Close()
+	// A redirect means this scheme is not where the API lives.
+	if res.StatusCode >= 300 && res.StatusCode < 400 {
+		return nil, fmt.Errorf("%w: redirected to %s", errWrongScheme, res.Header.Get("Location"))
+	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
 		return nil, err
 	}
 	var out []apiResp
 	if err := json.Unmarshal(raw, &out); err != nil {
+		// An HTML error page is what the wrong scheme/port looks like when the camera
+		// does not bother redirecting; a genuine API reply is always JSON.
+		if strings.Contains(strings.ToLower(string(raw)), "<html") {
+			return nil, fmt.Errorf("%w: got an HTML page, not the API", errWrongScheme)
+		}
 		return nil, fmt.Errorf("the camera returned an unexpected response")
 	}
 	if len(out) > 0 && out[0].Error != nil {

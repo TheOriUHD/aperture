@@ -99,3 +99,54 @@ func TestSupervisorStopAllDrains(t *testing.T) {
 	waitState(t, s, "c", StateStopped, 3*time.Second)
 	waitState(t, s, "d", StateStopped, 3*time.Second)
 }
+
+// TestSupervisorRestartDuringStopWindow pins the restart race that left an
+// extension permanently stopped after an update.
+//
+// Stop is asynchronous: it cancels the context and returns, but supervise is
+// parked in cmd.Run and keeps reporting `running` until the process actually
+// exits — up to stopGrace later, and longer for a child that ignores SIGTERM.
+// Every restart path in the manager (bundle update, settings change, file edit)
+// is Stop-then-Start, so a Start issued in that window used to see `running` and
+// no-op. The old process then died and the extension sat stopped with nothing
+// logged, recoverable only by a manual disable/enable.
+func TestSupervisorRestartDuringStopWindow(t *testing.T) {
+	s := newTestSupervisor()
+	// Ignore SIGTERM and keep the shell alive, so the child is still `running`
+	// when Start arrives and only exits at the SIGKILL that stopGrace schedules.
+	s.stopGrace = 150 * time.Millisecond
+	const stubborn = "trap '' TERM; while :; do sleep 0.02; done"
+
+	s.Start(Spec{ID: "r", Entry: stubborn})
+	waitState(t, s, "r", StateRunning, 3*time.Second)
+
+	s.Stop("r")
+	// The window under test: the child has been told to stop but has not exited,
+	// so it still reads `running`. If this is ever not true the test is no longer
+	// exercising the race and must be revisited rather than silently passing.
+	if st, _ := s.Status("r"); st != StateRunning {
+		t.Fatalf("precondition: want the cancelled child to still read %q, got %q", StateRunning, st)
+	}
+	s.Start(Spec{ID: "r", Entry: "echo restarted; sleep 30"})
+
+	// The restart must take effect: previously Start returned without doing
+	// anything and the extension settled on stopped forever.
+	waitState(t, s, "r", StateRunning, 5*time.Second)
+	got := false
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline) && !got; time.Sleep(5 * time.Millisecond) {
+		for _, l := range s.Logs("r") {
+			if strings.Contains(l, "restarted") {
+				got = true
+			}
+		}
+	}
+	if !got {
+		t.Fatalf("expected the REPLACEMENT child to be running, logs: %v", s.Logs("r"))
+	}
+	// The predecessor winding down must not clobber the live child's state.
+	time.Sleep(300 * time.Millisecond)
+	if st, _ := s.Status("r"); st != StateRunning {
+		t.Fatalf("after the old child exited, state=%q, want %q", st, StateRunning)
+	}
+	s.Stop("r")
+}

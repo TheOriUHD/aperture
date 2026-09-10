@@ -59,6 +59,8 @@ import { useSite, useWeatherRange } from "../hooks/useEnvironment";
 import { usePrefs } from "../lib/prefs";
 import { api } from "../lib/api";
 import { warmLive, stopWarmLive } from "../lib/liveWarm";
+import { ExtensionToolbar, ExtensionOSD } from "../ext/PlayerExtensions";
+import { onLiveResume } from "../lib/liveResume";
 import { fmtTimeSec, fmtDate } from "../lib/format";
 import { wallToOffset, offsetToWall, type Seg } from "../lib/playlist";
 import type { MotionEvent } from "../lib/types";
@@ -115,6 +117,15 @@ export function Playback() {
     Math.min(ZOOMS.length - 1, Math.max(0, prefs.timelineZoom ?? ZOOM_DEFAULT)),
   );
   const [paused, setPaused] = useState(false);
+  // Why recorded playback failed, surfaced on the player instead of leaving a
+  // silent black rectangle. hls.js reports every failure through its ERROR
+  // event; with no handler attached those were swallowed and the only symptom
+  // was black video, which is close to undiagnosable from the outside.
+  const [playerError, setPlayerError] = useState<string | null>(null);
+  // Bumping this rebuilds the hls.js instance. It is the watchdog's last escalation:
+  // without it, a wedged player can never be recreated, because every same-day seek
+  // leaves the HLS effect's dependencies untouched.
+  const [playerNonce, setPlayerNonce] = useState(0);
 
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const [camerasOpen, setCamerasOpen] = useState(false);
@@ -243,13 +254,23 @@ export function Playback() {
     setMultiStartId(null);
   }
 
-  // Keep a live connection warm for the selected camera the whole time we're on
-  // this screen, so scrubbing back to the live edge is instant (the visible
-  // player borrows the already-connected stream) instead of renegotiating.
+  // Keep a live connection warm for the selected camera so returning to the live edge is
+  // instant (the visible player borrows the already-connected stream) instead of
+  // renegotiating.
+  //
+  // Only while actually live, though. Warming during recorded playback ran a SECOND
+  // full-resolution decode of the same camera — in a hidden 2px element kept deliberately
+  // visible so the decoder would not suspend — for the entire scrubbing session, competing
+  // with the HLS decode for exactly the CPU and bandwidth playback needs. Returning to
+  // live re-warms immediately, so the cost of not warming is one renegotiation.
   useEffect(() => {
+    if (!isLive) {
+      stopWarmLive();
+      return;
+    }
     warmLive(selected?.id, selected?.enabled ?? false);
     return () => stopWarmLive();
-  }, [selected?.id, selected?.enabled]);
+  }, [isLive, selected?.id, selected?.enabled]);
 
   const followingToday = dayStart === startOfDay(nowMs);
 
@@ -321,23 +342,182 @@ export function Playback() {
     if (!video) return;
     const url = `/api/v1/cameras/${selected.id}/hls?from=${dayStart}&to=${dayEnd}`;
     if (Hls.isSupported()) {
-      const hls = new Hls({ maxBufferLength: 30, enableWorker: true });
+      // Where in the day's timeline this attach should begin. Handed to hls.js as
+      // startPosition rather than assigned to video.currentTime later: at
+      // MANIFEST_PARSED the element is still HAVE_NOTHING with nothing buffered,
+      // and per the HTML spec assigning currentTime then only sets the *default
+      // playback start position* and fires no `seeking` event. hls.js never sees
+      // it and keeps loading from 0 — which on a 24h playlist is midnight, hours
+      // from the playhead, so the picture stays black until some later seek
+      // happens to nudge it. That was the "works only if I scrub a bit" bug.
+      const startAt = wallToOffset(segmentsRef.current, selectedRef.current);
+      const hls = new Hls({
+        maxBufferLength: 30,
+        enableWorker: true,
+        startPosition: startAt,
+        // Recorded footage has real holes where the recorder restarted. hls.js's 0.1s
+        // default is far too tight for them, and its nudge budget is cumulative, not
+        // per-try: nudgeOffset*(1+2+3) reaches only 0.6s before it declares a fatal
+        // stall, so any hole over 0.6s was guaranteed terminal. Below 0.5s a hole is
+        // skipped unconditionally; above it, hls.js must first reconcile playlist time
+        // against buffered PTS, which is exactly what fails on a gappy archive.
+        // Kept at 0.5 rather than higher because the same value drives load scheduling
+        // (getFwdBufferInfoAtPos), and a large value starts under-buffering.
+        maxBufferHole: 0.5,
+        nudgeOffset: 0.2,
+        nudgeMaxRetry: 10,
+        maxFragLookUpTolerance: 0.5,
+        highBufferWatchdogPeriod: 1,
+      });
       hlsRef.current = hls;
-      hls.loadSource(url);
-      hls.attachMedia(video);
+      setPlayerError(null);
+      // Recover, then explain. A fatal network error is usually a transient
+      // fetch; a fatal media error is usually a decoder that rejected an append
+      // and leaves the element black forever unless we rebuild the buffer.
+      // hls.js only offers these once each per incident, so count attempts and
+      // stop rather than loop.
+      let netRetries = 0;
+      let mediaRetries = 0;
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        const where = `${data.type}/${data.details}`;
+        if (!data.fatal) {
+          console.warn("[aperture] hls non-fatal", where, data);
+          return;
+        }
+        console.error("[aperture] hls FATAL", where, data);
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && netRetries < 3) {
+          netRetries++;
+          hls.startLoad();
+          return;
+        }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRetries < 2) {
+          mediaRetries++;
+          hls.recoverMediaError();
+          return;
+        }
+        setPlayerError(where + (data.reason ? ` — ${data.reason}` : ""));
+      });
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.currentTime = wallToOffset(segmentsRef.current, selectedRef.current);
         void video.play().catch(() => undefined);
       });
+      // Budgets are per-incident, not per-lifetime. Without this reset, three unrelated
+      // blips spread over an hour leave nothing for the fourth and playback is dead for
+      // the rest of the session.
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        netRetries = 0;
+        mediaRetries = 0;
+      });
+      // Belt and braces: once the element actually has metadata a currentTime
+      // assignment is a real seek that hls.js observes. If startPosition did not
+      // land us within a second of the target, correct it here rather than
+      // leaving the viewer parked somewhere else in the day.
+      const settlePosition = () => {
+        const want = wallToOffset(segmentsRef.current, selectedRef.current);
+        if (Number.isFinite(want) && Math.abs(video.currentTime - want) > 1) {
+          video.currentTime = want;
+        }
+      };
+      video.addEventListener("loadedmetadata", settlePosition);
+      // Listeners are attached BEFORE loadSource: manifest loading is an async
+      // XHR that can complete before a later-registered listener exists.
+      hls.loadSource(url);
+      hls.attachMedia(video);
       return () => {
+        video.removeEventListener("loadedmetadata", settlePosition);
         hls.destroy();
         hlsRef.current = null;
       };
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = url;
+    } else {
+      setPlayerError("this browser cannot play HLS");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLive, selected?.id, dayStart, segments.length > 0]);
+  }, [isLive, selected?.id, dayStart, segments.length > 0, playerNonce]);
+
+  // Where the viewer asked to be, in wall-clock ms. A seek is an intent that has to be
+  // confirmed, not a fire-and-forget assignment: while the element is HAVE_NOTHING an
+  // assignment to currentTime only sets the *default playback start position*, fires no
+  // `seeking`, and reads back the value you wrote — so it looks like it worked, hls.js
+  // never learns about it, and the picture never arrives.
+  const seekIntent = useRef<number | null>(null);
+
+  // Apply a wall-clock seek to the recorded player and remember the intent so the
+  // watchdog can confirm it landed.
+  function applySeek(wallMs: number) {
+    const v = playerVideoRef.current;
+    if (!v || !hlsRef.current) return;
+    seekIntent.current = wallMs;
+    const want = wallToOffset(segmentsRef.current, wallMs);
+    if (!Number.isFinite(want)) return;
+    v.currentTime = want;
+    void v.play().catch(() => undefined);
+  }
+
+  // Playback watchdog — the recorded-mode counterpart of LiveStream.startWatchdog.
+  // Recorded playback previously had no liveness check at all, so every silent failure
+  // (a seek discarded because the element was not ready, a fragment that never buffered,
+  // an exhausted retry budget) was terminal: hls.js emits nothing when its buffer is
+  // empty, so no error handler ever fired and jiggling the scrubber could not help,
+  // because a same-day seek re-runs nothing.
+  useEffect(() => {
+    if (isLive || !selected) return;
+    let lastTime = -1;
+    let stalledTicks = 0;
+    const id = window.setInterval(() => {
+      const v = playerVideoRef.current;
+      if (!v || v.paused || scrubbing.current) {
+        stalledTicks = 0;
+        return;
+      }
+      const intent = seekIntent.current;
+      if (intent !== null) {
+        // Confirm the seek landed. If the element swallowed it, re-apply now that it has
+        // had time to reach HAVE_METADATA.
+        const want = wallToOffset(segmentsRef.current, intent);
+        if (Number.isFinite(want) && Math.abs(v.currentTime - want) > 2 && v.readyState > 0) {
+          v.currentTime = want;
+          void v.play().catch(() => undefined);
+          return;
+        }
+        if (v.readyState > 0) seekIntent.current = null;
+      }
+      if (v.currentTime === lastTime) {
+        stalledTicks++;
+        // Escalate: nudge past a hole, then make hls.js reload, then rebuild it.
+        if (stalledTicks === 2) {
+          v.currentTime = v.currentTime + 0.25;
+          void v.play().catch(() => undefined);
+        } else if (stalledTicks === 4) {
+          hlsRef.current?.startLoad();
+        } else if (stalledTicks >= 6) {
+          stalledTicks = 0;
+          setPlayerNonce((n) => n + 1);
+        }
+      } else {
+        stalledTicks = 0;
+        // Progress means whatever went wrong is over; stop showing a stale error.
+        setPlayerError((e) => (e === null ? e : null));
+      }
+      lastTime = v.currentTime;
+    }, 2500);
+    return () => window.clearInterval(id);
+  }, [isLive, selected?.id, playerNonce]);
+
+  // A backgrounded PWA comes back with a dead hls.js instance and nothing notices.
+  // Live already handles this through the same coordinator.
+  useEffect(() => {
+    if (isLive) return;
+    return onLiveResume(() => {
+      const v = playerVideoRef.current;
+      if (!v || v.paused) return;
+      void v.play().catch(() => undefined);
+      window.setTimeout(() => {
+        const el = playerVideoRef.current;
+        if (el && !el.paused && el.readyState < 3) setPlayerNonce((n) => n + 1);
+      }, 700);
+    });
+  }, [isLive]);
 
   const scrubbing = useRef(false);
   const snapAnim = useRef(0);
@@ -420,11 +600,7 @@ export function Playback() {
     if (followingRef.current) {
       setFollowing(false);
     } else {
-      const v = playerVideoRef.current;
-      if (v && hlsRef.current) {
-        v.currentTime = wallToOffset(segmentsRef.current, selectedRef.current);
-        void v.play().catch(() => undefined);
-      }
+      applySeek(selectedRef.current);
     }
   }
   // Wheel/continuous scrubs have no discrete end, so settle after an idle gap.
@@ -488,11 +664,7 @@ export function Playback() {
     setSelectedState(c);
     selectedRef.current = c;
     if (!wasFollowing) {
-      const v = playerVideoRef.current;
-      if (v && hlsRef.current) {
-        v.currentTime = wallToOffset(segmentsRef.current, c);
-        void v.play().catch(() => undefined);
-      }
+      applySeek(c);
     }
   }
 
@@ -678,23 +850,41 @@ export function Playback() {
         quality={quality}
       />
     ) : (
-      <video
-        ref={playerVideoRef}
-        playsInline
-        muted={muted}
-        className={mobileFs ? "bg-black" : "absolute inset-0 h-full w-full object-contain bg-black"}
-        style={mobileFs ? fsVideoStyle : undefined}
-        onTimeUpdate={(e) => {
-          if (scrubbing.current) return;
-          const wall = offsetToWall(segmentsRef.current, e.currentTarget.currentTime);
-          if (wall) {
-            setSelectedState(wall);
-            selectedRef.current = wall;
-          }
-        }}
-        onPlay={() => setPaused(false)}
-        onPause={() => setPaused(true)}
-      />
+      <>
+        <video
+          ref={playerVideoRef}
+          playsInline
+          muted={muted}
+          className={mobileFs ? "bg-black" : "absolute inset-0 h-full w-full object-contain bg-black"}
+          style={mobileFs ? fsVideoStyle : undefined}
+          onTimeUpdate={(e) => {
+            if (scrubbing.current) return;
+            const wall = offsetToWall(segmentsRef.current, e.currentTarget.currentTime);
+            // Deliberately NOT filtered against the loaded day. A guard here is
+            // self-latching: `dayStart` derives from `selectedState`, which this
+            // handler is the primary writer of, so one rejection freezes the clock
+            // and every later rejection follows. Playback wandering into the
+            // neighbouring day is handled by keying the player on the loaded window
+            // instead (see the HLS effect).
+            if (wall !== null) {
+              setSelectedState(wall);
+              selectedRef.current = wall;
+            }
+          }}
+          onError={(e) => {
+            const err = e.currentTarget.error;
+            console.error("[aperture] <video> error", err?.code, err?.message);
+            if (err) setPlayerError(`video error ${err.code}${err.message ? ` — ${err.message}` : ""}`);
+          }}
+          onPlay={() => setPaused(false)}
+          onPause={() => setPaused(true)}
+        />
+        {playerError && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-black/70 px-3 py-2 text-center font-mono text-[11px] text-rec">
+            playback failed: {playerError}
+          </div>
+        )}
+      </>
     );
   }
 
@@ -1169,6 +1359,11 @@ export function Playback() {
                   </div>
                 </div>
               )}
+              {/* Extension toolbar entries come LAST, after every first-party
+                  control. Extensions append; they never reorder or displace
+                  what shipped. With none installed this renders nothing and the
+                  cluster is byte-identical. */}
+              <ExtensionToolbar cameraId={selected.id} />
             </div>
           )}
           {region && !gridOpen && (
@@ -1185,6 +1380,11 @@ export function Playback() {
           {selected && !multiActive && !gridOpen && (
             <ViewerZoom zoom={zoom} pan={pan} onZoom={setZoom} onPan={setPan} />
           )}
+          {/* Extension OSD widgets float over the picture. Mounted OUTSIDE the
+              digital-zoom wrapper deliberately: a control like a jog wheel should
+              stay put and stay the same size while the operator zooms the image,
+              unlike detection boxes, which must track it. */}
+          {selected && !multiActive && !gridOpen && <ExtensionOSD cameraId={selected.id} />}
         </div>
 
         {/* control bar (below the video) */}

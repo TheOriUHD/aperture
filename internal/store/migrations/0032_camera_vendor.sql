@@ -1,0 +1,13 @@
+-- An EXPLICIT per-camera vendor marking, so vendor-specific local controls (today
+-- Reolink's LED spotlight and IR illuminators) are a stated fact about the camera
+-- rather than something inferred at request time.
+--
+-- They used to be gated purely on a live ONVIF probe reporting the manufacturer.
+-- That made the controls disappear whenever the probe could not run — the camera
+-- offline, ONVIF turned off, credentials edited — so a feature the operator had
+-- been using silently vanished after an unrelated settings change. A stored marking
+-- survives all of that; the probe remains as the way to SUGGEST the value.
+--
+-- Free text rather than a boolean so a second vendor does not need a second column.
+-- '' means "not marked"; the probe may still identify the camera at runtime.
+ALTER TABLE cameras ADD COLUMN vendor TEXT NOT NULL DEFAULT '';

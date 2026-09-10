@@ -7,9 +7,13 @@
   "description": "Control a camera's room light in Home Assistant from its camera view — on/off, brightness, and colour — with the server and camera→light mapping you configure.",
   "minApiVersion": "v1",
   "permissions": {
-    "data": { "cameras": "read" },
+    "data": {
+      "cameras": "read"
+    },
     "cameras": "all",
-    "network": ["{{setting:ha_url}}"]
+    "network": [
+      "{{setting:ha_url}}"
+    ]
   },
   "settings": [
     {
@@ -33,15 +37,32 @@
       "type": "group",
       "help": "Map each camera to the Home Assistant light entity to control while you are viewing it.",
       "fields": [
-        { "key": "camera", "label": "Camera", "type": "camera", "required": true },
-        { "key": "entity", "label": "Light entity", "type": "text", "required": true, "placeholder": "light.hallway" }
+        {
+          "key": "camera",
+          "label": "Camera",
+          "type": "camera",
+          "required": true
+        },
+        {
+          "key": "entity",
+          "label": "Light entity",
+          "type": "text",
+          "required": true,
+          "placeholder": "light.hallway"
+        }
       ]
     }
   ],
   "ui": {
     "panels": [
-      { "slot": "camera-detail", "entry": "ui/panel.html", "title": "Room light" }
+      {
+        "slot": "camera-detail",
+        "entry": "ui/panel.html",
+        "title": "Room light"
+      }
     ]
   },
-  "update": { "url": "https://example.com/ha-room-lights/manifest.json" }
+  "update": {
+    "url": "http://127.0.0.1:8975/ha-room-lights/manifest.json"
+  }
 }

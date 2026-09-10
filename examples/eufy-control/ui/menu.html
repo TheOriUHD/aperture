@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!--
+  Eufy Control — device menu, rendered into Aperture's `player-toolbar` slot.
+
+  The host draws the icon button and the dropdown chrome; this document is only the
+  dropdown's contents. So: transparent body, no border, no title bar — the host has
+  already drawn all of that, and repeating it would double it.
+-->
+<style>
+  html,
+  body {
+    margin: 0;
+    background: transparent;
+    color: #fff;
+    font: 12px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .body {
+    padding: 8px 12px 12px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 0;
+  }
+  .k {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11px;
+  }
+  .v {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+  }
+  .ok {
+    background: #3fce7c;
+  }
+  .bad {
+    background: #f0494e;
+  }
+  button {
+    all: unset;
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: 7px 0;
+    margin-top: 8px;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    font-size: 11px;
+  }
+  button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .danger:hover:not(:disabled) {
+    background: rgba(240, 73, 78, 0.35);
+  }
+  .hint {
+    margin-top: 8px;
+    font-size: 10px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.5);
+  }
+</style>
+</head>
+<body>
+
+<div class="body">
+  <div class="row"><span class="k">Server</span><span class="v" id="conn">…</span></div>
+  <div class="row"><span class="k">Device</span><span class="v" id="dev">…</span></div>
+  <button id="alarm" class="danger" disabled>Sound alarm (10s)</button>
+  <button id="stop" disabled>Stop alarm</button>
+  <div class="hint" id="hint"></div>
+</div>
+
+<script>
+  const ap = window.aperture;
+  const CONTROL = "http://127.0.0.1:8787";
+  const $ = (id) => document.getElementById(id);
+  let serial = null;
+
+  function fit() {
+    ap.resize(document.documentElement.scrollHeight);
+  }
+
+  async function resolveSerial() {
+    // A `group` setting arrives as an ARRAY of row objects, not as JSON text
+    // (docs/extensions/sdk.md) — JSON.parse on it throws.
+    const rows = await ap.settings.get("devices");
+    if (!Array.isArray(rows)) return null;
+    const row = rows.find((r) => r && r.camera === ap.cameraId);
+    return row && row.serial ? String(row.serial) : null;
+  }
+
+  async function init() {
+    serial = await resolveSerial();
+    let st = null;
+    try {
+      const res = await ap.net.fetch(
+        CONTROL + "/status" + (serial ? "?serial=" + encodeURIComponent(serial) : ""),
+        { method: "GET" },
+      );
+      st = res.ok ? JSON.parse(res.body) : null;
+    } catch {
+      st = null;
+    }
+
+    if (!st) {
+      $("conn").innerHTML = '<span class="dot bad"></span>unreachable';
+      $("hint").textContent =
+        "The Eufy Control backend is not responding. Check the extension is enabled and its eufy-security-ws address is set.";
+      return fit();
+    }
+
+    $("conn").innerHTML = st.connected
+      ? '<span class="dot ok"></span>connected'
+      : '<span class="dot bad"></span>' + (st.lastError || "connecting…");
+
+    if (!serial) {
+      $("dev").textContent = "not mapped";
+      $("hint").textContent =
+        "This camera is not mapped to a Eufy device. Add the pairing in the extension's settings.";
+      return fit();
+    }
+
+    const dev = (st.devices || []).find((d) => d.serial === serial);
+    $("dev").textContent = dev ? dev.name : serial;
+
+    const caps = st.capabilities || {};
+    $("alarm").disabled = !caps.alarm;
+    $("stop").disabled = !caps.alarm;
+    if (!caps.alarm) $("hint").textContent = "This device reports no alarm command.";
+
+    const call = async (btn, body) => {
+      btn.disabled = true;
+      try {
+        await ap.net.fetch(CONTROL + "/alarm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ serial, ...body }),
+        });
+        $("hint").textContent = "";
+      } catch (err) {
+        $("hint").textContent = String(err.message || err);
+      } finally {
+        btn.disabled = false;
+        fit();
+      }
+    };
+    $("alarm").addEventListener("click", () => call($("alarm"), { seconds: 10 }));
+    $("stop").addEventListener("click", () => call($("stop"), { off: true }));
+    fit();
+  }
+
+  init().catch((err) => {
+    $("hint").textContent = String(err.message || err);
+    fit();
+  });
+</script>
+</body>
+</html>

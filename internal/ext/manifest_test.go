@@ -75,24 +75,24 @@ func TestManifestWriteImpliesRead(t *testing.T) {
 
 func TestManifestRejections(t *testing.T) {
 	cases := map[string]string{
-		"unknown top-level field (strict)": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"bogus":1}`,
-		"wrong manifest version":           `{"manifest":9,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"}}`,
-		"bad id (not reverse-DNS)":         `{"manifest":1,"id":"notdns","name":"N","version":"1.0.0","backend":{"entry":"m.ts"}}`,
-		"bad version":                      `{"manifest":1,"id":"a.b","name":"N","version":"1.x","backend":{"entry":"m.ts"}}`,
-		"no ui and no backend":             `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0"}`,
-		"unknown data domain":              `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"data":{"nope":"read"}}}`,
+		"unknown top-level field (strict)":    `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"bogus":1}`,
+		"wrong manifest version":              `{"manifest":9,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"}}`,
+		"bad id (not reverse-DNS)":            `{"manifest":1,"id":"notdns","name":"N","version":"1.0.0","backend":{"entry":"m.ts"}}`,
+		"bad version":                         `{"manifest":1,"id":"a.b","name":"N","version":"1.x","backend":{"entry":"m.ts"}}`,
+		"no ui and no backend":                `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0"}`,
+		"unknown data domain":                 `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"data":{"nope":"read"}}}`,
 		"un-grantable value (coverage write)": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"data":{"coverage":"write"}}}`,
-		"bad alarm value":                  `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"alarm":"disarm"}}`,
-		"bad network url":                  `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"network":["not a url"]}}`,
-		"bad camera request (string)":      `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"cameras":"some"}}`,
-		"empty camera id":                  `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"cameras":["ok",""]}}`,
-		"unknown setting type":             `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"k","label":"L","type":"colour"}]}`,
-		"select without options":           `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"k","label":"L","type":"select"}]}`,
-		"duplicate setting key":            `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"k","label":"A","type":"text"},{"key":"k","label":"B","type":"text"}]}`,
-		"bad setting key charset":          `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"Bad Key","label":"L","type":"text"}]}`,
-		"unknown ui slot":                  `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","ui":{"panels":[{"slot":"nope","entry":"ui/x.html"}]}}`,
-		"entry path traversal":             `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"../escape.ts"}}`,
-		"entry absolute path":              `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"/etc/passwd"}}`,
+		"bad alarm value":                     `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"alarm":"disarm"}}`,
+		"bad network url":                     `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"network":["not a url"]}}`,
+		"bad camera request (string)":         `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"cameras":"some"}}`,
+		"empty camera id":                     `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"permissions":{"cameras":["ok",""]}}`,
+		"unknown setting type":                `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"k","label":"L","type":"colour"}]}`,
+		"select without options":              `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"k","label":"L","type":"select"}]}`,
+		"duplicate setting key":               `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"k","label":"A","type":"text"},{"key":"k","label":"B","type":"text"}]}`,
+		"bad setting key charset":             `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},"settings":[{"key":"Bad Key","label":"L","type":"text"}]}`,
+		"unknown ui slot":                     `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","ui":{"panels":[{"slot":"nope","entry":"ui/x.html"}]}}`,
+		"entry path traversal":                `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"../escape.ts"}}`,
+		"entry absolute path":                 `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"/etc/passwd"}}`,
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -271,5 +271,52 @@ func TestCheckNoRemoteImports(t *testing.T) {
 	}
 	if fileScheme := CheckNoRemoteImports(`import x from "file:///etc/passwd";`); len(fileScheme) != 1 {
 		t.Fatalf("file: scheme should be rejected, got %v", fileScheme)
+	}
+}
+
+// A repeatable group can declare egress for every row the user configures. Without
+// this an extension that talks to N user-named devices could not declare its network
+// at all: a static list cannot know the addresses, and a plain url setting holds one.
+func TestNetworkHostFromGroupColumn(t *testing.T) {
+	const ok = `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},
+	  "permissions":{"network":["{{setting:cams.address}}"]},
+	  "settings":[{"key":"cams","label":"Cameras","type":"group","fields":[
+	    {"key":"camera","label":"Camera","type":"camera"},
+	    {"key":"address","label":"Address","type":"url"}]}]}`
+	m, err := Parse([]byte(ok))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	d, err := m.Validate()
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if len(d.NetSettings) != 1 || d.NetSettings[0] != "cams.address" {
+		t.Fatalf("NetSettings = %v, want [cams.address]", d.NetSettings)
+	}
+
+	bad := map[string]string{
+		"column is not a url": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},
+		  "permissions":{"network":["{{setting:cams.name}}"]},
+		  "settings":[{"key":"cams","label":"C","type":"group","fields":[{"key":"name","label":"N","type":"text"}]}]}`,
+		"column does not exist": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},
+		  "permissions":{"network":["{{setting:cams.nope}}"]},
+		  "settings":[{"key":"cams","label":"C","type":"group","fields":[{"key":"address","label":"A","type":"url"}]}]}`,
+		"base setting is not a group": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},
+		  "permissions":{"network":["{{setting:u.address}}"]},
+		  "settings":[{"key":"u","label":"U","type":"url"}]}`,
+		"group does not exist": `{"manifest":1,"id":"a.b","name":"N","version":"1.0.0","backend":{"entry":"m.ts"},
+		  "permissions":{"network":["{{setting:nope.address}}"]}}`,
+	}
+	for name, src := range bad {
+		t.Run(name, func(t *testing.T) {
+			m, err := Parse([]byte(src))
+			if err != nil {
+				return // rejected at parse is also a rejection
+			}
+			if _, err := m.Validate(); err == nil {
+				t.Fatal("expected validation to reject this network reference")
+			}
+		})
 	}
 }

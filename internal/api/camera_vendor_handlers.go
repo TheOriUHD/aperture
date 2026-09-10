@@ -11,6 +11,7 @@ import (
 
 	"github.com/TheOriUHD/aperture/internal/onvifclient"
 	"github.com/TheOriUHD/aperture/internal/reolink"
+	"github.com/TheOriUHD/aperture/internal/store"
 )
 
 // Vendor extras: controls a camera exposes through its OWN API that ONVIF does
@@ -24,6 +25,16 @@ func (s *Server) reolinkFor(ctx context.Context, camID string) (*reolink.Client,
 	_, res, err := s.onvifClientFor(camID)
 	if err != nil {
 		return nil, "", err
+	}
+	// An EXPLICIT marking is the operator's stated fact about the camera and outranks
+	// probing: it holds while the camera is offline, while ONVIF is switched off, and
+	// across unrelated settings edits. Those are exactly the cases where a probe-only
+	// gate used to make working controls disappear with no explanation.
+	if cam, cerr := s.st.GetCamera(camID); cerr == nil && cam.Vendor == store.VendorReolink {
+		if res.host == "" {
+			return nil, cam.Vendor, nil // marked, but no address to reach it on
+		}
+		return cachedReolink(camID, res.host, res.user, res.pass), cam.Vendor, nil
 	}
 	if !res.cfg.Enabled {
 		return nil, "", nil
@@ -47,6 +58,48 @@ var (
 	reolinkClients = map[string]*reolink.Client{}
 )
 
+// Reading vendor state means talking to the CAMERA, not to Aperture. A Reolink
+// serves very few concurrent sessions, and hammering its HTTP API while it is also
+// serving the RTSP stream that recording depends on can wedge it — it keeps
+// answering pings while its stream stops delivering. The UI is careful not to poll,
+// but the UI is not the only possible caller, so the floor is enforced HERE: reads
+// within vendorTTL of the last one are served from memory and never reach the
+// camera. Writes go straight through (an operator pressing a light switch must not
+// wait) and drop the entry so the next read reflects reality.
+const vendorTTL = 10 * time.Second
+
+type vendorSnapshot struct {
+	at   time.Time
+	body map[string]any
+}
+
+var (
+	vendorCacheMu sync.Mutex
+	vendorCache   = map[string]vendorSnapshot{}
+)
+
+func cachedVendorRead(camID string) (map[string]any, bool) {
+	vendorCacheMu.Lock()
+	defer vendorCacheMu.Unlock()
+	v, ok := vendorCache[camID]
+	if !ok || time.Since(v.at) > vendorTTL {
+		return nil, false
+	}
+	return v.body, true
+}
+
+func storeVendorRead(camID string, body map[string]any) {
+	vendorCacheMu.Lock()
+	defer vendorCacheMu.Unlock()
+	vendorCache[camID] = vendorSnapshot{at: time.Now(), body: body}
+}
+
+func invalidateVendorRead(camID string) {
+	vendorCacheMu.Lock()
+	defer vendorCacheMu.Unlock()
+	delete(vendorCache, camID)
+}
+
 // cachedReolink returns a per-camera client, rebuilt when the endpoint or login
 // changes so a credential edit takes effect immediately.
 func cachedReolink(camID, host, user, pass string) *reolink.Client {
@@ -69,6 +122,10 @@ func cachedReolink(camID, host, user, pass string) *reolink.Client {
 
 func (s *Server) handleGetCameraVendor(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if body, ok := cachedVendorRead(id); ok {
+		writeJSON(w, http.StatusOK, body)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	c, vendor, err := s.reolinkFor(ctx, id)
@@ -78,6 +135,7 @@ func (s *Server) handleGetCameraVendor(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{"vendor": vendor, "supported": c != nil}
 	if c == nil {
+		storeVendorRead(id, out)
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
@@ -89,11 +147,14 @@ func (s *Server) handleGetCameraVendor(w http.ResponseWriter, r *http.Request) {
 	if ir, err := c.GetIR(ctx); err == nil {
 		out["ir"] = ir
 	}
+	storeVendorRead(id, out)
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleSetCameraVendor(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	// Whatever happens below, the cached read is now stale.
+	defer invalidateVendorRead(id)
 	var req struct {
 		Spotlight *struct {
 			State  *int `json:"state"`

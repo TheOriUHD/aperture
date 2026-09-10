@@ -3,6 +3,7 @@ import { SlidersHorizontal, X, Check, Loader2, Lightbulb } from "lucide-react";
 import {
   useCameraOnvif,
   useSetCameraImaging,
+  useCameras,
   useCameraVendor,
   useSetCameraVendor,
   type OnvifImaging,
@@ -16,9 +17,13 @@ export function CameraImagingOverlay({ cameraId, VidBtn }: {
   VidBtn: React.ComponentType<{ onClick: () => void; label: string; active?: boolean; children: React.ReactNode }>;
 }) {
   const { data } = useCameraOnvif(cameraId);
+  const { data: cameras } = useCameras();
   const setImg = useSetCameraImaging();
-  // Vendor extras (Reolink spotlight/IR) — fetched only once ONVIF is on.
-  const { data: vendor } = useCameraVendor(cameraId, !!data?.enabled);
+  // Vendor extras (Reolink spotlight/IR). These do NOT go through ONVIF — they use
+  // the camera's own HTTP API — so an explicit vendor marking is enough on its own.
+  // ONVIF being on still fetches them, for a camera identified by probe alone.
+  const marked = cameras?.find((c) => c.id === cameraId)?.vendor === "reolink";
+  const { data: vendor } = useCameraVendor(cameraId, marked || !!data?.enabled);
   const setVendor = useSetCameraVendor();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<OnvifImaging | null>(null);

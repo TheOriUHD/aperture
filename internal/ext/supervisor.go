@@ -46,6 +46,7 @@ type Supervisor struct {
 	fastCrashUnder time.Duration
 	backoffBase    time.Duration
 	backoffMax     time.Duration
+	stopGrace      time.Duration
 }
 
 type State string
@@ -58,8 +59,8 @@ const (
 )
 
 const (
-	stopGrace    = 5 * time.Second // SIGTERM → SIGKILL window
-	logRingLines = 200
+	defaultStopGrace = 5 * time.Second // SIGTERM → SIGKILL window
+	logRingLines     = 200
 )
 
 // Defaults the caller (install/T1.5) applies when building a Spec. MemMB caps V8's
@@ -104,6 +105,7 @@ type child struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	logs   *lineRing
+	done   chan struct{} // closed when supervise returns, so Start can await a predecessor
 
 	mu       sync.Mutex
 	state    State
@@ -115,6 +117,7 @@ func NewSupervisor(denoPath string, log *slog.Logger) *Supervisor {
 	s := &Supervisor{
 		denoPath: denoPath, selfExe: "/proc/self/exe", log: log, children: map[string]*child{},
 		maxFastCrashes: 5, fastCrashUnder: 30 * time.Second, backoffBase: time.Second, backoffMax: 30 * time.Second,
+		stopGrace: defaultStopGrace,
 	}
 	s.argv = s.denoArgv
 	return s
@@ -137,18 +140,43 @@ func (s *Supervisor) denoArgv(spec Spec) (string, []string) {
 // already running (or starting) this is a no-op; a previously stopped or failed
 // child is replaced with a fresh run.
 func (s *Supervisor) Start(spec Spec) {
-	s.mu.Lock()
-	if c, ok := s.children[spec.ID]; ok {
-		if st, _ := c.get(); st == StateRunning || st == StateStarting {
+	// A cancelled child keeps REPORTING "running" until its process actually exits:
+	// supervise is parked in cmd.Run and only learns of the stop when Wait returns —
+	// up to stopGrace later. Every restart path (bundle update, settings change, file
+	// edit) is Stop then Start, so without this wait the Start lands inside that
+	// window, sees "running", and no-ops. The old process then dies and the extension
+	// is left permanently stopped, with no error logged anywhere and no way back
+	// except a manual disable/enable (whose human-scale delay is what made it "work").
+	waited := false
+	for {
+		s.mu.Lock()
+		c, ok := s.children[spec.ID]
+		if ok && c.ctx.Err() != nil && !waited {
 			s.mu.Unlock()
-			return
+			waited = true
+			select {
+			case <-c.done:
+			case <-time.After(s.stopGrace + time.Second): // SIGTERM→SIGKILL window, plus reaping
+			}
+			continue // re-resolve under the lock; another caller may have replaced it
 		}
+		// Only a child that has NOT been cancelled counts as already up.
+		if ok && c.ctx.Err() == nil {
+			if st, _ := c.get(); st == StateRunning || st == StateStarting {
+				s.mu.Unlock()
+				return
+			}
+		}
+		// Replacing a stale entry is safe even if its goroutine is still winding down:
+		// it only ever mutates its own child struct, which is no longer the one Status
+		// and Logs resolve to.
+		ctx, cancel := context.WithCancel(context.Background())
+		nc := &child{id: spec.ID, ctx: ctx, cancel: cancel, logs: newLineRing(logRingLines), state: StateStarting, done: make(chan struct{})}
+		s.children[spec.ID] = nc
+		s.mu.Unlock()
+		go s.supervise(nc, spec)
+		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	c := &child{id: spec.ID, ctx: ctx, cancel: cancel, logs: newLineRing(logRingLines), state: StateStarting}
-	s.children[spec.ID] = c
-	s.mu.Unlock()
-	go s.supervise(c, spec)
 }
 
 // Stop gracefully stops an extension (SIGTERM → WaitDelay → SIGKILL) but keeps its
@@ -214,6 +242,7 @@ func (s *Supervisor) Logs(id string) []string {
 }
 
 func (s *Supervisor) supervise(c *child, spec Spec) {
+	defer close(c.done)
 	backoff := s.backoffBase
 	fastCrashes := 0
 	for {
@@ -294,7 +323,7 @@ func (s *Supervisor) buildCmd(ctx context.Context, spec Spec) *exec.Cmd {
 		}
 		return nil
 	}
-	cmd.WaitDelay = stopGrace
+	cmd.WaitDelay = s.stopGrace
 	return cmd
 }
 

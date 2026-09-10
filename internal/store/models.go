@@ -53,6 +53,7 @@ type Camera struct {
 	AudioThreshold    float64 `json:"audioThreshold"`          // 0..1 loudness to trip an audio event (0 = default)
 	DetectMethod      string  `json:"detectMethod"`            // "" = inherit global; off|bridge|onnx
 	TempSensor        string  `json:"tempSensor"`              // HA sensor entity id for the overlay ("" = weather)
+	Vendor            string  `json:"vendor"`                  // explicit vendor marking ("" = unmarked); enables that vendor's local controls
 	FPS               int     `json:"fps"`
 	SortOrder         int     `json:"sortOrder"`
 	PrerollMs         int     `json:"prerollMs"`
@@ -62,6 +63,12 @@ type Camera struct {
 	CreatedAt         int64   `json:"createdAt"`
 	UpdatedAt         int64   `json:"updatedAt"`
 }
+
+// Vendor markings a camera can carry. A marking is the operator's stated fact about
+// the camera and is what enables that vendor's local controls — deliberately NOT
+// inferred from a live probe, because an inference vanishes the moment the camera
+// is unreachable, taking working controls with it.
+const VendorReolink = "reolink"
 
 // NewID returns a random 128-bit hex identifier.
 func NewID() string {

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Switch } from "./ui/Switch";
 import { usePrefs } from "../lib/prefs";
 import type { Preferences } from "../lib/types";
+import { OSD_MIN_OPACITY, OSD_MAX_OPACITY } from "../lib/osd";
 
 const ZOOM_PRESETS: { idx: number; label: string }[] = [
   { idx: 0, label: "12 hours" },
@@ -61,6 +62,41 @@ export function PreferencesSettings() {
             onChange={(v) => setPref({ timelineRibbon: v })}
             label="Weather ribbon"
           />
+        </div>
+
+        {/* One opacity for every overlay on every video — first-party badges and
+            extension OSD widgets alike. Live-previewed against a sample so the
+            choice is made by looking at it rather than at a number. */}
+        <div>
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm text-fg">{t("prefs.osd", "Overlay opacity")}</span>
+              <p className="text-xs text-fg-faint">
+                {t("prefs.osdSub", "How solid on-screen widgets look over the video")}
+              </p>
+            </div>
+            <span className="text-xs tabular-nums text-fg-faint">
+              {Math.round(prefs.osdOpacity * 100)}%
+            </span>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <input
+              type="range"
+              min={OSD_MIN_OPACITY}
+              max={OSD_MAX_OPACITY}
+              step={0.05}
+              value={prefs.osdOpacity}
+              onChange={(e) => setPref({ osdOpacity: Number(e.target.value) })}
+              className="w-full accent-brand"
+              aria-label="Overlay opacity"
+            />
+            {/* Sample tile: a scrap of "video" with a real OSD surface on it. */}
+            <div className="relative h-10 w-20 shrink-0 overflow-hidden rounded-md bg-gradient-to-br from-ink-600 via-fg-faint to-ink-700">
+              <div className="osd-surface absolute left-1 top-1 rounded px-1.5 py-0.5 text-[10px] text-white">
+                12:34
+              </div>
+            </div>
+          </div>
         </div>
 
         <div>

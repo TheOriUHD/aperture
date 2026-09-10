@@ -95,7 +95,7 @@ catalogue and consent wording in [permissions.md](permissions.md).
 | `permissions.alarm`   | string            | Only `"arm"`.                                                                       |
 | `permissions.system`  | string            | Only `"read"`.                                                                      |
 | `permissions.cameras` | `"all"` \| string[] | Camera access is **opt-in**: `"all"` (every camera, incl. future) or a list of ids (a ceiling); **omitted = no camera access**. Composed as **owner ∩ grants**. See [permissions.md](permissions.md#camera-access-is-opt-in). |
-| `permissions.network` | string[]          | Hosts a backend (`--allow-net`) or panel (`net.fetch`) may reach: a static `http(s)` URL, or `{{setting:key}}` to take the host from a `url` setting. |
+| `permissions.network` | string[]          | Hosts a backend (`--allow-net`) or panel (`net.fetch`) may reach: a static `http(s)` URL, `{{setting:key}}` to take the host from a `url` setting, or `{{setting:group.column}}` to take one host from **every row** of a `group` (see below). |
 | `permissions.storage` | bool              | `true` reserves a private, quota'd key-value namespace. Also **implied by `settings`**. |
 | `settings`            | object[]          | The extension's own settings schema (implies `storage`). See [settings.md](settings.md). |
 
@@ -145,6 +145,18 @@ A manifest must pass all of these at install (each fails with a clear message):
 - Each **`permissions.data`** domain and level must be grantable (see
   [permissions.md](permissions.md)); un-grantable or misspelled permissions are
   rejected.
+- **`permissions.network`** also accepts a **dotted** reference,
+  `{{setting:group.column}}`, where `group` names a declared `group` setting and
+  `column` a `url` field inside it. Every configured row then contributes one allowed
+  host. This is what an extension driving several user-named devices needs: a static
+  list cannot know the addresses, and a plain `url` setting holds only one. The
+  allow-list still contains exactly the addresses the user typed and nothing wider —
+  the port is part of a host identity, so the same device on another port is not
+  allowed, and a blank row marks the extension "not fully configured" rather than
+  silently changing what may be reached.
+  [`examples/tapo-control/`](../../examples/tapo-control/) uses this to reach one
+  ONVIF camera per row.
+
 - **`permissions.network`** entries are absolute `http(s)` URLs, or `{{setting:key}}`
   referencing a declared `url` setting.
 - **`permissions.cameras`** must be `"all"` or a list of ids; a camera-touching `data`

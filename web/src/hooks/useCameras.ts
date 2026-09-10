@@ -173,8 +173,17 @@ export function useCameraVendor(cameraId: string | undefined, enabled = true) {
     queryKey: ["camera-vendor", cameraId],
     queryFn: () => api.get<CameraVendor>(`/api/cameras/${cameraId}/vendor`),
     enabled: !!cameraId && enabled,
-    staleTime: 2_000,
-    refetchInterval: 4_000,
+    // DELIBERATELY NOT POLLED. Unlike every other query here, this one does not read
+    // Aperture's database — it reaches out to the CAMERA over the vendor's own HTTP
+    // API. A Reolink serves very few concurrent sessions, and polling it every few
+    // seconds alongside the RTSP pull that recording depends on is enough to wedge
+    // the camera: it keeps answering pings while its RTSP stops delivering, and
+    // recording stops. Nothing here changes on its own — the mutation below writes
+    // the applied state straight back into this cache — so there is nothing to poll
+    // for. A change made in the vendor's own app is picked up on the next mount.
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false, // never retry against a camera that is already struggling
   });
 }
 
@@ -187,8 +196,10 @@ export function useSetCameraVendor() {
       ir?: string;
     }) => api.put<CameraVendor>(`/api/cameras/${id}/vendor`, body),
     // Reflect the change immediately: the request takes about a second against a
-    // camera, and a light switch that visibly lags feels broken. The rollback and
-    // the poll below keep the optimistic value honest.
+    // camera, and a light switch that visibly lags feels broken. onSuccess below
+    // replaces the optimistic value with what the camera actually applied, and
+    // onError rolls it back — that is what keeps it honest (this query is not
+    // polled, on purpose; see above).
     onMutate: async (v) => {
       const key = ["camera-vendor", v.id];
       await qc.cancelQueries({ queryKey: key });

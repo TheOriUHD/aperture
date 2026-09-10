@@ -101,7 +101,8 @@ type cameraReq struct {
 	AudioThreshold    *float64 `json:"audioThreshold"`
 	LocationID        *string  `json:"locationId"`   // storage location for new footage ("" = default)
 	DetectMethod      *string  `json:"detectMethod"` // "" = inherit; off|bridge|onnx
-	TempSensor        *string  `json:"tempSensor"`   // HA sensor entity id ("" = weather)
+	TempSensor        *string  `json:"tempSensor"`
+	Vendor            *string  `json:"vendor"` // HA sensor entity id ("" = weather)
 	FPS               *int     `json:"fps"`
 	SortOrder         *int     `json:"sortOrder"`
 	PrerollMs         *int     `json:"prerollMs"`
@@ -162,6 +163,19 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, cameraView(c))
 }
 
+// validVendor normalises a vendor marking to one Aperture actually acts on. An
+// unknown value is stored as "" rather than kept verbatim: a marking that drives
+// nothing but LOOKS set is worse than no marking, because the operator would be left
+// wondering why the vendor controls never appeared.
+func validVendor(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case store.VendorReolink:
+		return store.VendorReolink
+	default:
+		return ""
+	}
+}
+
 func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	c, err := s.st.GetCamera(chi.URLParam(r, "id"))
 	if err != nil {
@@ -220,6 +234,9 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TempSensor != nil {
 		c.TempSensor = *req.TempSensor
+	}
+	if req.Vendor != nil {
+		c.Vendor = validVendor(*req.Vendor)
 	}
 	if req.FPS != nil {
 		c.FPS = *req.FPS
@@ -318,6 +335,7 @@ func cameraView(c *store.Camera) map[string]any {
 		"locationId":        c.LocationID,
 		"detectMethod":      c.DetectMethod,
 		"tempSensor":        c.TempSensor,
+		"vendor":            c.Vendor,
 		"fps":               c.FPS,
 		"sortOrder":         c.SortOrder,
 		"prerollMs":         c.PrerollMs,

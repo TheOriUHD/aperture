@@ -24,19 +24,41 @@ function errMsg(e: unknown): string {
 // and silent on failure, so an update surfaces only as a quiet pill.
 function useUpdateChecks(exts: ExtItem[] | undefined): Record<string, UpdateInfo> {
   const [map, setMap] = useState<Record<string, UpdateInfo>>({});
-  const ids = (exts ?? []).filter((e) => e.updatable).map((e) => e.id).join(",");
+  // Keyed on id AND VERSION. Keying on ids alone meant the effect never re-ran after
+  // an update — the set of updatable extensions is identical before and after — so
+  // the stale "version available" answer stayed on screen until the component
+  // remounted, and the badge only cleared by navigating away and back.
+  const key = (exts ?? [])
+    .filter((e) => e.updatable)
+    .map((e) => `${e.id}@${e.version}`)
+    .join(",");
   useEffect(() => {
     let cancelled = false;
-    for (const e of (exts ?? []).filter((x) => x.updatable)) {
-      checkUpdate(e.id)
-        .then((info) => !cancelled && setMap((m) => ({ ...m, [e.id]: info })))
-        .catch(() => {});
+    const targets = (exts ?? []).filter((x) => x.updatable);
+    if (targets.length === 0) {
+      setMap({});
+      return;
     }
+    // Built fresh rather than merged into the previous map: merging keeps an entry
+    // for an extension that no longer has an update, which is the same staleness in
+    // a different shape.
+    const next: Record<string, UpdateInfo> = {};
+    void Promise.all(
+      targets.map((e) =>
+        checkUpdate(e.id)
+          .then((info) => {
+            next[e.id] = info;
+          })
+          .catch(() => {}),
+      ),
+    ).then(() => {
+      if (!cancelled) setMap(next);
+    });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids]);
+  }, [key]);
   return map;
 }
 
@@ -62,6 +84,14 @@ export function ExtensionsManager() {
 
   const invalidate = () => {
     for (const k of ["ext", "ext-panels", "ext-nav", "ext-store"]) qc.invalidateQueries({ queryKey: [k] });
+    // An update stops the backend, swaps its files and respawns it. The respawn is
+    // not instant, so a refetch fired the moment the request returns catches the
+    // extension mid-restart and reports it stopped — which reads as "the update
+    // stopped my extension" when in fact it is already coming back. Re-check twice
+    // as it settles so the row converges on its own instead of needing a reload.
+    for (const delay of [1500, 4000]) {
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["ext"] }), delay);
+    }
   };
 
   async function runStage(fn: () => Promise<StageView>) {
@@ -82,6 +112,10 @@ export function ExtensionsManager() {
   async function onUpdate(ext: ExtItem) {
     const info = updates[ext.id];
     if (!info?.bundleUrl) return;
+    // Re-entrancy guard as well as the disabled button: an update stops the backend,
+    // renames its directory and respawns it, so a second one arriving mid-swap races
+    // the first over the same paths and can leave the extension stopped.
+    if (staging || confirmBusy) return;
     setStaging(true);
     setStageErr(undefined);
     try {
@@ -91,6 +125,7 @@ export function ExtensionsManager() {
       } else {
         setConfirmBusy(true);
         await actions.applyUpdate.mutateAsync({ id: ext.id, stagingId: view.stagingId, consented: true });
+        invalidate(); // includes the delayed re-checks that let the respawn settle
       }
     } catch (e) {
       setStageErr(errMsg(e));
@@ -108,6 +143,7 @@ export function ExtensionsManager() {
       if (staged.targetId) {
         // Row-initiated URL update (has a fixed target extension).
         await actions.applyUpdate.mutateAsync({ id: staged.targetId, stagingId: staged.view.stagingId, consented: true });
+        invalidate();
       } else {
         // A fresh install, or a sideload upgrade of an already-installed id — the
         // confirm endpoint handles both (preserving ext_kv + camera grant on upgrade).
@@ -167,6 +203,7 @@ export function ExtensionsManager() {
                 ext={ext}
                 actions={actions}
                 update={updates[ext.id]}
+                updating={staging || confirmBusy}
                 onUpdate={onUpdate}
                 onEdit={setEditing}
                 onUninstall={setUninstall}

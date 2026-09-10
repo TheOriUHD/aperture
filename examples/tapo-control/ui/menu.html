@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!--
+  Tapo Control — device menu, rendered into Aperture's `player-toolbar` slot.
+
+  The host draws the icon button and the dropdown chrome; this document is only the
+  dropdown's contents. So: transparent body, no border, no title bar — the host has
+  already drawn all of that, and repeating it would double it.
+-->
+<style>
+  html,
+  body {
+    margin: 0;
+    background: transparent;
+    color: #fff;
+    font: 12px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .body {
+    padding: 8px 12px 12px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 0;
+  }
+  .k {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11px;
+  }
+  .v {
+    font-size: 11px;
+    text-align: right;
+  }
+  .dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+  }
+  .ok { background: #3fce7c; }
+  .bad { background: #f0494e; }
+  button {
+    all: unset;
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: 7px 0;
+    margin-top: 8px;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    font-size: 11px;
+  }
+  button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); }
+  button:disabled { opacity: 0.35; cursor: default; }
+  .hint {
+    margin-top: 8px;
+    font-size: 10px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.5);
+  }
+</style>
+</head>
+<body>
+
+<div class="body">
+  <div class="row"><span class="k">Camera</span><span class="v" id="dev">…</span></div>
+  <div class="row"><span class="k">Pan / tilt</span><span class="v" id="ptz">…</span></div>
+  <button id="centre" disabled>Recentre</button>
+  <button id="rescan">Re-detect capabilities</button>
+  <div class="hint" id="hint"></div>
+</div>
+
+<script>
+  const ap = window.aperture;
+  const CONTROL = "http://127.0.0.1:8788";
+  const $ = (id) => document.getElementById(id);
+
+  function fit() {
+    ap.resize(document.body.scrollHeight);
+  }
+
+  async function post(path) {
+    const res = await ap.net.fetch(CONTROL + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ camera: ap.cameraId }),
+    });
+    if (!res.ok) {
+      let reason = "failed";
+      try { reason = JSON.parse(res.body).error || reason; } catch {}
+      throw new Error(reason);
+    }
+  }
+
+  async function load() {
+    let st = null;
+    try {
+      const res = await ap.net.fetch(
+        CONTROL + "/status?camera=" + encodeURIComponent(ap.cameraId || ""),
+        { method: "GET" },
+      );
+      st = res.ok ? JSON.parse(res.body) : null;
+    } catch {
+      st = null;
+    }
+
+    if (!st) {
+      $("dev").innerHTML = '<span class="dot bad"></span>unreachable';
+      $("ptz").textContent = "—";
+      $("hint").textContent =
+        "The Tapo Control backend is not responding. Check the extension is enabled.";
+      return fit();
+    }
+
+    if (!st.configured) {
+      $("dev").textContent = "not configured";
+      $("ptz").textContent = "—";
+      $("hint").textContent =
+        "No camera account is set. Add the Tapo camera account and a camera mapping in the extension's settings.";
+      return fit();
+    }
+
+    if (!st.mapped) {
+      $("dev").textContent = "not mapped";
+      $("ptz").textContent = "—";
+      $("hint").textContent =
+        "This camera is not mapped to a Tapo device. Add the pairing in the extension's settings.";
+      return fit();
+    }
+
+    const caps = st.capabilities || {};
+    $("dev").innerHTML =
+      (st.lastError ? '<span class="dot bad"></span>' : '<span class="dot ok"></span>') +
+      (st.model || "Tapo camera");
+    $("ptz").textContent = caps.panTilt ? "supported" : "not supported";
+    $("centre").disabled = !caps.centre;
+    $("hint").textContent = st.lastError
+      ? st.lastError
+      : caps.panTilt
+        ? ""
+        : "This model is a fixed camera, so there is nothing to steer.";
+    fit();
+  }
+
+  $("centre").addEventListener("click", async () => {
+    $("centre").disabled = true;
+    try {
+      await post("/centre");
+      $("hint").textContent = "";
+    } catch (err) {
+      $("hint").textContent = String(err.message || err);
+    } finally {
+      await load();
+    }
+  });
+
+  $("rescan").addEventListener("click", async () => {
+    $("rescan").disabled = true;
+    $("hint").textContent = "Re-detecting…";
+    try {
+      await post("/rescan");
+    } catch (err) {
+      $("hint").textContent = String(err.message || err);
+    } finally {
+      $("rescan").disabled = false;
+      await load();
+    }
+  });
+
+  load().catch((err) => {
+    $("hint").textContent = String(err.message || err);
+    fit();
+  });
+</script>
+</body>
+</html>

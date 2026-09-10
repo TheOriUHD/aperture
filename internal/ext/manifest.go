@@ -103,7 +103,7 @@ func (c *CameraReq) UnmarshalJSON(b []byte) error {
 //   - url:    a URL, validated on save; can back a {{setting:key}} network host.
 //   - camera: a picker of the extension's granted cameras (stores a camera id).
 //   - group:  a repeatable list; each row is the fields in Fields (scalars/camera
-//             only — no nested groups or secrets). Stored as a JSON array.
+//     only — no nested groups or secrets). Stored as a JSON array.
 type SettingField struct {
 	Key         string          `json:"key"`
 	Label       string          `json:"label"`
@@ -143,6 +143,18 @@ type Panel struct {
 	Slot  string `json:"slot"`
 	Entry string `json:"entry"`
 	Title string `json:"title"`
+	// Anchor places a player-osd widget in one corner of the picture. Ignored by
+	// every other slot. Empty means "bottom-left", which is the corner first-party
+	// chrome leaves free — the top-right holds the control cluster, the top-left the
+	// name/time pill, and the bottom-right the zoom navigator. Extensions declare a
+	// corner rather than coordinates so the host can keep them from colliding with
+	// each other or with first-party overlays.
+	Anchor string `json:"anchor,omitempty"`
+}
+
+// panelAnchors are the corners a player-osd widget may request.
+var panelAnchors = map[string]bool{
+	"top-left": true, "top-right": true, "bottom-left": true, "bottom-right": true,
 }
 
 type BackendSpec struct {
@@ -158,11 +170,11 @@ type UpdateSpec struct {
 // Deno flag string itself is assembled by the supervisor (T1.3), which knows the
 // runtime paths; this stays pure.
 type Derived struct {
-	Scopes       []string // API scopes for the extension's token / broker claim
-	CameraGrants []string // camera ids (empty when "all" or no request)
-	NetHosts     []string // STATIC host[:port] declared literally in the manifest
-	NetSettings  []string // keys of url settings that resolve to a host at request/spawn time
-	ConsentLines []string // plain-language lines for the consent screen
+	Scopes          []string // API scopes for the extension's token / broker claim
+	CameraGrants    []string // camera ids (empty when "all" or no request)
+	NetHosts        []string // STATIC host[:port] declared literally in the manifest
+	NetSettings     []string // keys of url settings that resolve to a host at request/spawn time
+	ConsentLines    []string // plain-language lines for the consent screen
 	HasBackend      bool
 	HasUI           bool
 	HasNavPanel     bool   // declares a full-page nav-panel view → eligible to be pinned (T2.1)
@@ -189,7 +201,14 @@ var (
 	reSettingKey = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 	// knownSlots are the host mount points Pass 1 exposes (T1.6).
-	knownSlots = map[string]bool{"camera-detail": true, "settings": true, "dashboard-card": true, "nav-panel": true}
+	knownSlots = map[string]bool{
+		"camera-detail": true, "settings": true, "dashboard-card": true, "nav-panel": true,
+		// Camera-context slots that render ON the player rather than under it:
+		// an icon+dropdown in the top-right control cluster, and a transparent
+		// widget floating over the picture. Both are gated by camera grant and
+		// both inherit the user's overlay-opacity preference.
+		"player-toolbar": true, "player-osd": true,
+	}
 
 	// dataDomainScopes maps a data domain + value to the exact scope strings in
 	// internal/api. "write" implies "read". Absence of a value = not grantable.
@@ -272,6 +291,17 @@ func (m *Manifest) Validate() (Derived, error) {
 			if err := safeEntry(p.Entry); err != nil {
 				return d, fmt.Errorf("ui.panels[%d].entry: %w", i, err)
 			}
+			// An anchor only means something for a widget that floats over the
+			// picture. Rejecting it elsewhere keeps a manifest from claiming a
+			// placement the host will silently ignore.
+			if p.Anchor != "" {
+				if p.Slot != "player-osd" {
+					return d, fmt.Errorf("ui.panels[%d].anchor: only valid for the player-osd slot", i)
+				}
+				if !panelAnchors[p.Anchor] {
+					return d, fmt.Errorf("ui.panels[%d].anchor: unknown anchor %q", i, p.Anchor)
+				}
+			}
 			if p.Slot == "nav-panel" {
 				d.HasNavPanel = true
 			}
@@ -353,10 +383,20 @@ func (m *Manifest) Validate() (Derived, error) {
 	}
 	d.Settings = m.Settings
 	settingType := map[string]string{}
+	// Subfield types per group, so a network entry can address one column of a
+	// repeatable list (see the dotted reference below).
+	groupFieldType := map[string]map[string]string{}
 	for _, f := range m.Settings {
 		settingType[f.Key] = f.Type
 		if f.Type == "secret" {
 			d.SecretKeys = append(d.SecretKeys, f.Key)
+		}
+		if f.Type == "group" {
+			cols := map[string]string{}
+			for _, sf := range f.Fields {
+				cols[sf.Key] = sf.Type
+			}
+			groupFieldType[f.Key] = cols
 		}
 	}
 	d.HasStorage = m.Permissions.Storage || len(m.Settings) > 0
@@ -368,6 +408,21 @@ func (m *Manifest) Validate() (Derived, error) {
 	// are bounded to the resolved set.
 	for _, raw := range m.Permissions.Network {
 		if key, ok := settingRef(raw); ok {
+			// A DOTTED reference addresses one url column of a group setting, so a
+			// repeatable list — one row per device — supplies as many hosts as the
+			// user configured. Without this an extension that talks to N cameras the
+			// user names at runtime could not declare its egress at all: a static
+			// list cannot know the addresses, and a plain url setting holds only one.
+			if group, col, dotted := strings.Cut(key, "."); dotted {
+				if settingType[group] != "group" {
+					return d, fmt.Errorf("permissions.network: {{setting:%s}} must reference a declared group setting", group)
+				}
+				if groupFieldType[group][col] != "url" {
+					return d, fmt.Errorf("permissions.network: {{setting:%s}} must reference a url field of group %q", key, group)
+				}
+				d.NetSettings = append(d.NetSettings, key)
+				continue
+			}
 			if settingType[key] != "url" {
 				return d, fmt.Errorf("permissions.network: {{setting:%s}} must reference a declared url setting", key)
 			}
@@ -512,6 +567,14 @@ func consentLines(m *Manifest, d Derived) []string {
 		lines = append(lines, scopeSummary(d.Scopes))
 	}
 	for _, h := range d.NetHosts {
+		// Loopback is not "the internet", and saying so would train people to skim a
+		// screen whose whole job is to be read. An extension talking to a service on
+		// this machine still deserves a line — it is a real capability — but an honest
+		// one, because the data does not leave the box.
+		if isLoopbackHost(h) {
+			lines = append(lines, fmt.Sprintf("Talk to %s — a service running on this machine, not over the internet", h))
+			continue
+		}
 		lines = append(lines, fmt.Sprintf("Connect over the internet to %s — it can send your data there", h))
 	}
 	if len(d.NetSettings) > 0 {
@@ -587,4 +650,20 @@ func CheckNoRemoteImports(src string) []string {
 		}
 	}
 	return bad
+}
+
+// isLoopbackHost reports whether a manifest network host names this machine. Used
+// only to word the consent line accurately — it grants nothing extra, and the Deno
+// --allow-net scope is identical either way.
+func isLoopbackHost(hostPort string) bool {
+	h := hostPort
+	if i := strings.LastIndex(h, ":"); i > 0 && !strings.Contains(h[i+1:], "]") {
+		h = h[:i]
+	}
+	h = strings.Trim(h, "[]")
+	switch strings.ToLower(h) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return strings.HasPrefix(h, "127.")
 }

@@ -68,6 +68,7 @@ export function CameraModal({
   const [audioThreshold, setAudioThreshold] = useState(0);
   const [detectMethod, setDetectMethod] = useState("");
   const [tempSensor, setTempSensor] = useState("");
+  const [isReolink, setIsReolink] = useState(false);
   const [locationId, setLocationId] = useState(""); // the PRIMARY destination
   // Mirror destinations: locationId -> per-location retention days (0 = inherit).
   const [mirrors, setMirrors] = useState<Map<string, number>>(new Map());
@@ -100,6 +101,7 @@ export function CameraModal({
       setAudioThreshold(camera.audioThreshold ?? 0);
       setDetectMethod(camera.detectMethod ?? "");
       setTempSensor(camera.tempSensor ?? "");
+      setIsReolink((camera.vendor ?? "") === "reolink");
       setLocationId(camera.locationId ?? "");
     } else {
       setName("");
@@ -161,6 +163,7 @@ export function CameraModal({
       audioThreshold,
       detectMethod,
       tempSensor,
+      vendor: isReolink ? "reolink" : "",
       locationId,
       prerollMs: preroll * 1000,
       postrollMs: postroll * 1000,
@@ -567,6 +570,22 @@ export function CameraModal({
               </p>
             </div>
           )}
+
+          {/* Vendor-specific local controls. This is a STATED FACT about the camera,
+              not something detected: identifying the vendor by probing it means the
+              controls disappear whenever the camera is unreachable or its ONVIF
+              settings change, which is how they were previously lost. */}
+          <div className="border-t border-line pt-4">
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-xs font-medium text-fg-muted">Reolink camera</p>
+              <Switch checked={isReolink} onChange={setIsReolink} label="Reolink camera" />
+            </div>
+            <p className="text-[11px] text-fg-faint">
+              Enables Reolink&apos;s own controls for this camera — spotlight and IR illuminators — which
+              ONVIF does not cover. Uses the camera&apos;s existing credentials, and stays on whether or not
+              the camera is reachable right now.
+            </p>
+          </div>
 
           {/* Camera groups — which mobile-dashboard groups this camera is in. */}
           <div className="border-t border-line pt-4">

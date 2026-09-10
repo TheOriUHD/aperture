@@ -1,5 +1,5 @@
 import { Lightbulb, LightbulbOff } from "lucide-react";
-import { useCameraOnvif, useCameraVendor, useSetCameraVendor } from "../hooks/useCameras";
+import { useCameraOnvif, useCameraVendor, useCameras, useSetCameraVendor } from "../hooks/useCameras";
 
 // One-tap spotlight toggle in the player's overlay bar. A light is something you
 // flick on while watching, so it gets its own button rather than living behind a
@@ -9,7 +9,13 @@ export function CameraSpotlightButton({ cameraId, VidBtn }: {
   VidBtn: React.ComponentType<{ onClick: () => void; label: string; active?: boolean; children: React.ReactNode }>;
 }) {
   const { data: onvif } = useCameraOnvif(cameraId);
-  const { data: vendor } = useCameraVendor(cameraId, !!onvif?.enabled);
+  const { data: cameras } = useCameras();
+  // Marking the camera as a Reolink is enough on its own. Gating the lookup on ONVIF
+  // being enabled was the other half of why this button kept disappearing: the vendor
+  // controls do not go through ONVIF at all — they use the camera's own HTTP API — so
+  // an ONVIF toggle should never decide whether they show.
+  const marked = cameras?.find((c) => c.id === cameraId)?.vendor === "reolink";
+  const { data: vendor } = useCameraVendor(cameraId, marked || !!onvif?.enabled);
   const setVendor = useSetCameraVendor();
 
   const spot = vendor?.supported ? vendor.spotlight : undefined;

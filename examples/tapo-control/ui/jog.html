@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!--
+  Tapo Control — pan/tilt jog wheel, rendered into Aperture's `player-osd` slot.
+
+  Host conventions this relies on:
+
+  1. The body is TRANSPARENT. The host positions this iframe over live video; a panel
+     that paints its own background paints a rectangle over the picture. (The host
+     also pins the panel's colour scheme to match its own, which is what actually
+     keeps the frame's canvas transparent — see docs/extensions/panels.md.)
+  2. `?osdAlpha=` carries the user's single overlay-opacity preference, shared by
+     every OSD on every player. We render our surface at that alpha rather than
+     picking our own, so one slider in Settings moves this too.
+  3. `ap.resize(height, width)` negotiates BOTH dimensions, so the collapsed state is
+     a real 32x32 button rather than a small icon adrift in a wide invisible box that
+     would swallow clicks meant for the video.
+
+  It opens COLLAPSED: a steering control that is only occasionally wanted should not
+  sit over the picture permanently. Collapsed, it is a 32x32 button matching the
+  player's own bottom-left chrome; the host places it directly beside the
+  keyboard-shortcuts button.
+-->
+<style>
+  html,
+  body {
+    margin: 0;
+    background: transparent;
+    color: #fff;
+    font: 11px/1.3 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  #root { width: max-content; }
+
+  /* Collapsed: deliberately identical to the player's own overlay buttons. */
+  .toggle {
+    all: unset;
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(4px);
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+  }
+  .toggle:hover { background: rgba(0, 0, 0, 0.7); color: #fff; }
+
+  .panel {
+    width: 176px;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, var(--osd-alpha, 0.55));
+    backdrop-filter: blur(6px);
+    border-radius: 10px;
+    padding: 6px 10px 10px;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 18px;
+    margin-bottom: 2px;
+  }
+  .head b {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+  }
+  .x {
+    all: unset;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+  }
+  .x:hover { color: #fff; }
+
+  /* The pad is a disc of four wedges around a centre button: no empty corners, and
+     a much bigger hit target per direction than a square grid of the same size. */
+  .pad { display: block; margin: 0 auto; width: 132px; height: 132px; }
+  .wedge {
+    fill: rgba(255, 255, 255, 0.11);
+    cursor: pointer;
+    transition: fill 110ms;
+  }
+  .wedge:hover { fill: rgba(255, 255, 255, 0.24); }
+  .wedge:active { fill: #1b9df0; }
+  .wedge.off { fill: rgba(255, 255, 255, 0.05); cursor: default; }
+  .glyph { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  .hub { fill: rgba(255, 255, 255, 0.07); cursor: pointer; transition: fill 110ms; }
+  .hub:hover { fill: rgba(255, 255, 255, 0.18); }
+  .hub:active { fill: #1b9df0; }
+  .hub.off { fill: rgba(255, 255, 255, 0.03); cursor: default; }
+  .hubtext {
+    fill: rgba(255, 255, 255, 0.75);
+    font: 600 9px/1 ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: 0.06em;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+
+  .ctl { margin-top: 7px; }
+  .ctl .lbl {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 2px;
+  }
+  .ctl .lbl span:last-child { color: rgba(255, 255, 255, 0.9); font-variant-numeric: tabular-nums; }
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.2);
+    outline: none;
+    margin: 0;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #fff;
+    cursor: pointer;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 11px; height: 11px; border: 0; border-radius: 50%; background: #fff; cursor: pointer;
+  }
+  .msg {
+    margin-top: 6px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.55);
+    min-height: 0;
+    text-align: center;
+  }
+  .msg.err { color: #f0494e; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  const ap = window.aperture;
+  const qs = new URLSearchParams(location.search);
+  const CONTROL = "http://127.0.0.1:8788";
+
+  const alpha = parseFloat(qs.get("osdAlpha") || "");
+  if (Number.isFinite(alpha)) document.documentElement.style.setProperty("--osd-alpha", String(alpha));
+
+  const root = document.getElementById("root");
+  let caps = null;
+  let open = false;
+  let speed = 60;   // % of the camera's maximum pan/tilt velocity
+  let step = 400;   // ms of travel per nudge — how far one press moves
+
+  const KEY_SPEED = "speed:" + (ap.cameraId || "");
+  const KEY_STEP = "step:" + (ap.cameraId || "");
+
+  function fit() {
+    // Negotiate BOTH dimensions so the collapsed button is exactly 32x32 and the
+    // expanded panel is exactly as wide as it needs to be.
+    const el = root.firstElementChild;
+    ap.resize(el ? el.offsetHeight : 0, el ? el.offsetWidth : 0);
+  }
+
+  async function control(path, body) {
+    const res = await ap.net.fetch(CONTROL + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ camera: ap.cameraId, ...body }),
+    });
+    if (!res.ok) {
+      let reason = "failed";
+      try { reason = JSON.parse(res.body).error || reason; } catch {}
+      throw new Error(reason);
+    }
+  }
+
+  // --- the disc -------------------------------------------------------------
+  // Four wedges around a hub. Built in code because the arc maths is what makes it
+  // a disc rather than a grid with empty corners.
+  const R_OUT = 62, R_IN = 23, C = 66;
+  const pol = (r, deg) => [C + r * Math.cos((deg * Math.PI) / 180), C + r * Math.sin((deg * Math.PI) / 180)];
+  function wedge(from, to) {
+    const [x1, y1] = pol(R_IN, from), [x2, y2] = pol(R_OUT, from);
+    const [x3, y3] = pol(R_OUT, to), [x4, y4] = pol(R_IN, to);
+    return `M${x1} ${y1}L${x2} ${y2}A${R_OUT} ${R_OUT} 0 0 1 ${x3} ${y3}L${x4} ${y4}A${R_IN} ${R_IN} 0 0 0 ${x1} ${y1}Z`;
+  }
+  const DIRS = [
+    { dir: "up", from: -125, to: -55, mid: -90, d: "M0 7V-7M-6 1L0 -6L6 1" },
+    { dir: "right", from: -35, to: 35, mid: 0, d: "M-7 0H7M1 -6L7 0L1 6" },
+    { dir: "down", from: 55, to: 125, mid: 90, d: "M0 -7V7M-6 -1L0 6L6 -1" },
+    { dir: "left", from: 145, to: 215, mid: 180, d: "M7 0H-7M-1 -6L-7 0L-1 6" },
+  ];
+
+  function render() {
+    if (!open) {
+      root.innerHTML =
+        '<button class="toggle" id="open" title="Pan / tilt" aria-label="Pan and tilt controls">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" class="glyph" stroke-width="2">' +
+        '<path d="M12 4v16M4 12h16M12 4l-3 3M12 4l3 3M12 20l-3-3M12 20l3-3M4 12l3-3M4 12l3 3M20 12l-3-3M20 12l-3 3"/>' +
+        "</svg></button>";
+      document.getElementById("open").addEventListener("click", () => { open = true; render(); });
+      return fit();
+    }
+
+    const arms = DIRS.map((s) => {
+      const [mx, my] = pol((R_IN + R_OUT) / 2, s.mid);
+      return (
+        `<path class="wedge" data-dir="${s.dir}" d="${wedge(s.from, s.to)}"></path>` +
+        `<g transform="translate(${mx} ${my})"><path class="glyph" d="${s.d}"/></g>`
+      );
+    }).join("");
+
+    root.innerHTML =
+      '<div class="panel">' +
+        '<div class="head"><b>Pan / tilt</b><button class="x" id="close" aria-label="Close">×</button></div>' +
+        `<svg class="pad" viewBox="0 0 132 132">${arms}` +
+          `<circle class="hub${caps.centre ? "" : " off"}" id="hub" cx="${C}" cy="${C}" r="${R_IN - 2}"></circle>` +
+          `<text class="hubtext" x="${C}" y="${C + 3}">HOME</text>` +
+        "</svg>" +
+        '<div class="ctl"><div class="lbl"><span>Speed</span><span id="vspeed"></span></div>' +
+          '<input type="range" id="speed" min="10" max="100" step="5"></div>' +
+        '<div class="ctl"><div class="lbl"><span>Step</span><span id="vstep"></span></div>' +
+          '<input type="range" id="step" min="100" max="1500" step="50"></div>' +
+        '<div class="msg" id="msg"></div>' +
+      "</div>";
+
+    const msg = document.getElementById("msg");
+    const say = (t, err) => { msg.textContent = t || ""; msg.className = "msg" + (err ? " err" : ""); fit(); };
+
+    const sp = document.getElementById("speed"), st = document.getElementById("step");
+    const paint = () => {
+      document.getElementById("vspeed").textContent = speed + "%";
+      document.getElementById("vstep").textContent = step + " ms";
+    };
+    sp.value = String(speed); st.value = String(step); paint();
+    sp.addEventListener("input", () => { speed = Number(sp.value); paint(); });
+    st.addEventListener("input", () => { step = Number(st.value); paint(); });
+    // Persist on release, not on every tick of the drag.
+    sp.addEventListener("change", () => ap.storage.set(KEY_SPEED, String(speed)));
+    st.addEventListener("change", () => ap.storage.set(KEY_STEP, String(step)));
+
+    document.getElementById("close").addEventListener("click", () => { open = false; render(); });
+
+    for (const w of root.querySelectorAll(".wedge")) {
+      w.addEventListener("click", async () => {
+        try {
+          await control("/ptz", { direction: w.dataset.dir, speed, step });
+          say("");
+        } catch (err) { say(err.message, true); }
+      });
+    }
+    const hub = document.getElementById("hub");
+    if (caps.centre) {
+      hub.addEventListener("click", async () => {
+        try { await control("/centre", {}); say(""); } catch (err) { say(err.message, true); }
+      });
+    }
+    fit();
+  }
+
+  async function init() {
+    let st = null;
+    try {
+      const res = await ap.net.fetch(
+        CONTROL + "/status?camera=" + encodeURIComponent(ap.cameraId || ""),
+        { method: "GET" },
+      );
+      st = res.ok ? JSON.parse(res.body) : null;
+    } catch { st = null; }
+
+    // Nothing to steer on this camera: ask for zero and the host collapses the
+    // overlay to nothing, rather than leaving a box sitting on the picture.
+    if (!st || !st.mapped || !st.capabilities || !st.capabilities.panTilt) return ap.resize(0, 0);
+    caps = st.capabilities;
+
+    const [s, t] = await Promise.all([ap.storage.get(KEY_SPEED), ap.storage.get(KEY_STEP)]);
+    if (Number(s)) speed = Math.max(10, Math.min(Number(s), 100));
+    if (Number(t)) step = Math.max(100, Math.min(Number(t), 1500));
+    render();
+  }
+
+  init().catch(() => ap.resize(0, 0));
+</script>
+</body>
+</html>

@@ -185,4 +185,37 @@ input.tl-zoom::-moz-range-track {
   .nav-item-active {
     @apply text-white bg-brand/15 hover:bg-brand/20;
   }
+
+  /* On-screen display surfaces ------------------------------------------- */
+  /* Every translucent widget that floats over a video shares one opacity, set
+     by the user in Settings and published on :root as --osd-alpha (see
+     lib/osd.ts). Use these instead of a bespoke bg-black/NN: before this
+     existed the codebase had nine different blacks stacked over the same
+     picture, and an extension author picking a tenth would not have been
+     doing anything wrong. */
+  .osd-surface {
+    background: rgba(0, 0, 0, var(--osd-alpha, 0.55));
+    @apply backdrop-blur-sm;
+  }
+  /* Chrome that must stay legible against a bright frame — panel bodies and
+     menus — sits a step more opaque than a passive badge, but still tracks the
+     same user preference rather than a hardcoded constant. */
+  .osd-panel {
+    background: rgba(0, 0, 0, min(0.92, calc(var(--osd-alpha, 0.55) + 0.25)));
+    @apply backdrop-blur-md border border-white/10 rounded-lg shadow-pop;
+  }
+  /* The 32px square icon button used in a player's control cluster. Extracted
+     from Playback's private VidBtn so extension toolbar entries render
+     identically to first-party ones instead of approximating them. */
+  .osd-btn {
+    @apply grid h-8 w-8 place-items-center rounded-md text-white/85
+      transition-colors backdrop-blur-sm;
+    background: rgba(0, 0, 0, min(0.9, calc(var(--osd-alpha, 0.55) + 0.1)));
+  }
+  .osd-btn:hover {
+    background: rgba(0, 0, 0, min(0.95, calc(var(--osd-alpha, 0.55) + 0.35)));
+  }
+  .osd-btn-active {
+    @apply bg-brand text-white hover:bg-[#2aa6f5];
+  }
 }

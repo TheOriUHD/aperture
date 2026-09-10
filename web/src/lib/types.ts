@@ -7,6 +7,11 @@ export interface Preferences {
   density: "comfortable" | "compact";
   language: string; // "en" | "de" | "auto"
   timelineRibbon: boolean; // show the temperature/precip ribbon on the timeline
+  // Opacity of on-screen display widgets over the video, 0.15–1.0. One value for
+  // every OSD, first-party and extension alike: an overlay that each author tunes
+  // separately is how you end up with nine different blacks over the same picture.
+  // Published as the --osd-alpha CSS variable; see osd.ts.
+  osdOpacity: number;
 }
 
 export const DEFAULT_PREFS: Preferences = {
@@ -16,6 +21,7 @@ export const DEFAULT_PREFS: Preferences = {
   density: "comfortable",
   language: "auto",
   timelineRibbon: false,
+  osdOpacity: 0.55,
 };
 
 export interface User {
@@ -47,6 +53,7 @@ export interface Camera {
   locationId: string; // storage location for new footage ("" = default)
   detectMethod: string; // "" = inherit global; off|bridge|onnx
   tempSensor: string; // HA sensor entity id for the overlay ("" = weather)
+  vendor: string; // explicit vendor marking ("" = unmarked); "reolink" enables Reolink-local controls
   fps: number;
   sortOrder: number;
   prerollMs: number;

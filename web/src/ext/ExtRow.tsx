@@ -51,6 +51,7 @@ export function ExtRow({
   actions,
   update,
   onUpdate,
+  updating,
   onEdit,
   onUninstall,
 }: {
@@ -60,10 +61,21 @@ export function ExtRow({
   onUpdate: (ext: ExtItem) => void;
   onEdit: (ext: ExtItem) => void;
   onUninstall: (ext: ExtItem) => void;
+  /** True while the manager is staging this update, before applyUpdate starts. */
+  updating?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const busy =
-    actions.enable.isPending || actions.disable.isPending || actions.pin.isPending || actions.unpin.isPending;
+    actions.enable.isPending ||
+    actions.disable.isPending ||
+    actions.pin.isPending ||
+    actions.unpin.isPending ||
+    // An update stops the backend, swaps its files and respawns it. Firing a second
+    // one while the first is mid-swap makes the two race over the same directories
+    // and can leave the extension stopped — which is why this button, alone among
+    // the row actions, used to need a disable/enable afterwards to recover.
+    actions.applyUpdate.isPending ||
+    updating;
   const hasUpdate = !!update?.available;
 
   const logs = useQuery({
@@ -125,8 +137,8 @@ export function ExtRow({
                 <span className="text-fg-muted"> · you have {ext.version}</span>
                 {update?.permissionsChanged && <span className="ml-1 text-[#e6b45a]">· needs new permissions</span>}
               </div>
-              <button className="btn-subtle h-8" onClick={() => onUpdate(ext)}>
-                Update
+              <button className="btn-subtle h-8" disabled={busy} onClick={() => onUpdate(ext)}>
+                {busy ? "Updating…" : "Update"}
               </button>
             </div>
           )}

@@ -46,6 +46,74 @@ my-extension/
 
 Full field reference: [manifest.md](manifest.md).
 
+## The private development store
+
+While Aperture is private, the "official store" is a static index served on this host
+and read only by `nvrd`. It is real curation, not a stub: an extension listed here
+installs through the normal store path and skips the sideload warning.
+
+| | |
+|---|---|
+| Doc root | `/var/lib/aperture/store/` |
+| Server | `aperture-store.service` — `busybox httpd` on **127.0.0.1:8975** |
+| Index | `/var/lib/aperture/store/index.json` |
+| Pointed at by | the `ext.store_url` setting |
+
+Loopback is deliberate: the browser never fetches the index or a bundle. `GET
+/ext/store` does not echo `bundleUrl`, and the install handler resolves and downloads
+it server-side, so `nvrd` is the only client these URLs need to reach.
+
+**Layout matters.** An update's bundle is never named anywhere — it is derived as
+`bundle.zip` *beside* the manifest that `update.url` points at. So each extension
+needs its own directory, and the flat `examples/dist/*.zip` layout cannot be served
+as-is:
+
+```
+/var/lib/aperture/store/
+├── index.json
+└── <name>/
+    ├── bundle.zip      # the built bundle
+    └── manifest.json   # same manifest, for update checks
+```
+
+**The index** is decoded into `storeItem` (`internal/api/ext_manager.go`), so it is
+exactly these fields — unknown keys are ignored, and `bundleUrl` spelled any other
+way parses to empty and installs 404:
+
+```json
+{ "extensions": [ { "id": "...", "name": "...", "version": "...",
+                    "author": "...", "description": "...",
+                    "bundleUrl": "http://127.0.0.1:8975/<name>/bundle.zip" } ] }
+```
+
+`version` here is **display-only** — nothing compares or re-installs on it. What
+actually drives an update is the version in the manifest at `update.url`.
+
+**Publishing a change** during development:
+
+```bash
+make examples                                   # rebuild the zips
+install -m 0644 examples/dist/<name>.zip        /var/lib/aperture/store/<name>/bundle.zip
+install -m 0644 examples/<name>/manifest.json   /var/lib/aperture/store/<name>/manifest.json
+```
+
+No restart of anything: the index is re-read on every request and `busybox httpd`
+serves from disk. Bump the manifest `version` for the manager to offer an update.
+
+> **`ext.store_url` has no API, no CLI and no env var** — nothing in the codebase
+> writes it, though the Marketplace tells you to set it. Today it can only be set by
+> writing the settings row directly:
+>
+> ```bash
+> sqlite3 /var/lib/aperture/data/aperture.db "PRAGMA busy_timeout=5000;
+>   INSERT INTO settings(key,value) VALUES('ext.store_url','http://127.0.0.1:8975/index.json')
+>   ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
+> ```
+>
+> Use no trailing newline: the "is it configured" check trims the value, but the
+> *raw* string is what gets fetched, so stray whitespace reports configured and then
+> fails the fetch with a 502.
+
 ## Distribution: store vs sideload
 
 |              | Official store                                   | Sideload                                |

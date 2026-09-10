@@ -17,8 +17,33 @@ describe("panelsForSlot — the zero-extensions identity guarantee", () => {
     }
   });
 
-  it("exposes exactly the four Pass-1 slots, in order (append-only contract)", () => {
-    expect(EXT_SLOTS).toEqual(["camera-detail", "settings", "dashboard-card", "nav-panel"]);
+  // The exact-array assertion is the append-only contract: a slot may be added to
+  // the END, never inserted or reordered, because host mount points are matched by
+  // position in first-party UI and an installed extension's manifest names a slot
+  // by string. Changing this list deliberately fails here first.
+  it("exposes exactly the known slots, in order (append-only contract)", () => {
+    expect(EXT_SLOTS).toEqual([
+      "camera-detail",
+      "settings",
+      "dashboard-card",
+      "nav-panel",
+      "player-toolbar",
+      "player-osd",
+    ]);
+  });
+
+  // Every camera-context slot must be grant-gated. This previously read
+  // `slot !== "camera-detail"`, so any new player slot would have rendered on every
+  // camera regardless of the admin's grant — a silent widening of what an extension
+  // can see, not just where it appears.
+  it("gates every camera-context slot by camera grant, not just camera-detail", () => {
+    const scoped: ExtPanel = { extId: "a.b", extName: "A", slot: "", entry: "u.html", cameraGrants: ["cam-1"] };
+    for (const slot of ["camera-detail", "player-toolbar", "player-osd"]) {
+      const p = { ...scoped, slot };
+      expect(panelsForSlot([p], slot, "cam-1")).toHaveLength(1);
+      expect(panelsForSlot([p], slot, "cam-2")).toHaveLength(0);
+      expect(panelsForSlot([p], slot)).toHaveLength(0);
+    }
   });
 
   it("selects only the panels whose slot matches, preserving input order", () => {

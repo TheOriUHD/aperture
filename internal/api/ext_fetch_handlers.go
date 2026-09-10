@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -174,6 +175,17 @@ func (s *Server) handleExtFetch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) resolveExtHosts(id string, d ext.Derived) (allowed []string, unconfigured bool) {
 	allowed = append(allowed, d.NetHosts...)
 	for _, key := range d.NetSettings {
+		// A dotted key addresses one url column of a group setting: every configured
+		// row contributes a host, so an extension that talks to a user-named list of
+		// devices gets exactly the egress the user configured and nothing more.
+		if group, col, dotted := strings.Cut(key, "."); dotted {
+			hosts, ok := s.groupHosts(id, group, col)
+			if !ok {
+				unconfigured = true
+			}
+			allowed = append(allowed, hosts...)
+			continue
+		}
 		v, found, _ := s.st.ExtKVGet(id, key)
 		v = strings.TrimSpace(v)
 		if !found || v == "" {
@@ -187,6 +199,39 @@ func (s *Server) resolveExtHosts(id string, d ext.Derived) (allowed []string, un
 		}
 	}
 	return allowed, unconfigured
+}
+
+// groupHosts reads one url column out of a group setting (a JSON array of row
+// objects) and returns the host[:port] of every row that has one. ok is false when
+// the group is unset or any row is missing/malformed, so the caller can report the
+// extension as not fully configured rather than silently narrowing its egress.
+func (s *Server) groupHosts(id, group, col string) (hosts []string, ok bool) {
+	raw, found, _ := s.st.ExtKVGet(id, group)
+	if !found || strings.TrimSpace(raw) == "" {
+		return nil, false
+	}
+	var rows []map[string]string
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		return nil, false
+	}
+	if len(rows) == 0 {
+		return nil, false
+	}
+	ok = true
+	for _, r := range rows {
+		v := strings.TrimSpace(r[col])
+		if v == "" {
+			ok = false
+			continue
+		}
+		u, err := url.Parse(v)
+		if err != nil || u.Host == "" {
+			ok = false
+			continue
+		}
+		hosts = append(hosts, u.Host)
+	}
+	return hosts, ok
 }
 
 // classifyEgressError maps a Go outbound error to a plain sentence naming the host and
