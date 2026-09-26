@@ -2,7 +2,18 @@
 # Note: if `go` is not on PATH, install puts it at ~/.local/go/bin.
 GO ?= go
 PKG := github.com/TheOriUHD/aperture
-VERSION ?= 0.0.0-dev
+# Version comes from the nearest v* tag, so a binary always names the release it was
+# built from: 1.2.0 on the tag, 1.2.0-4-g1a2b3c4 four commits later. Those tags were
+# reconstructed from the history (see CHANGELOG.md) because the first three months
+# shipped untagged and every build called itself 0.0.0-dev.
+#
+# A build carrying uncommitted source is suffixed +local, so a hand-built binary can
+# never be mistaken for the tagged release. deploy/go2rtc.yaml is excluded from that
+# test: it is permanently modified on the NVR host (it holds camera credentials) and
+# would otherwise mark every production build +local.
+GIT_VER := $(shell git describe --tags --match 'v[0-9]*' 2>/dev/null || echo 0.0.0-dev)
+GIT_LOCAL := $(shell test -n "$$(git status --porcelain -- . ':(exclude)deploy/go2rtc.yaml' 2>/dev/null)" && echo +local)
+VERSION ?= $(patsubst v%,%,$(GIT_VER))$(GIT_LOCAL)
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -s -w \
 	-X $(PKG)/internal/version.Version=$(VERSION) \
