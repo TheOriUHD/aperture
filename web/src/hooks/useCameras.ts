@@ -9,6 +9,19 @@ export function useCameras() {
   });
 }
 
+// visibleCameras is the set a viewer should ever SEE. A disabled camera is
+// absent from the dashboard, playback, multi-view and the export picker rather
+// than drawn as a dead tile labelled "Disabled": it streams nothing and records
+// nothing, so a placeholder only takes up space.
+//
+// Camera MANAGEMENT deliberately keeps the full list from useCameras(): Settings
+// -> Cameras is where a disabled camera is found and switched back on, and the
+// ACL, token-grant, group, storage and automation pickers must be able to
+// configure one before it is turned on.
+export function visibleCameras(cameras: Camera[] | undefined): Camera[] | undefined {
+  return cameras?.filter((c) => c.enabled);
+}
+
 export interface CameraInput {
   name: string;
   rtspMainUrl: string;

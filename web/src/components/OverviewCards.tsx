@@ -337,6 +337,8 @@ function VideoArchivingCard({ cameras }: { cameras: Camera[] }) {
 
 // ---- Recent detections ---------------------------------------------------
 
+// Takes EVERY camera, disabled included: an event recorded before its camera was
+// switched off should still be labelled with that camera's name.
 function RecentDetectionsCard({ cameras }: { cameras: Camera[] }) {
   const navigate = useNavigate();
   // Poll dropped: event.*/detection.* feed messages invalidate ["events-recent-dash"].
@@ -393,7 +395,16 @@ function RecentDetectionsCard({ cameras }: { cameras: Camera[] }) {
 
 // ---- The sidebar ---------------------------------------------------------
 
-export function OverviewSidebar({ cameras }: { cameras: Camera[] }) {
+export function OverviewSidebar({
+  cameras,
+  allCameras,
+}: {
+  // The cameras actually on screen: counts, resolutions and the export picker
+  // describe what the operator can see.
+  cameras: Camera[];
+  // Every camera, disabled included — used only to name past events.
+  allCameras?: Camera[];
+}) {
   const { data: settings } = useSiteName();
   const showSpotlights = settings?.spotlightsEnabled !== false; // default on until loaded
   return (
@@ -411,7 +422,7 @@ export function OverviewSidebar({ cameras }: { cameras: Camera[] }) {
       </div>
       {showSpotlights && <SpotlightsCard />}
       <VideoArchivingCard cameras={cameras} />
-      <RecentDetectionsCard cameras={cameras} />
+      <RecentDetectionsCard cameras={allCameras ?? cameras} />
       <ExtensionSlot slot="dashboard-card" />
     </div>
   );

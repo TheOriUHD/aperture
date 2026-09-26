@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import Hls from "hls.js";
@@ -53,7 +53,7 @@ import { DateTimePicker } from "../components/DateTimePicker";
 import { PlaybackConditions } from "../components/ConditionsOverlay";
 import { useAuth } from "../lib/auth";
 import { fsVideoStyle, FullscreenChrome } from "../components/fullscreen";
-import { useCameras } from "../hooks/useCameras";
+import { useCameras, visibleCameras } from "../hooks/useCameras";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useSite, useWeatherRange } from "../hooks/useEnvironment";
 import { usePrefs } from "../lib/prefs";
@@ -85,7 +85,12 @@ const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x
 const fmtClock = fmtTimeSec;
 
 export function Playback() {
-  const { data: cameras } = useCameras();
+  const { data: allCameras } = useCameras();
+  // Disabled cameras are not offered anywhere you watch from: not in the camera
+  // rail, not in multi-view, not in the export picker. A ?camera= deep link to a
+  // disabled one therefore falls through to the default selection below.
+  // Memoised because the selection effects key off this array's identity.
+  const cameras = useMemo(() => visibleCameras(allCameras), [allCameras]);
   const [params] = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 

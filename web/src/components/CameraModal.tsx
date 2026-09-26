@@ -253,6 +253,20 @@ export function CameraModal({
         }
       >
         <div className="space-y-4">
+          {/* Whether the camera is on at all comes first: it governs every
+              setting below it, and switching it off removes the camera from the
+              dashboard and playback entirely. */}
+          {isEdit && (
+            <div className="flex items-center justify-between border-b border-line pb-3">
+              <div>
+                <span className="text-sm text-fg">Enabled</span>
+                <p className="text-xs text-fg-faint">
+                  Off stops streaming and recording, and hides this camera from the dashboard and playback.
+                </p>
+              </div>
+              <Switch checked={enabled} onChange={setEnabled} label="Enabled" />
+            </div>
+          )}
           <div>
             <label className="label">Name</label>
             <input
@@ -616,15 +630,6 @@ export function CameraModal({
             </p>
           </div>
 
-          {isEdit && (
-            <div className="flex items-center justify-between pt-1">
-              <div>
-                <span className="text-sm text-fg">Enabled</span>
-                <p className="text-xs text-fg-faint">Stream and record this camera</p>
-              </div>
-              <Switch checked={enabled} onChange={setEnabled} label="Enabled" />
-            </div>
-          )}
           {error && <p className="text-sm text-rec">{error}</p>}
         </div>
       </Modal>
