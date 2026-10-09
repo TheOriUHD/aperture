@@ -138,15 +138,7 @@ func (s *Store) OldestEvictablesInLocation(locationID string, limit int) ([]Evic
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(
-		`SELECT c.segment_id, c.location_id, c.path, c.size_bytes, c.created_at
-         FROM segment_copies c JOIN segments s ON s.id = c.segment_id
-         WHERE c.location_id = ? AND s.locked = 0
-         ORDER BY s.start_ts ASC LIMIT ?`, locationID, limit)
-	if err != nil {
-		return nil, err
-	}
-	copies, err := collectCopies(rows)
+	copies, err := s.OldestCopiesInLocation(locationID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +164,21 @@ func (s *Store) OldestEvictablesInLocation(locationID string, limit int) ([]Evic
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+// OldestCopiesInLocation returns the mirror copies parked on a location, oldest
+// segment first, skipping locked footage. Each one is redundant: its canonical
+// copy lives on another location.
+func (s *Store) OldestCopiesInLocation(locationID string, limit int) ([]*SegmentCopy, error) {
+	rows, err := s.db.Query(
+		`SELECT c.segment_id, c.location_id, c.path, c.size_bytes, c.created_at
+         FROM segment_copies c JOIN segments s ON s.id = c.segment_id
+         WHERE c.location_id = ? AND s.locked = 0
+         ORDER BY s.start_ts ASC LIMIT ?`, locationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return collectCopies(rows)
 }
 
 func collectCopies(rows *sql.Rows) ([]*SegmentCopy, error) {

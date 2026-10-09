@@ -460,68 +460,63 @@ func (j *Janitor) enforceQuota(cameraID string, quota int64) {
 }
 
 func (j *Janitor) enforceFreeSpace() {
-	total, free, ok := j.du(j.activeDir())
-	if !ok || total == 0 {
-		return
-	}
-	minFree := freeFloor(total)
-	if free >= minFree {
-		return
-	}
-	deleted := 0
-	for free < minFree {
-		// Only footage on the default location frees space on this disk; footage
-		// on other locations lives on their own filesystems.
-		oldest, err := j.st.OldestSegmentsInLocation(store.DefaultLocationID, deleteBatch)
-		if err != nil || len(oldest) == 0 {
-			break
-		}
-		progressed := false
-		for _, s := range oldest {
-			if j.delete(s) {
-				deleted++
-				progressed = true
-			}
-		}
-		if !progressed {
-			break // whole batch is export-protected; retry next pass
-		}
-		if _, free, ok = j.du(j.activeDir()); !ok {
-			break
-		}
-	}
-	if deleted > 0 {
-		j.log.Warn("retention: low disk space, removed oldest on default location", "count", deleted)
+	// Only footage on the default location frees space on this disk; footage on
+	// other locations lives on their own filesystems.
+	if n := j.freeSpace(store.DefaultLocationID, j.activeDir()); n > 0 {
+		j.log.Warn("retention: low disk space, removed oldest on default location", "count", n)
 	}
 }
 
 // enforceLocationFreeSpace is the free-space safety net for an unallocated local
-// location: it deletes that location's oldest footage to keep its filesystem
-// above the same floor the default location uses.
+// location: it frees that location's oldest footage to keep its filesystem above
+// the same floor the default location uses.
 func (j *Janitor) enforceLocationFreeSpace(loc *store.StorageLocation) {
 	path, _ := loc.Config["path"].(string)
 	if path == "" {
 		return
 	}
+	if n := j.freeSpace(loc.ID, path); n > 0 {
+		j.log.Warn("retention: low disk space on location, removed oldest", "location", loc.ID, "count", n)
+	}
+}
+
+// freeSpace evicts from one location until the filesystem at path is back above
+// freeFloor, and returns how many items it removed. Mirror copies parked on the
+// location go first: each is redundant, so freeing it loses nothing. Only then is
+// canonical footage evicted, oldest first, through evictCanonical, which promotes
+// a surviving mirror instead of destroying it; footage with no mirror is deleted,
+// still subject to delete's export and lease protection.
+func (j *Janitor) freeSpace(locationID, path string) int {
 	total, free, ok := j.du(path)
 	if !ok || total == 0 {
-		return
+		return 0
 	}
 	minFree := freeFloor(total)
-	if free >= minFree {
-		return
-	}
-	deleted := 0
+	removed := 0
 	for free < minFree {
-		oldest, err := j.st.OldestSegmentsInLocation(loc.ID, deleteBatch)
-		if err != nil || len(oldest) == 0 {
+		copies, err := j.st.OldestCopiesInLocation(locationID, deleteBatch)
+		if err != nil {
 			break
 		}
 		progressed := false
-		for _, s := range oldest {
-			if j.delete(s) {
-				deleted++
-				progressed = true
+		if len(copies) > 0 {
+			for _, c := range copies {
+				j.removeCopyFile(c)
+				if err := j.st.DeleteSegmentCopy(c.SegmentID, c.LocationID); err == nil {
+					removed++
+					progressed = true
+				}
+			}
+		} else {
+			oldest, err := j.st.OldestSegmentsInLocation(locationID, deleteBatch)
+			if err != nil || len(oldest) == 0 {
+				break
+			}
+			for _, s := range oldest {
+				if j.evictCanonical(s) {
+					removed++
+					progressed = true
+				}
 			}
 		}
 		if !progressed {
@@ -531,9 +526,7 @@ func (j *Janitor) enforceLocationFreeSpace(loc *store.StorageLocation) {
 			break
 		}
 	}
-	if deleted > 0 {
-		j.log.Warn("retention: low disk space on location, removed oldest", "location", loc.ID, "count", deleted)
-	}
+	return removed
 }
 
 // delete removes a segment's bytes and index row. It returns false without
