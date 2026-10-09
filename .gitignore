@@ -35,3 +35,5 @@
 !/internal/webassets/dist/.gitkeep
 .backups/
 apdiscovery
+# `go build ./cmd/nvrd` from the repo root drops the binary here; builds belong in bin/.
+/nvrd

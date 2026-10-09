@@ -24,7 +24,7 @@ hardware, recording production cameras behind a frozen `/api/v1`.
   governs.
 - The build derives its version from git tags; `0.0.0-dev` is gone.
 
-## 1.1.0 — 2026-09-10 (`b88982e`)
+## 1.1.0 — 2026-09-10 (`a6fb784`)
 - Audio restored under ffmpeg 7, which announced an AAC track and then wrote no
   packets to it; segments recorded while it was broken are repaired as they are
   served.
@@ -34,14 +34,14 @@ hardware, recording production cameras behind a frozen `/api/v1`.
 - Explicit per-camera Reolink marking for spotlight and IR, replacing a live probe
   that made the controls vanish whenever the camera was unreachable.
 
-## 1.0.0 — 2026-08-20 (`f08c9c7`) — production deployment
+## 1.0.0 — 2026-08-20 (`42d5188`) — production deployment
 - Native systemd units on dedicated hardware, replacing Docker Compose. The
   cutover cost 28 seconds of recording.
 - Pinned runtime vendoring, a hardening preflight, and a retention gate that
   predicts the janitor's first pass before the daemon starts.
 - mDNS/DNS-SD advertisement (`aperture.local`).
 
-## 0.12.0 — 2026-08-19 (`4e64d07`)
+## 0.12.0 — 2026-08-19 (`c7dfe28`)
 - Mirrored storage destinations: record to several locations at once, with
   per-destination retention.
 - Camera controls from the live view: ONVIF picture settings, Reolink spotlight
@@ -50,57 +50,57 @@ hardware, recording production cameras behind a frozen `/api/v1`.
   three-state timeline.
 - Home Assistant live card: managed live key and camera slugs.
 
-## 0.11.0 — 2026-08-07 (`2691245`) — extension platform
+## 0.11.0 — 2026-08-07 (`7fd62b0`) — extension platform
 - Deno backend extensions under a non-root uid with deny-by-default permissions.
 - Sandboxed UI panels with a confused-deputy-safe broker (extension ∩ caller).
 - Manager UI: install, consent, pins, curated store, updates with revert, editor.
 - Private per-extension storage, settings with write-only secrets, and
   host-mediated egress.
 
-## 0.10.0 — 2026-08-06 (`6fe03da`) — frozen /api/v1
+## 0.10.0 — 2026-08-06 (`dea7747`) — frozen /api/v1
 - `/api/v1` alongside the legacy `/api` alias, with capability discovery.
 - Central declarative authorization that refuses to boot on an undeclared route.
 - Scoped API tokens, ETag/If-Match, idempotency keys, keyset pagination, segment
   leases, an SSE change feed, and OpenAPI generated from the route registry.
 
-## 0.9.0 — 2026-08-02 (`378c73e`)
+## 0.9.0 — 2026-08-02 (`833a8d5`)
 - Storage reframed around Aperture's own allocation rather than the whole disk.
 - Multi-camera export: zip and composite multi-view.
 - Playback, shell and mobile sweep, including iOS fullscreen and safe areas.
 
-## 0.8.0 — 2026-07-03 (`a1378c9`)
+## 0.8.0 — 2026-07-03 (`1a69225`)
 - Scoped API tokens, outbound webhooks, OpenAPI.
 - Automation engine, inbound Home Assistant control, ONVIF and HomeKit.
 - Opt-in, event-gated object detection.
 
-## 0.7.0 — 2026-06-30 (`4abfee6`)
+## 0.7.0 — 2026-06-30 (`e43a6e4`)
 - System health dashboard; resilience and operability passes.
 - Storage redesign: global cap, configurable path, tabbed settings.
 - On-device notifications without an external push service.
 
-## 0.6.0 — 2026-06-24 (`a2212c2`)
+## 0.6.0 — 2026-06-24 (`b09e502`)
 - Clip export and scoped share links.
 - Notifications engine and channels, PWA, web push.
 - Motion quality: per-camera roll, cooldown and sensitivity, paintable zones.
 - Audit log, per-user preferences, i18n (DE/EN), first-login flow, TOTP 2FA and
   passkeys.
 
-## 0.5.0 — 2026-06-24 (`476cd99`)
+## 0.5.0 — 2026-06-24 (`08f169d`)
 - Home Assistant MQTT integration (outbound).
 - `nvrctl` full-screen admin console; OIDC/SSO login.
 - Mobile playback layout and responsive bottom nav.
 
-## 0.4.0 — 2026-06-23 (`7aa3de0`)
+## 0.4.0 — 2026-06-23 (`9651c7b`)
 - Record modes honoured; multi-user roles with per-camera access.
 - Weekly schedule editor; admin storage management.
 
-## 0.3.0 — 2026-06-23 (`c9e547e`)
+## 0.3.0 — 2026-06-23 (`b118bdb`)
 - Motion detection and events.
 
-## 0.2.0 — 2026-06-23 (`4b771f7`)
+## 0.2.0 — 2026-06-23 (`e8ae72b`)
 - Continuous recorder, retention janitor, recordings API.
 - UniFi-style playback with a fixed-playhead scrub timeline.
 
-## 0.1.0 — 2026-06-23 (`dfa25ee`)
+## 0.1.0 — 2026-06-23 (`0e0583f`)
 - Backend foundation: config, SQLite store, auth, go2rtc stream manager, API.
 - React UI: design system, app shell, live tiles.
