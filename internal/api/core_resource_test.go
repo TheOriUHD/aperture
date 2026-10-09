@@ -16,7 +16,7 @@ func TestEventEndTsMsOngoing(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	const T = int64(1_700_000_000_000)
 	ongoing := &store.Event{CameraID: "cam1", StartTS: T} // EndTS 0 = ongoing
@@ -65,8 +65,8 @@ func TestEventDetectionsEndpoint(t *testing.T) {
 		{Label: "person", Confidence: 0.9, X: 0.1, Y: 0.1, W: 0.2, H: 0.3},
 	}))
 
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
-	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s.am, viewer))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
+	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s, viewer))}
 
 	rec := s.reqAs("GET", "/api/v1/events/"+ev.ID+"/detections", adminC)
 	if rec.Code != http.StatusOK {

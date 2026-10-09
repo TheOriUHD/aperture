@@ -20,7 +20,7 @@ func TestCameraScopeDenied(t *testing.T) {
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "Own"}))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam2", Name: "Other"}))
 	mustDo(t, s.st.SetUserCameras(viewer.ID, []string{"cam1"})) // viewer may see cam1 only
-	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s.am, viewer))}
+	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s, viewer))}
 	anon := cred{"anon", nil}
 
 	// Every route scoped to a camera the viewer cannot see (cam2).
@@ -61,7 +61,7 @@ func TestListCamerasFilteredForViewer(t *testing.T) {
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "Own"}))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam2", Name: "Other"}))
 	mustDo(t, s.st.SetUserCameras(viewer.ID, []string{"cam1"}))
-	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s.am, viewer))}
+	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s, viewer))}
 
 	body := s.reqAs("GET", "/api/v1/cameras", viewerC).Body.String()
 	if !strings.Contains(body, "cam1") {

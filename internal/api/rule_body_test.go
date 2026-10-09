@@ -18,7 +18,7 @@ func newRuleTest(t *testing.T) (*Server, cred, *store.NotifyRule) {
 	mustDo(t, s.st.CreateUser(admin))
 	rule := &store.NotifyRule{UserID: admin.ID, Name: "R", Enabled: true, QuietStart: -1, QuietEnd: -1}
 	mustDo(t, s.st.CreateRule(rule))
-	return s, cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}, rule
+	return s, cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}, rule
 }
 
 // TestRuleUpdateRejectsIdInBody pins the bug: the id belongs in the URL, not the

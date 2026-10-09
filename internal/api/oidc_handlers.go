@@ -78,7 +78,10 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		fail()
 		return
 	}
-	s.startSession(w, u)
+	if err := s.startSession(w, r, u, s.trustedDevice(r, u.ID)); err != nil {
+		fail()
+		return
+	}
 	s.logAuditAs(r, u.Email, "auth.login", u.Email, "sso")
 	http.Redirect(w, r, "/", http.StatusFound)
 }

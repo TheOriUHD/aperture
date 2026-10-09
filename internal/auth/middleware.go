@@ -16,7 +16,7 @@ const claimsKey ctxKey = iota
 // CLI bearer token authenticates as a synthetic admin (for nvrctl).
 func (m *Manager) Context(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if claims, err := m.SessionFromRequest(r); err == nil {
+		if claims := m.sessionFromRequest(w, r); claims != nil {
 			r = r.WithContext(context.WithValue(r.Context(), claimsKey, claims))
 		} else if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 			if claims := m.CLISession(bearer); claims != nil {
@@ -27,6 +27,21 @@ func (m *Manager) Context(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sessionFromRequest resolves the session cookie, if any, through the store-backed
+// resolver. It runs before the handler writes anything, so the resolver may still
+// set a renewed cookie on w.
+func (m *Manager) sessionFromRequest(w http.ResponseWriter, r *http.Request) *SessionClaims {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil || c.Value == "" || m.session == nil {
+		return nil
+	}
+	claims := m.session(w, r, c.Value)
+	if claims != nil {
+		claims.Class = ClassSession
+	}
+	return claims
 }
 
 // RequireAuth rejects unauthenticated requests with 401.

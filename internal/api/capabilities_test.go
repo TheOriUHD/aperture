@@ -15,7 +15,7 @@ func TestVersionAndCapabilities(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	// /version is public (pre-auth negotiation).
 	rec := s.reqAs("GET", "/api/v1/version", cred{"anon", nil})

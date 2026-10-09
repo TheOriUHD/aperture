@@ -17,7 +17,7 @@ func TestCoverageMergeAndTolerance(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	const T = int64(1_700_000_000_000)
 	// A,B contiguous; C 1s after B; D 9s after C.
@@ -69,7 +69,7 @@ func TestCoverageDefaultsAndValidation(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	const T = int64(1_700_000_000_000)
 	mustDo(t, s.st.InsertSegment(&store.Segment{CameraID: "cam1", Path: "x", StartTS: T, EndTS: T + 10_000}))

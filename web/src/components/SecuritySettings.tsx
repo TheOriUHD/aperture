@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck, ShieldOff, KeyRound, Fingerprint, Trash2, Plus } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { TwoFactorSetup } from "./TwoFactorSetup";
+import { SignedInDevices } from "./SignedInDevices";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { registerPasskey, passkeysSupported, passkeyError } from "../lib/passkey";
@@ -16,6 +17,7 @@ interface PasskeyRow {
 
 export function SecuritySettings() {
   const { user, refresh } = useAuth();
+  const qc = useQueryClient();
   const passkeys = useQuery({
     queryKey: ["passkeys"],
     queryFn: () => api.get<PasskeyRow[]>("/api/auth/passkeys"),
@@ -69,8 +71,12 @@ export function SecuritySettings() {
     }
     setBusy(true);
     try {
-      await api.post("/api/auth/password", { currentPassword: cur, newPassword: nw });
-      setPwMsg("Password updated.");
+      const r = await api.post<{ signedOut?: number }>("/api/auth/password", { currentPassword: cur, newPassword: nw });
+      const n = r?.signedOut ?? 0;
+      setPwMsg(
+        n > 0 ? `Password updated. ${n} other device${n === 1 ? " was" : "s were"} signed out.` : "Password updated.",
+      );
+      await qc.invalidateQueries({ queryKey: ["sessions"] });
       setCur("");
       setNw("");
       setNw2("");
@@ -91,6 +97,7 @@ export function SecuritySettings() {
       setDisabling(false);
       setDisableVal("");
       await refresh();
+      await qc.invalidateQueries({ queryKey: ["sessions"] }); // trusted marks are gone
     } catch (e) {
       setDisableErr((e as Error).message || "Verification failed.");
     } finally {
@@ -113,7 +120,7 @@ export function SecuritySettings() {
             <p className="text-sm text-fg">Two-factor authentication</p>
             <p className="text-xs text-fg-faint">
               {user?.twoFactor
-                ? "On — a one-time code is required at sign-in."
+                ? "On — a one-time code is required when you sign in on a new device."
                 : "Off — add an authenticator app for stronger security."}
             </p>
           </div>
@@ -181,6 +188,8 @@ export function SecuritySettings() {
           </div>
         )}
       </div>
+
+      <SignedInDevices />
 
       <form onSubmit={changePw} className="space-y-3">
         <p className="text-xs font-medium text-fg-muted flex items-center gap-1.5">

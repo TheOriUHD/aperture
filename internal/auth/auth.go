@@ -3,16 +3,26 @@
 package auth
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
-const sessionCookie = "aperture_session"
+const (
+	sessionCookie = "aperture_session"
+	// deviceCookie marks a browser that completed a second factor, so its next
+	// password sign-in can skip the code. It outlives sessions on purpose.
+	deviceCookie = "aperture_device"
+)
 
 // Manager issues and verifies credentials. It is safe for concurrent use.
 type Manager struct {
@@ -24,7 +34,38 @@ type Manager struct {
 	// apiToken resolves a Bearer string to session claims for a stored API token
 	// (bound to a user). Injected from main so auth stays store-agnostic.
 	apiToken func(bearer string) *SessionClaims
+	// session resolves a session cookie to the signed-in user's current claims,
+	// sliding the cookie forward through w when due. Injected by the API server,
+	// which owns the session store.
+	session func(w http.ResponseWriter, r *http.Request, token string) *SessionClaims
 }
+
+// SetSessionResolver wires the session-cookie → claims lookup (store-backed).
+func (m *Manager) SetSessionResolver(fn func(w http.ResponseWriter, r *http.Request, token string) *SessionClaims) {
+	m.session = fn
+}
+
+// NewToken returns a random 256-bit cookie token and the hash that is stored for
+// it. Only the hash is kept server-side, so a copy of the database cannot be
+// replayed as a sign-in.
+func NewToken() (token, hash string) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic("auth: cannot read random bytes: " + err.Error())
+	}
+	token = base64.RawURLEncoding.EncodeToString(b)
+	return token, HashToken(token)
+}
+
+// HashToken is the stored form of a cookie token.
+func HashToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+
+// IsLegacySession reports whether a session cookie is in the old self-contained
+// JWT format (three dot-separated parts) rather than a stored-session token.
+func IsLegacySession(token string) bool { return strings.Count(token, ".") == 2 }
 
 // NewManager builds a Manager from the configured secrets.
 func NewManager(jwtSecret, streamSecret, cliToken []byte, secureCookies bool) *Manager {
@@ -76,6 +117,7 @@ type SessionClaims struct {
 	Scopes       []string `json:"-"` // token scopes; empty for session/cli means all scopes
 	CameraGrants []string `json:"-"` // token per-camera allowlist; empty means the owner's full ACL
 	ExtID        string   `json:"-"` // extension id for an extension-minted token; "" otherwise (T2 ext_kv)
+	SessionID    string   `json:"-"` // the stored session behind a cookie; "" for other classes
 	jwt.RegisteredClaims
 }
 
@@ -117,7 +159,10 @@ func VerifyPassword(hash, plain string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain)) == nil
 }
 
-// IssueSession returns a signed JWT for the user valid for ttl.
+// IssueSession returns a signed JWT session for the user valid for ttl: the OLD
+// cookie format, replaced by stored sessions. Nothing issues it any more; it stays
+// so the one-time upgrade of cookies still in browsers can be tested. Remove it
+// together with ParseLegacySession once those have expired (7 days after deploy).
 func (m *Manager) IssueSession(userID, email, name, role string, ttl time.Duration) (string, error) {
 	now := time.Now()
 	claims := SessionClaims{
@@ -146,44 +191,55 @@ func (m *Manager) ParseSession(token string) (*SessionClaims, error) {
 	return claims, nil
 }
 
-// SetSessionCookie writes the session cookie on the response.
-func (m *Manager) SetSessionCookie(w http.ResponseWriter, token string, ttl time.Duration) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   m.secure,
-		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(ttl),
-		MaxAge:   int(ttl.Seconds()),
-	})
-}
-
-// ClearSessionCookie expires the session cookie.
-func (m *Manager) ClearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: "", Path: "/",
-		HttpOnly: true, Secure: m.secure, SameSite: http.SameSiteLaxMode,
-		MaxAge: -1,
-	})
-}
-
-// SessionFromRequest extracts and verifies the session cookie, if present.
-func (m *Manager) SessionFromRequest(r *http.Request) (*SessionClaims, error) {
-	c, err := r.Cookie(sessionCookie)
-	if err != nil {
-		return nil, err
-	}
-	claims, err := m.ParseSession(c.Value)
+// ParseLegacySession verifies an old-format JWT session cookie, so a browser still
+// carrying one can be moved onto a stored session instead of being signed out.
+func (m *Manager) ParseLegacySession(token string) (*SessionClaims, error) {
+	claims, err := m.ParseSession(token)
 	if err != nil {
 		return nil, err
 	}
 	if claims.Stage != "" {
 		return nil, errors.New("incomplete session")
 	}
-	claims.Class = ClassSession
 	return claims, nil
+}
+
+// SetSessionCookie writes the session cookie on the response.
+func (m *Manager) SetSessionCookie(w http.ResponseWriter, token string, ttl time.Duration) {
+	m.setCookie(w, sessionCookie, token, ttl)
+}
+
+// ClearSessionCookie expires the session cookie.
+func (m *Manager) ClearSessionCookie(w http.ResponseWriter) { m.setCookie(w, sessionCookie, "", -1) }
+
+// SetDeviceCookie writes the trusted-device cookie on the response.
+func (m *Manager) SetDeviceCookie(w http.ResponseWriter, token string, ttl time.Duration) {
+	m.setCookie(w, deviceCookie, token, ttl)
+}
+
+// ClearDeviceCookie expires the trusted-device cookie.
+func (m *Manager) ClearDeviceCookie(w http.ResponseWriter) { m.setCookie(w, deviceCookie, "", -1) }
+
+// DeviceToken returns the trusted-device cookie's value, or "".
+func DeviceToken(r *http.Request) string {
+	if c, err := r.Cookie(deviceCookie); err == nil {
+		return c.Value
+	}
+	return ""
+}
+
+// setCookie writes an HttpOnly, Lax, whole-site cookie; a negative ttl deletes it.
+func (m *Manager) setCookie(w http.ResponseWriter, name, value string, ttl time.Duration) {
+	c := &http.Cookie{
+		Name: name, Value: value, Path: "/",
+		HttpOnly: true, Secure: m.secure, SameSite: http.SameSiteLaxMode,
+		MaxAge: -1,
+	}
+	if ttl > 0 {
+		c.Expires = time.Now().Add(ttl)
+		c.MaxAge = int(ttl.Seconds())
+	}
+	http.SetCookie(w, c)
 }
 
 // streamClaims is the payload of a short-lived stream-access token.

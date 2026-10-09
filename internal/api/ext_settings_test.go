@@ -24,7 +24,7 @@ func TestExtSettings(t *testing.T) {
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
 	mustDo(t, s.st.CreateExtension(&store.Extension{ID: "com.set", Name: "S", Version: "1.0.0", Source: "sideload", Enabled: true, ManifestJSON: settingsManifest, InstalledBy: admin.ID}))
-	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s, admin))}
 
 	// A valid write.
 	if rec := s.reqBody("PUT", "/api/v1/ext/com.set/settings", adminSess,
@@ -96,7 +96,7 @@ func TestExtSettings(t *testing.T) {
 	// panel, and still never sees the secret.
 	viewer := &store.User{ID: "viewer", Email: "v@x", Name: "V", Role: store.RoleViewer}
 	mustDo(t, s.st.CreateUser(viewer))
-	viewerSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, viewer))}
+	viewerSess := cred{apply: cookieCred(sessionCookieFor(t, s, viewer))}
 	vr := s.reqAs("GET", "/api/v1/ext/com.set/settings", viewerSess)
 	if vr.Code != 200 || strings.Contains(vr.Body.String(), "s3cr3t") {
 		t.Fatalf("viewer settings GET = %d and must not leak the secret (%s)", vr.Code, vr.Body)
@@ -122,7 +122,7 @@ func TestExtSettingsGroupsAndTypes(t *testing.T) {
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
 	mustDo(t, s.st.CreateExtension(&store.Extension{ID: "com.grp", Name: "G", Version: "1.0.0", Source: "sideload", Enabled: true, ManifestJSON: groupManifest, CameraGrants: []string{"cam1", "cam2"}, InstalledBy: admin.ID}))
-	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s, admin))}
 
 	// Save a url + a two-row camera→entity mapping.
 	body := `{"values":{"ha_url":"https://ha.local:8123","mapping":[{"camera":"cam1","entity":"light.a"},{"camera":"cam2","entity":"light.b"}]}}`

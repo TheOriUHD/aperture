@@ -14,6 +14,8 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [tfToken, setTfToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  // On by default: the point is not being asked again on your own devices.
+  const [trustDevice, setTrustDevice] = useState(true);
   const [error, setError] = useState(
     new URLSearchParams(window.location.search).get("error") === "sso"
       ? t("auth.ssoFailed", "Single sign-on failed. Try again or use your password.")
@@ -60,7 +62,7 @@ export function Login() {
     setError("");
     setBusy(true);
     try {
-      await login2fa(tfToken ?? "", code.trim());
+      await login2fa(tfToken ?? "", code.trim(), trustDevice);
     } catch {
       setError(t("auth.badCode", "Incorrect code. Try again, or use a recovery code."));
     } finally {
@@ -84,6 +86,20 @@ export function Login() {
             value={code}
             onChange={(e) => setCode(e.target.value)}
           />
+          <label className="flex items-start gap-2.5 text-left cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-brand"
+              checked={trustDevice}
+              onChange={(e) => setTrustDevice(e.target.checked)}
+            />
+            <span>
+              <span className="block text-sm text-fg">{t("auth.trustDevice", "Trust this device")}</span>
+              <span className="block text-xs text-fg-faint">
+                {t("auth.trustDeviceHint", "Don't ask for a code when I sign in on this browser again.")}
+              </span>
+            </span>
+          </label>
           {error && <p className="text-sm text-rec">{error}</p>}
           <button type="submit" className="btn-primary w-full" disabled={busy || code.trim().length < 6}>
             {busy ? t("auth.verifying", "Verifying…") : t("auth.verify", "Verify")}

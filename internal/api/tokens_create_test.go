@@ -22,7 +22,7 @@ func TestCreateTokenScopes(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "u1", Email: "a@t", Name: "A", Role: store.RoleAdmin}
 	mustDo(t, s.st.CreateUser(admin))
-	sess := sessionCookieFor(t, s.am, admin)
+	sess := sessionCookieFor(t, s, admin)
 
 	post := func(body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/api/v1/tokens", strings.NewReader(body))

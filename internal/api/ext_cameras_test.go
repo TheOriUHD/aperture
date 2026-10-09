@@ -73,7 +73,7 @@ func TestExtSetCameras(t *testing.T) {
 		ID: "com.x", Name: "X", Version: "1.0.0", Source: "sideload", Enabled: true,
 		ManifestJSON: manifest, CameraGrants: []string{"a", "b", "c"}, InstalledBy: admin.ID,
 	}))
-	sess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	sess := cred{apply: cookieCred(sessionCookieFor(t, s, admin))}
 
 	// Narrow to a subset → 200, grant rewritten.
 	if rec := s.reqBody("PUT", "/api/v1/ext/com.x/cameras", sess, strings.NewReader(`{"cameras":["a"]}`)); rec.Code != 200 {

@@ -29,7 +29,7 @@ func TestFeedResumeReplay(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	const T = int64(1_700_000_000_000)
 	for i := 0; i < 3; i++ { // seq 1,2,3
@@ -60,7 +60,7 @@ func TestFeedResetOnPrunedCursor(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	const T = int64(1_700_000_000_000)
 	var ids []string

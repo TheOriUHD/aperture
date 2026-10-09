@@ -32,7 +32,7 @@ func newCredTest(t *testing.T) (s *Server, admin, viewer cred) {
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "Schlafzimmer", RTSPMainURL: credMain,
 		RTSPSubURL: credSub, Enabled: true, RecordMode: store.ModeContinuous, RetentionDays: 7}))
 	mustDo(t, s.st.SetUserCameras(v.ID, []string{"cam1"}))
-	return s, cred{"admin", cookieCred(sessionCookieFor(t, s.am, a))}, cred{"viewer", cookieCred(sessionCookieFor(t, s.am, v))}
+	return s, cred{"admin", cookieCred(sessionCookieFor(t, s, a))}, cred{"viewer", cookieCred(sessionCookieFor(t, s, v))}
 }
 
 func TestCameraLinksNeverLeaveWithTheirLogin(t *testing.T) {

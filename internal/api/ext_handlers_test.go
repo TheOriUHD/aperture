@@ -54,7 +54,7 @@ func newExtAdmin(t *testing.T) (*Server, cred) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
-	return s, cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	return s, cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 }
 
 // A pure-UI panel with a NON-camera scope: under the opt-in camera model it needs

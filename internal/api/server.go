@@ -34,8 +34,6 @@ import (
 	"github.com/TheOriUHD/aperture/internal/webhook"
 )
 
-const sessionTTL = 7 * 24 * time.Hour
-
 // Server wires the HTTP API and the embedded web UI.
 type Server struct {
 	cfg      *config.Config
@@ -60,6 +58,7 @@ type Server struct {
 	watchdog  *watchdog.Watchdog
 	logs      *logbuf.Ring
 	waSess    *waSessions
+	legacy    legacyUpgrades // old-format session cookies being moved onto stored sessions
 	registry  *storage.Registry
 	cipher    *secret.Cipher
 	reconcile func() // triggers an immediate retention/reservation pass (set at startup)
@@ -121,6 +120,7 @@ func (s *Server) triggerReconcile() {
 func NewServer(cfg *config.Config, st *store.Store, am *auth.Manager, sm *stream.Manager, rec *record.Recorder, det *motion.Detector, detectEng *detect.Engine, webhookDisp *webhook.Dispatcher, automateEng *automate.Engine, haPub *ha.Publisher, oidcAuth *oidc.Authenticator, auditLog *audit.Logger, exp *export.Manager, notifyEng *notify.Engine, weatherPoller *weather.Poller, wd *watchdog.Watchdog, logs *logbuf.Ring, log *slog.Logger) *Server {
 	s := &Server{eufyCtx: context.Background(), cfg: cfg, st: st, am: am, sm: sm, rec: rec, det: det, detect: detectEng, webhook: webhookDisp, automate: automateEng, ha: haPub, oidc: oidcAuth, audit: auditLog, exp: exp, notify: notifyEng, weather: weatherPoller, watchdog: wd, logs: logs, waSess: newWASessions(), startedAt: time.Now(), log: log}
 	s.limiter = newRateLimiter()
+	am.SetSessionResolver(s.resolveSession)
 	s.router = s.routes()
 	return s
 }
@@ -286,6 +286,10 @@ func (s *Server) routes() http.Handler {
 		g.Post("/auth/passkey/register/finish", authedSessionOnly, s.handlePasskeyRegisterFinish)
 		g.Get("/auth/passkeys", authed, s.handleListPasskeys)
 		g.Delete("/auth/passkeys/{id}", authedSessionOnly, s.handleDeletePasskey)
+		// The caller's own signed-in devices (sessions.go).
+		g.Get("/auth/sessions", authedSessionOnly, s.handleListSessions)
+		g.Delete("/auth/sessions/{id}", authedSessionOnly, s.handleRevokeSession)
+		g.Post("/auth/sessions/revoke-others", authedSessionOnly, s.handleRevokeOtherSessions)
 		g.Get("/users/me/preferences", authed, s.handleGetPrefs)
 		g.Put("/users/me/preferences", authed, s.handleSetPrefs)
 		g.Get("/cameras", scoped(ScopeCamerasRead), s.handleListCameras)

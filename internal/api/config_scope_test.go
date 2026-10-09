@@ -41,7 +41,7 @@ func TestConfigScopeAndK3(t *testing.T) {
 
 	// K3: a viewer SESSION (not a token) still reads the settings blob — scope
 	// checks are bypassed for sessions, so the TopBar isn't broken for viewers.
-	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s.am, viewer))}
+	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s, viewer))}
 	if rec := s.reqAs("GET", "/api/v1/system/settings", viewerC); rec.Code != http.StatusOK {
 		t.Fatalf("viewer session GET /system/settings: got %d, want 200 (K3 must not break the header)", rec.Code)
 	}
@@ -53,7 +53,7 @@ func TestConfigUpdatedEmit(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	_, ch := s.notify.SubscribeFeed(notify.FeedFilter{Types: map[string]bool{"config.updated": true}}, nil)
 	if rec := s.reqBody("PUT", "/api/v1/system/settings", adminC, strings.NewReader(`{"siteName":"Test Site"}`)); rec.Code != http.StatusOK {

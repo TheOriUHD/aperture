@@ -17,7 +17,7 @@ func TestIfMatchPolicy(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "Orig"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	_, tok, err := s.st.CreateAPIToken(admin.ID, "ext", 0, []string{ScopeCamerasWrite}, nil)
 	mustDo(t, err)
@@ -75,7 +75,7 @@ func TestIfMatchSessionEnforcedWhenSent(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "Orig"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	put := func(ifMatch string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("PUT", "/api/v1/cameras/cam1", strings.NewReader(`{"name":"Renamed"}`))

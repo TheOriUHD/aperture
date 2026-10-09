@@ -35,7 +35,7 @@ func TestInteropToggle(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: store.RoleAdmin}
 	mustDo(t, s.st.CreateUser(admin))
-	sess := cred{name: "admin", apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	sess := cred{name: "admin", apply: cookieCred(sessionCookieFor(t, s, admin))}
 	onvif, hk := &fakeInterop{}, &fakeInterop{}
 	s.SetInterop(onvif, hk)
 
@@ -87,7 +87,7 @@ func TestInteropUnavailable(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: store.RoleAdmin}
 	mustDo(t, s.st.CreateUser(admin))
-	sess := cred{name: "admin", apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	sess := cred{name: "admin", apply: cookieCred(sessionCookieFor(t, s, admin))}
 
 	rec := s.reqAs("GET", "/api/v1/system/interop", sess)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"available":false`) {

@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/store"
@@ -55,7 +56,10 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not create account")
 		return
 	}
-	s.startSession(w, u)
+	if err := s.startSession(w, r, u, ""); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	s.logAuditAs(r, u.Email, "user.create", u.Email, "first administrator")
 	writeJSON(w, http.StatusCreated, s.userPayload(u))
 }
@@ -83,22 +87,37 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "account disabled")
 		return
 	}
+	// A browser that already completed the second factor for this account skips it.
+	deviceID := s.trustedDevice(r, u.ID)
+	how := "password"
 	if u.TOTPEnabled {
-		tok, err := s.am.IssuePending2FA(u.ID, pending2FATTL)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
+		if deviceID == "" {
+			tok, err := s.am.IssuePending2FA(u.ID, pending2FATTL)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"twoFactorRequired": true, "token": tok})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"twoFactorRequired": true, "token": tok})
+		s.touchTrustedDevice(w, r, deviceID, time.Now().Unix())
+		how = "password, trusted device"
+	}
+	if err := s.startSession(w, r, u, deviceID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	s.startSession(w, u)
-	s.logAuditAs(r, u.Email, "auth.login", u.Email, "password")
+	s.logAuditAs(r, u.Email, "auth.login", u.Email, how)
 	writeJSON(w, http.StatusOK, s.userPayload(u))
 }
 
+// handleLogout ends this browser's session. Its trusted-device mark stays, so
+// signing in here again needs the password but not the authenticator code.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.logAudit(r, "auth.logout", "", "")
+	if c := auth.FromContext(r.Context()); c != nil && c.SessionID != "" {
+		_ = s.st.DeleteSession(c.SessionID)
+	}
 	s.am.ClearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
@@ -111,15 +130,6 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.userPayload(u))
-}
-
-func (s *Server) startSession(w http.ResponseWriter, u *store.User) {
-	token, err := s.am.IssueSession(u.ID, u.Email, u.Name, u.Role, sessionTTL)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	s.am.SetSessionCookie(w, token, sessionTTL)
 }
 
 func publicUser(u *store.User) map[string]any {

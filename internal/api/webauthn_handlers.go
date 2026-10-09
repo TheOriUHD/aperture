@@ -263,7 +263,12 @@ func (s *Server) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request
 		credJSON, _ := json.Marshal(cred)
 		_ = s.st.UpdateWebAuthnCredential(base64.RawURLEncoding.EncodeToString(cred.ID), string(credJSON))
 	}
-	s.startSession(w, matched)
+	// A passkey is a second factor in itself: remember the browser, so a later
+	// password sign-in from it skips the authenticator code.
+	if err := s.startSession(w, r, matched, s.trustDevice(w, r, matched)); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	s.logAuditAs(r, matched.Email, "auth.login", matched.Email, "passkey")
 	writeJSON(w, http.StatusOK, s.userPayload(matched))
 }

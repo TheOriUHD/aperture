@@ -15,7 +15,7 @@ func TestCameraDestinationsAPI(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: store.RoleAdmin}
 	mustDo(t, s.st.CreateUser(admin))
-	sess := cred{name: "admin", apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	sess := cred{name: "admin", apply: cookieCred(sessionCookieFor(t, s, admin))}
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "c1", Name: "Cam", RetentionDays: 7}))
 	nas := &store.StorageLocation{Name: "NAS", Type: store.LocationSMB, Enabled: true}
 	mustDo(t, s.st.CreateStorageLocation(nas))

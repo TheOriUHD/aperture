@@ -17,7 +17,7 @@ func TestSegmentsScopeRequired(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	// Session (implicitly all scopes) → 200.
 	if rec := s.reqAs("GET", "/api/v1/cameras/cam1/segments", adminC); rec.Code != http.StatusOK {
@@ -48,7 +48,7 @@ func TestSegmentsKeysetPaging(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	const T = int64(1_700_000_000_000)
 	starts := []int64{T, T + 10, T + 10, T + 20, T + 30, T + 40, T + 50} // one tie at T+10

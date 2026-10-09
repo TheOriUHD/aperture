@@ -76,6 +76,9 @@ func (s *Server) handleLogin2FA(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Token string `json:"token"`
 		Code  string `json:"code"`
+		// TrustDevice remembers this browser so its next sign-in skips the code.
+		// Absent (an older client) means yes.
+		TrustDevice *bool `json:"trustDevice"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
@@ -104,7 +107,14 @@ func (s *Server) handleLogin2FA(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "incorrect code")
 		return
 	}
-	s.startSession(w, u)
+	deviceID := ""
+	if req.TrustDevice == nil || *req.TrustDevice {
+		deviceID = s.trustDevice(w, r, u)
+	}
+	if err := s.startSession(w, r, u, deviceID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 	s.logAuditAs(r, u.Email, "auth.login", u.Email, "2fa")
 	writeJSON(w, http.StatusOK, s.userPayload(u))
 }
@@ -143,8 +153,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.st.SetUserPassword(u.ID, hash)
 	_ = s.st.SetMustChangePassword(u.ID, false)
+	// A new password signs out every other browser; this one stays signed in.
+	n, _ := s.st.DeleteUserSessions(u.ID, c.SessionID)
 	s.logAudit(r, "auth.password_change", u.Email, "")
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "signedOut": n})
 }
 
 // handle2FASetup generates a fresh (not-yet-enabled) TOTP secret.
@@ -189,6 +201,9 @@ func (s *Server) handle2FAEnable(w http.ResponseWriter, r *http.Request) {
 	}
 	plain, hashedJSON := genRecoveryCodes(10)
 	_ = s.st.SetUserTOTP(u.ID, u.TOTPSecret, true, hashedJSON)
+	// A new authenticator starts with no remembered devices: starting setup turns
+	// the old one off without going through disable, so clear them here too.
+	_, _ = s.st.DeleteUserTrustedDevices(u.ID, "")
 	s.logAudit(r, "auth.2fa_enabled", u.Email, "")
 	writeJSON(w, http.StatusOK, map[string]any{"recoveryCodes": plain})
 }
@@ -218,6 +233,7 @@ func (s *Server) handle2FADisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.st.SetUserTOTP(u.ID, "", false, "")
+	_, _ = s.st.DeleteUserTrustedDevices(u.ID, "")
 	s.logAudit(r, "auth.2fa_disabled", u.Email, "")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }

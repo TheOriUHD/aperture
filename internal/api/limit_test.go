@@ -89,7 +89,7 @@ func TestRateLimitPerClass(t *testing.T) {
 	// Shrink the token bucket to 3 with no refill; leave the session bucket large.
 	s.limiter.token = rateConfig{burst: 3, refill: 0}
 	tokenC := cred{"token", bearerCred(plain)}
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	var ok, limited int
 	for i := 0; i < 6; i++ {

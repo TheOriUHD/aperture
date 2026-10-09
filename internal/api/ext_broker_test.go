@@ -34,8 +34,8 @@ func newBrokerTest(t *testing.T) (*Server, cred, cred) {
 		Scopes: []string{"site:write"}, Enabled: true, InstalledBy: admin.ID,
 	}))
 	return s,
-		cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))},
-		cred{"viewer", cookieCred(sessionCookieFor(t, s.am, viewer))}
+		cred{"admin", cookieCred(sessionCookieFor(t, s, admin))},
+		cred{"viewer", cookieCred(sessionCookieFor(t, s, viewer))}
 }
 
 func brokerCall(t *testing.T, s *Server, c cred, extID, method, path, origin string) *httptest.ResponseRecorder {

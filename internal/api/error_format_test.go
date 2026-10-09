@@ -18,7 +18,7 @@ func TestErrorEnvelopeHasMachineCode(t *testing.T) {
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "Own"}))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam2", Name: "Other"}))
 	mustDo(t, s.st.SetUserCameras(viewer.ID, []string{"cam1"}))
-	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s.am, viewer))}
+	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s, viewer))}
 	anon := cred{"anon", nil}
 
 	cases := []struct {

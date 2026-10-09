@@ -17,7 +17,7 @@ func TestLeaseAPICreateReleaseAndScope(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	// Create a lease (admin session).
 	rec := s.reqBody("POST", "/api/v1/cameras/cam1/lease", adminC, strings.NewReader(`{"fromTs":1000,"toTs":5000,"ttlSec":600}`))

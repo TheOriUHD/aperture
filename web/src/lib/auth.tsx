@@ -8,7 +8,8 @@ interface AuthState {
   loading: boolean;
   needsSetup: boolean;
   login: (email: string, password: string) => Promise<{ twoFactor: boolean; token?: string }>;
-  login2fa: (token: string, code: string) => Promise<void>;
+  // trustDevice: skip the code on this browser at later sign-ins.
+  login2fa: (token: string, code: string, trustDevice: boolean) => Promise<void>;
   loginPasskey: () => Promise<void>;
   setup: (email: string, name: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -59,8 +60,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setNeedsSetup(false);
       return { twoFactor: false };
     },
-    async login2fa(token, code) {
-      const u = await api.post<User>("/api/auth/login/2fa", { token, code });
+    async login2fa(token, code, trustDevice) {
+      const u = await api.post<User>("/api/auth/login/2fa", { token, code, trustDevice });
       setUser(u);
       setNeedsSetup(false);
     },

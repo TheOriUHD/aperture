@@ -32,8 +32,8 @@ func TestAuthMatrix(t *testing.T) {
 	mustDo(t, s.st.SetUserCameras(viewer.ID, []string{cam1.ID})) // viewer may see cam1 only
 
 	anon := cred{"anon", nil}
-	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s.am, viewer))}
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s, viewer))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 	cliC := cred{"cli", bearerCred(testCLIToken)} // synthetic admin
 
 	cases := []struct {

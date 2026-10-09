@@ -14,7 +14,7 @@ func TestV1AliasAndVersionHeaders(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 	anon := cred{"anon", nil}
 
 	// Both prefixes resolve the same handler with the same authorization.

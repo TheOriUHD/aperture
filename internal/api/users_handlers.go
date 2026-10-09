@@ -130,6 +130,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 		hash, _ := auth.HashPassword(req.Password)
 		_ = s.st.SetUserPassword(u.ID, hash)
+		_, _ = s.st.DeleteUserSessions(u.ID, "") // an admin-set password signs the account out
+	}
+	if disabled && !u.Disabled {
+		s.endSessions(u.ID) // a disabled account is signed out everywhere, at once
 	}
 	if req.CameraIDs != nil {
 		_ = s.st.SetUserCameras(u.ID, req.CameraIDs)

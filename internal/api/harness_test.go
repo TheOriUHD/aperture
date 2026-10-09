@@ -73,7 +73,7 @@ func newTestServerNoRouter(t *testing.T) *Server {
 	})
 	cfg := &config.Config{DataDir: dir, RecordingsDir: filepath.Join(dir, "recordings")}
 	lg := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return &Server{
+	s := &Server{
 		st:        st,
 		am:        am,
 		cfg:       cfg,
@@ -91,6 +91,8 @@ func newTestServerNoRouter(t *testing.T) *Server {
 			anon:    rateConfig{burst: 1e9, refill: 1e9},
 		},
 	}
+	am.SetSessionResolver(s.resolveSession) // as NewServer does
+	return s
 }
 
 func mustDo(t *testing.T, err error) {
@@ -117,13 +119,15 @@ func bearerCred(token string) func(*http.Request) {
 	return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }
 }
 
-// sessionCookieFor mints a signed session JWT for a user (the cookie value the
-// web app would carry).
-func sessionCookieFor(t *testing.T, am *auth.Manager, u *store.User) string {
+// sessionCookieFor signs a user in through a stored session and returns the
+// cookie value the web app would carry.
+func sessionCookieFor(t *testing.T, s *Server, u *store.User) string {
 	t.Helper()
-	tok, err := am.IssueSession(u.ID, u.Email, u.Name, u.Role, time.Hour)
-	if err != nil {
-		t.Fatalf("issue session: %v", err)
+	tok, hash := auth.NewToken()
+	now := time.Now().Unix()
+	if err := s.st.CreateSession(&store.Session{UserID: u.ID, TokenHash: hash, CreatedAt: now, LastSeenAt: now,
+		ExpiresAt: now + 3600, MaxExpiresAt: now + 3600}); err != nil {
+		t.Fatalf("create session: %v", err)
 	}
 	return tok
 }

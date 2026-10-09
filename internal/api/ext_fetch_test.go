@@ -30,7 +30,7 @@ func TestExtFetch(t *testing.T) {
 	admin := &store.User{ID: "admin", Email: "a@x", Name: "Admin", Role: store.RoleAdmin}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
-	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s, admin))}
 
 	manifest := `{"manifest":1,"id":"com.net","name":"N","version":"1.0.0",
 	  "ui":{"panels":[{"slot":"camera-detail","entry":"ui/p.html"}]},
@@ -96,7 +96,7 @@ func TestExtFetchNetworkFromSetting(t *testing.T) {
 	admin := &store.User{ID: "admin", Email: "a@x", Name: "Admin", Role: store.RoleAdmin}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
-	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s, admin))}
 
 	manifest := `{"manifest":1,"id":"com.dyn","name":"D","version":"1.0.0",
 	  "ui":{"panels":[{"slot":"camera-detail","entry":"ui/p.html"}]},
@@ -125,7 +125,7 @@ func TestExtFetchLegibleError(t *testing.T) {
 	admin := &store.User{ID: "admin", Email: "a@x", Name: "Admin", Role: store.RoleAdmin}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
-	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s, admin))}
 
 	// A static host that will refuse (nothing listens on 127.0.0.1:1).
 	manifest := `{"manifest":1,"id":"com.err","name":"E","version":"1.0.0","ui":{"panels":[{"slot":"camera-detail","entry":"ui/p.html"}]},"permissions":{"network":["http://127.0.0.1:1"]}}`
@@ -170,7 +170,7 @@ func TestExtFetchSecretsAreNamespaceScoped(t *testing.T) {
 	admin := &store.User{ID: "admin", Email: "a@x", Name: "Admin", Role: store.RoleAdmin}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.SetSetting("ext.enabled", "1"))
-	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s, admin))}
 
 	// Two extensions, each granted the SAME host, each with its own secret plus a
 	// secret whose KEY NAME collides ("shared") but whose value differs.

@@ -16,7 +16,7 @@ func TestTokenCreationEnforcesScopesAndFreezes(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	// Empty scopes → 400 (a dead token, refused).
 	rec := s.reqBody("POST", "/api/v1/tokens", adminC, strings.NewReader(`{"name":"dead"}`))

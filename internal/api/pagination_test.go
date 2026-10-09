@@ -55,7 +55,7 @@ func TestEventsKeysetNoDupNoSkip(t *testing.T) {
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
 	mustDo(t, s.st.CreateCamera(&store.Camera{ID: "cam1", Name: "1"}))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	const T = int64(1_700_000_000_000)
 	for i := 0; i < 10; i++ { // seq 1..10
@@ -114,7 +114,7 @@ func TestEventsBadCursor(t *testing.T) {
 	s := newTestServer(t)
 	admin := &store.User{ID: "a1", Email: "a@t", Name: "A", Role: "admin"}
 	mustDo(t, s.st.CreateUser(admin))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 	// Valid base64url ("aGVsbG8" = "hello") but not an int64 key → client error.
 	rec := s.reqAs("GET", "/api/v1/events?cursor=aGVsbG8", adminC)
 	if rec.Code != http.StatusBadRequest {

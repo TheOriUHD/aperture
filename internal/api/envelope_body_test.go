@@ -31,7 +31,7 @@ func TestAutomationUpdateRejectsEnvelopeEtag(t *testing.T) {
 		Actions:    json.RawMessage("[]"),
 	}
 	mustDo(t, s.st.CreateAutomation(auto))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	put := func(body string) *httptest.ResponseRecorder {
 		return s.reqBody("PUT", "/api/v1/automations/"+auto.ID, adminC, strings.NewReader(body))
@@ -86,7 +86,7 @@ func TestAutomationSessionIfMatchRoundTrip(t *testing.T) {
 		Trigger: json.RawMessage("{}"), Conditions: json.RawMessage("{}"), Actions: json.RawMessage("[]"),
 	}
 	mustDo(t, s.st.CreateAutomation(auto))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	rec := s.reqAs("GET", "/api/v1/automations", adminC)
 	var list []map[string]any
@@ -119,7 +119,7 @@ func TestWebhookUpdateRejectsEnvelopeEtag(t *testing.T) {
 	mustDo(t, s.st.CreateUser(admin))
 	wh := &store.Webhook{Name: "H", URL: "http://x", Events: []string{}, Enabled: true}
 	mustDo(t, s.st.CreateWebhook(wh))
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
 
 	put := func(body string) *httptest.ResponseRecorder {
 		return s.reqBody("PUT", "/api/v1/webhooks/"+wh.ID, adminC, strings.NewReader(body))

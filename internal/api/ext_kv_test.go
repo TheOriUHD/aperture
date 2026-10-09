@@ -53,7 +53,7 @@ func TestExtKVNamespaceIsolation(t *testing.T) {
 
 	// An admin session (first-party) may reach any namespace — the host uses this
 	// path to relay an admin's UI-panel storage calls under a trusted extId.
-	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, admin))}
+	adminSess := cred{apply: cookieCred(sessionCookieFor(t, s, admin))}
 	if rec := s.reqAs("GET", "/api/v1/ext/com.a/kv/ha_token", adminSess); rec.Code != 200 {
 		t.Errorf("admin session GET = %d, want 200", rec.Code)
 	}
@@ -63,7 +63,7 @@ func TestExtKVNamespaceIsolation(t *testing.T) {
 	// the hole the routes' `authed` spec would otherwise leave open.
 	viewer := &store.User{ID: "viewer", Email: "v@x", Name: "Viewer", Role: store.RoleViewer}
 	mustDo(t, s.st.CreateUser(viewer))
-	viewerSess := cred{apply: cookieCred(sessionCookieFor(t, s.am, viewer))}
+	viewerSess := cred{apply: cookieCred(sessionCookieFor(t, s, viewer))}
 	if rec := s.reqAs("GET", "/api/v1/ext/com.a/kv/ha_token", viewerSess); rec.Code != 403 {
 		t.Errorf("viewer session GET = %d, want 403 (storage is admin-only for humans)", rec.Code)
 	}

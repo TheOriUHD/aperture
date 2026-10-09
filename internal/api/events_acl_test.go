@@ -35,8 +35,8 @@ func TestEventsAllCameraACLInSQL(t *testing.T) {
 		mustDo(t, s.st.InsertEvent(&store.Event{CameraID: "cam2", StartTS: T + 1_000 + int64(i)}))
 	}
 
-	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s.am, admin))}
-	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s.am, viewer))}
+	adminC := cred{"admin", cookieCred(sessionCookieFor(t, s, admin))}
+	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s, viewer))}
 	rng := fmt.Sprintf("from=%d&to=%d", T-1, T+10_000)
 
 	events := func(c cred, limit int) []map[string]any {
@@ -88,7 +88,7 @@ func TestEventsAllViewerNoCameras(t *testing.T) {
 	const T = int64(1_700_000_000_000)
 	mustDo(t, s.st.InsertEvent(&store.Event{CameraID: "cam1", StartTS: T}))
 
-	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s.am, viewer))}
+	viewerC := cred{"viewer", cookieCred(sessionCookieFor(t, s, viewer))}
 	rec := s.reqAs("GET", fmt.Sprintf("/api/v1/events?from=%d&to=%d", T-1, T+1), viewerC)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200", rec.Code)

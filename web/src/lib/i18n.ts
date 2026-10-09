@@ -34,6 +34,8 @@ const de = {
     or: "oder",
     signInWith: "Anmelden mit {{name}}",
     ssoFailed: "Einmalanmeldung fehlgeschlagen. Versuchen Sie es erneut oder nutzen Sie Ihr Passwort.",
+    trustDevice: "Diesem Gerät vertrauen",
+    trustDeviceHint: "Bei der nächsten Anmeldung in diesem Browser nicht nach einem Code fragen.",
   },
   settings: {
     title: "Einstellungen",
