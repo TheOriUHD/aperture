@@ -40,6 +40,8 @@ export type RecordMode = "never" | "continuous" | "motion" | "scheduled";
 export interface Camera {
   id: string;
   name: string;
+  // Links arrive with the login masked ("•••••", see lib/cameraLink), and empty
+  // for anyone but an admin.
   rtspMainUrl: string;
   rtspSubUrl: string;
   enabled: boolean;

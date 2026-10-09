@@ -32,7 +32,6 @@ export function CameraOnvifPanel({ cameraId, vendorMarked = false }: { cameraId:
 
   useEffect(() => {
     if (!data) return;
-    setUser(data.user);
     setPort(data.port);
     setDraft(data.imaging ?? null);
   }, [data]);
@@ -40,14 +39,23 @@ export function CameraOnvifPanel({ cameraId, vendorMarked = false }: { cameraId:
   if (!data) return null;
   const probe = data.probe;
   const busy = setCfg.isPending || setImg.isPending || isFetching;
+  const hasAccount = data.hasUser || data.hasPassword;
 
-  async function save(patch: Parameters<typeof setCfg.mutateAsync>[0]) {
+  async function save(patch: Parameters<typeof setCfg.mutateAsync>[0]): Promise<boolean> {
     setErr("");
     try {
       await setCfg.mutateAsync(patch);
+      return true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not save.");
+      return false;
     }
+  }
+
+  // The account is write-only: the saved values never reach the browser, so the
+  // fields start empty and anything typed replaces what is saved.
+  function saveField(patch: { user: string } | { password: string }, clear: () => void) {
+    save({ id: cameraId, ...patch }).then((ok) => ok && clear());
   }
 
   async function apply(next: Partial<OnvifImaging>) {
@@ -105,10 +113,12 @@ export function CameraOnvifPanel({ cameraId, vendorMarked = false }: { cameraId:
               <label className="label">Username</label>
               <input
                 className="input h-8 text-xs"
-                placeholder="from stream URL"
+                placeholder={data.hasUser ? "••••• (saved)" : "from stream link"}
                 value={user}
                 onChange={(e) => setUser(e.target.value)}
-                onBlur={() => user !== data.user && save({ id: cameraId, user })}
+                onBlur={() => user.trim() && saveField({ user: user.trim() }, () => setUser(""))}
+                autoComplete="off"
+                spellCheck={false}
               />
             </div>
             <div>
@@ -116,10 +126,12 @@ export function CameraOnvifPanel({ cameraId, vendorMarked = false }: { cameraId:
               <input
                 className="input h-8 text-xs"
                 type="password"
-                placeholder={data.hasPassword ? "•••••• (stored)" : "from stream URL"}
+                placeholder={data.hasPassword ? "••••• (saved)" : "from stream link"}
                 value={pass}
                 onChange={(e) => setPass(e.target.value)}
-                onBlur={() => pass && save({ id: cameraId, password: pass }).then(() => setPass(""))}
+                onBlur={() => pass && saveField({ password: pass }, () => setPass(""))}
+                // Never let the browser autofill the user's own Aperture password here.
+                autoComplete="new-password"
               />
             </div>
             {data.enabled && (
@@ -143,7 +155,23 @@ export function CameraOnvifPanel({ cameraId, vendorMarked = false }: { cameraId:
               : vendorMarked
                 ? "the Reolink spotlight and night vision"
                 : "picture settings"}
-            . Leave blank to use the account in the stream URL.
+            .{" "}
+            {hasAccount
+              ? "The saved account stays hidden; type in a field to replace it."
+              : "Leave blank to use the login from the stream link."}
+            {hasAccount && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="text-fg-muted underline underline-offset-2 hover:text-fg disabled:opacity-50"
+                  disabled={busy}
+                  onClick={() => save({ id: cameraId, user: "", password: "" })}
+                >
+                  Use the stream link&apos;s login instead
+                </button>
+              </>
+            )}
           </p>
           {err && !data.enabled && <p className="mt-1.5 text-xs text-rec">{err}</p>}
         </div>

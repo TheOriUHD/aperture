@@ -69,7 +69,10 @@ export function CamerasManager() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-fg truncate">{cam.name}</p>
-                <p className="text-xs text-fg-faint truncate font-mono">{cam.rtspMainUrl}</p>
+                {/* Login masked for admins; viewers are sent no link at all. */}
+                {cam.rtspMainUrl && (
+                  <p className="text-xs text-fg-faint truncate font-mono">{cam.rtspMainUrl}</p>
+                )}
               </div>
               <span className="pill bg-ink-700 text-fg-muted">{modeLabels[cam.recordMode]}</span>
               <span className="hidden sm:flex items-center gap-1.5 text-xs text-fg-muted w-20">

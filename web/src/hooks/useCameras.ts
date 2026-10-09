@@ -45,10 +45,14 @@ export function useCreateCamera() {
   });
 }
 
+// An edit sends only what changed. In particular a link is sent only when it was
+// edited: one left out keeps exactly what is saved, login included.
+export type CameraUpdate = Partial<CameraInput> & { id: string };
+
 export function useUpdateCamera() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...input }: CameraInput & { id: string }) =>
+    mutationFn: ({ id, ...input }: CameraUpdate) =>
       api.put<Camera>(`/api/cameras/${id}`, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["cameras"] }),
   });
@@ -91,10 +95,11 @@ export interface CameraTestResult {
   error?: string;
 }
 
+// cameraId lets the server fill a masked link's saved login back in for the test.
 export function useTestCamera() {
   return useMutation({
-    mutationFn: (rtspMainUrl: string) =>
-      api.post<CameraTestResult>("/api/cameras/test", { rtspMainUrl }),
+    mutationFn: (req: { rtspMainUrl: string; cameraId?: string }) =>
+      api.post<CameraTestResult>("/api/cameras/test", req),
   });
 }
 
@@ -125,8 +130,9 @@ export interface OnvifProbe {
 export interface CameraOnvif {
   enabled: boolean;
   port: number;
-  user: string;
   host: string;
+  // Whether an account is saved; the values themselves never leave the server.
+  hasUser: boolean;
   hasPassword: boolean;
   probe?: OnvifProbe;
   imaging?: OnvifImaging;

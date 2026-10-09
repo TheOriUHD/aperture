@@ -15,6 +15,7 @@ import {
   useSetCameraDestinations,
 } from "../hooks/useStorageLocations";
 import type { Camera, RecordMode } from "../lib/types";
+import { hasLoginMask, maskedLoginProblem } from "../lib/cameraLink";
 
 const SENS: { v: number; label: string }[] = [
   { v: 0.06, label: "Low" },
@@ -55,6 +56,10 @@ export function CameraModal({
   const [name, setName] = useState("");
   const [main, setMain] = useState("");
   const [sub, setSub] = useState("");
+  // The links as the server showed them, login masked. A link still equal to its
+  // shown value is not sent on save, so the saved login is kept untouched.
+  const [shownMain, setShownMain] = useState("");
+  const [shownSub, setShownSub] = useState("");
   const [mode, setMode] = useState<RecordMode>("continuous");
   const [retention, setRetention] = useState(7);
   const [enabled, setEnabled] = useState(true);
@@ -88,6 +93,8 @@ export function CameraModal({
       setName(camera.name);
       setMain(camera.rtspMainUrl);
       setSub(camera.rtspSubUrl);
+      setShownMain(camera.rtspMainUrl);
+      setShownSub(camera.rtspSubUrl);
       setMode(camera.recordMode);
       setRetention(camera.retentionDays);
       setEnabled(camera.enabled);
@@ -107,6 +114,8 @@ export function CameraModal({
       setName("");
       setMain("");
       setSub("");
+      setShownMain("");
+      setShownSub("");
       setMode("continuous");
       setRetention(7);
       setEnabled(true);
@@ -145,15 +154,28 @@ export function CameraModal({
 
   const busy = create.isPending || update.isPending;
 
+  // Links carrying the masked login may only keep it for the address it was saved
+  // for; say so under the field instead of letting the save bounce.
+  const saved = [shownMain, shownSub];
+  const mainProblem = maskedLoginProblem(main.trim(), saved);
+  const subProblem = maskedLoginProblem(sub.trim(), saved);
+
   async function save() {
     if (!name.trim() || !main.trim()) {
       setError("Name and main RTSP URL are required.");
       return;
     }
+    if (mainProblem || subProblem) {
+      setError(mainProblem || subProblem);
+      return;
+    }
+    const mainOut = main.trim();
+    const subOut = sub.trim();
     const input = {
       name: name.trim(),
-      rtspMainUrl: main.trim(),
-      rtspSubUrl: sub.trim(),
+      // Unchanged links stay out of an edit: the server keeps what is saved.
+      ...(isEdit && mainOut === shownMain ? {} : { rtspMainUrl: mainOut }),
+      ...(isEdit && subOut === shownSub ? {} : { rtspSubUrl: subOut }),
       recordMode: mode,
       retentionDays: retention,
       enabled,
@@ -174,7 +196,7 @@ export function CameraModal({
       let camId = camera?.id;
       if (camera) await update.mutateAsync({ id: camera.id, ...input });
       else {
-        const created = await create.mutateAsync(input);
+        const created = await create.mutateAsync({ ...input, rtspMainUrl: mainOut });
         camId = created?.id;
       }
       if (camId && groups) await setGroups.mutateAsync({ cameraId: camId, groupIds });
@@ -189,8 +211,9 @@ export function CameraModal({
         });
       }
       onClose();
-    } catch {
-      setError("Could not save the camera.");
+    } catch (e) {
+      // The server explains a refused link (e.g. a saved login on a new address).
+      setError(e instanceof Error && e.message ? e.message : "Could not save the camera.");
     }
   }
 
@@ -201,12 +224,17 @@ export function CameraModal({
     }
     setTestSnap(null);
     setTestErr("");
+    if (mainProblem) {
+      setTestErr(mainProblem);
+      return;
+    }
     try {
-      const r = await test.mutateAsync(main.trim());
+      // A masked link is tested with the camera's saved login filled back in.
+      const r = await test.mutateAsync({ rtspMainUrl: main.trim(), cameraId: camera?.id });
       if (r.ok && r.snapshot) setTestSnap(r.snapshot);
       else setTestErr(r.error || "No video from the camera.");
-    } catch {
-      setTestErr("Test failed — could not reach the server.");
+    } catch (e) {
+      setTestErr(e instanceof Error && e.message ? e.message : "Test failed — could not reach the server.");
     }
   }
 
@@ -283,7 +311,10 @@ export function CameraModal({
               placeholder="rtsp://user:pass@192.168.1.50:554/stream1"
               value={main}
               onChange={(e) => setMain(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
             />
+            {mainProblem && <p className="mt-1 text-xs text-rec">{mainProblem}</p>}
           </div>
           <div>
             <label className="label">Sub stream (optional, used for motion)</label>
@@ -292,7 +323,17 @@ export function CameraModal({
               placeholder="rtsp://user:pass@192.168.1.50:554/stream2"
               value={sub}
               onChange={(e) => setSub(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
             />
+            {subProblem && <p className="mt-1 text-xs text-rec">{subProblem}</p>}
+            {/* The saved login never reaches the browser, only a placeholder. */}
+            {(hasLoginMask(main) || hasLoginMask(sub)) && !mainProblem && !subProblem && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-fg-faint">
+                The username and password are hidden. Leave the dots to keep them, or type over
+                them to change them.
+              </p>
+            )}
           </div>
           <div>
             <button

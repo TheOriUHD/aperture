@@ -753,11 +753,14 @@ func card(label, value string) string {
 }
 
 func trunc(s string, n int) string {
-	if len(s) <= n {
+	// Count characters, not bytes: a camera link's masked login ("•••••", 3 bytes
+	// per dot) or a name like "Küche" would otherwise be cut early, or mid-rune.
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
 	if n < 1 {
 		return ""
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }

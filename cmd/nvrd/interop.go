@@ -19,18 +19,19 @@ import (
 
 // onvifService toggles the ONVIF Profile S provider.
 type onvifService struct {
-	base context.Context
-	cfg  *config.Config
-	st   *store.Store
-	log  *slog.Logger
+	base  context.Context
+	cfg   *config.Config
+	st    *store.Store
+	snaps onvif.Snapshotter
+	log   *slog.Logger
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	srv    *onvif.Server
 }
 
-func newONVIFService(base context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) *onvifService {
-	return &onvifService{base: base, cfg: cfg, st: st, log: log}
+func newONVIFService(base context.Context, cfg *config.Config, st *store.Store, snaps onvif.Snapshotter, log *slog.Logger) *onvifService {
+	return &onvifService{base: base, cfg: cfg, st: st, snaps: snaps, log: log}
 }
 
 func (o *onvifService) SetEnabled(on bool) error {
@@ -47,7 +48,7 @@ func (o *onvifService) SetEnabled(on bool) error {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(o.base)
-	srv := onvif.New(o.cfg, o.st, o.log)
+	srv := onvif.New(o.cfg, o.st, o.snaps, o.log)
 	o.cancel, o.srv = cancel, srv
 	go srv.Run(ctx)
 	return nil

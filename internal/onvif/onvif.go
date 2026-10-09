@@ -25,20 +25,27 @@ import (
 	"github.com/TheOriUHD/aperture/internal/store"
 )
 
+// Snapshotter supplies a camera's current JPEG frame (the stream manager's cache).
+type Snapshotter interface {
+	SnapshotCached(ctx context.Context, cameraID string) ([]byte, error)
+}
+
 // Server hosts the ONVIF SOAP endpoint and (optionally) a WS-Discovery responder.
 type Server struct {
-	cfg *config.Config
-	st  *store.Store
-	log *slog.Logger
+	cfg   *config.Config
+	st    *store.Store
+	snaps Snapshotter
+	log   *slog.Logger
 }
 
 // New constructs an ONVIF Server. It does not bind any sockets until Run is
 // called. When cfg.ONVIFEnabled is false, Run is a no-op.
-func New(cfg *config.Config, st *store.Store, log *slog.Logger) *Server {
+func New(cfg *config.Config, st *store.Store, snaps Snapshotter, log *slog.Logger) *Server {
 	return &Server{
-		cfg: cfg,
-		st:  st,
-		log: log.With("subsystem", "onvif"),
+		cfg:   cfg,
+		st:    st,
+		snaps: snaps,
+		log:   log.With("subsystem", "onvif"),
 	}
 }
 
@@ -51,17 +58,9 @@ func (s *Server) Run(ctx context.Context) {
 		addr = ":10101"
 	}
 
-	mux := http.NewServeMux()
-	// ONVIF clients POST SOAP to the service paths advertised in GetServices /
-	// GetCapabilities. We serve Device and Media from distinct paths and also
-	// accept the bare "/onvif/" prefix for lenient clients.
-	mux.HandleFunc("/onvif/device_service", s.handleSOAP)
-	mux.HandleFunc("/onvif/media_service", s.handleSOAP)
-	mux.HandleFunc("/onvif/", s.handleSOAP)
-
 	httpSrv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           s.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -87,6 +86,19 @@ func (s *Server) Run(ctx context.Context) {
 	}
 }
 
+// routes maps the provider's HTTP paths. ONVIF clients POST SOAP to the service
+// paths advertised in GetServices / GetCapabilities. We serve Device and Media from
+// distinct paths and also accept the bare "/onvif/" prefix for lenient clients; the
+// more specific snapshot prefix wins over that catch-all.
+func (s *Server) routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/onvif/device_service", s.handleSOAP)
+	mux.HandleFunc("/onvif/media_service", s.handleSOAP)
+	mux.HandleFunc(snapshotPath, s.handleSnapshot)
+	mux.HandleFunc("/onvif/", s.handleSOAP)
+	return mux
+}
+
 // deviceServiceURL is the externally-reachable URL of the Device service. ONVIF
 // clients expect an absolute http:// URL they can reach. We derive the host from
 // the local outbound IP (best-effort) and the configured ONVIF port so the URL
@@ -100,11 +112,46 @@ func (s *Server) mediaServiceURL() string {
 	return "http://" + s.advertiseHostPort() + "/onvif/media_service"
 }
 
-// snapshotURL builds the per-camera JPEG snapshot URL served by go2rtc, advertised
-// at an address an external ONVIF client can actually reach (not the internal
-// how-NVRD-reaches-go2rtc host, e.g. host.docker.internal).
+// snapshotPath is where this server answers GetSnapshotUri links.
+const snapshotPath = "/onvif/snapshot/"
+
+// snapshotURL builds the per-camera JPEG snapshot URL. It is served by this ONVIF
+// server itself (see handleSnapshot), on the same address as the SOAP services,
+// never by go2rtc: go2rtc's API is bound to localhost because it also hands out
+// every camera's source URL and password.
 func (s *Server) snapshotURL(camID string) string {
-	return "http://" + s.streamAdvertiseHost(s.cfg.Go2RTCSnapPort()) + "/api/frame.jpeg?src=cam_" + camID
+	return "http://" + s.advertiseHostPort() + snapshotPath + camID + ".jpg"
+}
+
+// handleSnapshot serves an enabled camera's current frame for the link that
+// snapshotURL advertises. Like the rest of this provider it is unauthenticated,
+// but it reaches nothing except a known camera's picture.
+func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, snapshotPath), ".jpg")
+	cam, err := s.st.GetCamera(id)
+	if err != nil || !cam.Enabled {
+		http.NotFound(w, r)
+		return
+	}
+	if s.snaps == nil {
+		http.Error(w, "snapshots unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	jpeg, err := s.snaps.SnapshotCached(ctx, cam.ID)
+	if err != nil {
+		s.log.Warn("onvif: snapshot", "camera", cam.ID, "err", err)
+		http.Error(w, "no frame available", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(jpeg)
 }
 
 // streamURL builds the per-camera RTSP restream URL served by go2rtc, at an
@@ -114,7 +161,7 @@ func (s *Server) streamURL(camID string) string {
 }
 
 // streamAdvertiseHost returns host:port an external client should use to reach
-// go2rtc's restream/snapshot: the configured StreamHost, or the best-effort primary
+// go2rtc's RTSP restream: the configured StreamHost, or the best-effort primary
 // LAN IP. The Go2RTC* bases name how NVRD reaches go2rtc (e.g. host.docker.internal)
 // and are unroutable for anyone else, so they must not be advertised.
 func (s *Server) streamAdvertiseHost(port string) string {

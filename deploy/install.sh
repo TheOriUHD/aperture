@@ -143,8 +143,10 @@ if [ ! -e /var/lib/aperture/go2rtc.yaml ]; then
 # Base go2rtc configuration. nvrd manages individual camera streams through the
 # go2rtc API at runtime, and go2rtc persists them back into this file — which is
 # why it ends up holding camera credentials and is chmod 0600.
+# The API hands every camera's source URL (password included) to whoever can reach
+# it, so only nvrd on this machine may: browsers use nvrd's authenticated proxy.
 api:
-  listen: ":1984"
+  listen: "127.0.0.1:1984"
 rtsp:
   listen: ":8554"
 webrtc:
@@ -153,6 +155,9 @@ webrtc:
     - stun:8555
 log:
   level: info
+  # The streams module logs a stream's full source URL (password included) with
+  # every reconnect warning. Keep it to errors; nvrd's watchdog reports stalls.
+  streams: error
 YAML
   info "seeded /var/lib/aperture/go2rtc.yaml"
 fi

@@ -293,7 +293,7 @@ func main() {
 
 	// ONVIF Profile S provider (external VMS/NVR consumption) — same toggle model
 	// as HomeKit above.
-	onvifSvc := newONVIFService(bgCtx, cfg, st, log)
+	onvifSvc := newONVIFService(bgCtx, cfg, st, sm, log)
 
 	// Seed each setting from its env var the first time only, then start whatever
 	// the settings say. A start failure is logged and leaves the service stopped —

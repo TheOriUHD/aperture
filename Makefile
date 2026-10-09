@@ -8,11 +8,9 @@ PKG := github.com/TheOriUHD/aperture
 # shipped untagged and every build called itself 0.0.0-dev.
 #
 # A build carrying uncommitted source is suffixed +local, so a hand-built binary can
-# never be mistaken for the tagged release. deploy/go2rtc.yaml is excluded from that
-# test: it is permanently modified on the NVR host (it holds camera credentials) and
-# would otherwise mark every production build +local.
+# never be mistaken for the tagged release.
 GIT_VER := $(shell git describe --tags --match 'v[0-9]*' 2>/dev/null || echo 0.0.0-dev)
-GIT_LOCAL := $(shell test -n "$$(git status --porcelain -- . ':(exclude)deploy/go2rtc.yaml' 2>/dev/null)" && echo +local)
+GIT_LOCAL := $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo +local)
 VERSION ?= $(patsubst v%,%,$(GIT_VER))$(GIT_LOCAL)
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -s -w \

@@ -108,9 +108,10 @@ func (s *Server) handleGetCameraONVIF(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"enabled": res.cfg.Enabled,
 		"port":    res.cfg.Port,
-		"user":    res.cfg.User,
 		"host":    res.host,
-		// hasPassword tells the UI a credential is stored without revealing it.
+		// hasUser / hasPassword tell the UI an account is stored without revealing
+		// it: camera credentials never leave the server, only get replaced.
+		"hasUser":     res.cfg.User != "",
 		"hasPassword": res.cfg.PassEnc != "",
 	}
 	if !res.cfg.Enabled {

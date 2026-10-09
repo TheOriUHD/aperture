@@ -3,6 +3,10 @@
 # left for go2rtc to populate at runtime.
 
 api:
+  # Under Docker, nvrd reaches this API across the container bridge, so it cannot
+  # be bound to 127.0.0.1 here. It hands out camera passwords to anyone who can
+  # reach it: firewall port 1984 off the LAN. The native install (deploy/install.sh)
+  # binds it to 127.0.0.1 instead.
   listen: ":1984"
 
 rtsp:
@@ -19,3 +23,6 @@ webrtc:
 
 log:
   level: info
+  # The streams module logs a stream's full source URL (password included) with
+  # every reconnect warning. Keep it to errors.
+  streams: error

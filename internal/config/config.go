@@ -58,12 +58,12 @@ func (c *Config) DBPath() string { return filepath.Join(c.DataDir, "aperture.db"
 // Go2RTCConfigPath returns where nvrd may render go2rtc config if needed.
 func (c *Config) Go2RTCConfigPath() string { return filepath.Join(c.DataDir, "go2rtc.yaml") }
 
-// Go2RTCRTSPPort / Go2RTCSnapPort are the ports go2rtc listens on for the RTSP
-// restream and the HTTP snapshot API, parsed from the reach-go2rtc bases (so a
-// customised port is respected) with the go2rtc defaults as a fallback. Used to
-// build the externally-advertised stream URLs alongside StreamHost.
+// Go2RTCRTSPPort is the port go2rtc listens on for the RTSP restream, parsed from
+// the reach-go2rtc base (so a customised port is respected) with the go2rtc default
+// as a fallback. Used to build the externally-advertised stream URLs alongside
+// StreamHost. (go2rtc's HTTP API is deliberately not advertised: it is bound to
+// localhost because it hands out every camera's source URL and password.)
 func (c *Config) Go2RTCRTSPPort() string { return portOf(c.Go2RTCRTSP, "8554") }
-func (c *Config) Go2RTCSnapPort() string { return portOf(c.Go2RTCURL, "1984") }
 
 func portOf(base, def string) string {
 	if u, err := url.Parse(base); err == nil && u.Port() != "" {

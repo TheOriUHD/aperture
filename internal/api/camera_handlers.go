@@ -10,7 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/store"
+	"github.com/TheOriUHD/aperture/internal/urlcred"
 )
 
 // handleReorderCameras persists a new camera display order (admin).
@@ -31,24 +33,40 @@ func (s *Server) handleReorderCameras(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleTestCamera probes an RTSP URL via go2rtc and returns a preview frame so
-// the operator can verify a camera connection before saving it.
+// the operator can verify a camera connection before saving it. An existing
+// camera's link arrives with its login masked; cameraId names the camera whose
+// saved login fills it back in, under the same rules as a save.
 func (s *Server) handleTestCamera(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RTSPMainURL string `json:"rtspMainUrl"`
+		CameraID    string `json:"cameraId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
 		return
 	}
-	if strings.TrimSpace(req.RTSPMainURL) == "" {
+	src := strings.TrimSpace(req.RTSPMainURL)
+	if src == "" {
 		writeError(w, http.StatusBadRequest, "rtspMainUrl required")
 		return
 	}
+	if urlcred.HasMask(src) {
+		cam, err := s.st.GetCamera(req.CameraID)
+		if req.CameraID == "" || err != nil {
+			writeError(w, http.StatusBadRequest, newCameraMaskMsg)
+			return
+		}
+		if src, err = urlcred.Merge(src, cam.RTSPMainURL, cam.RTSPSubURL); err != nil {
+			writeError(w, http.StatusBadRequest, linkErrMsg("Main stream", err))
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
-	jpeg, err := s.sm.TestStream(ctx, req.RTSPMainURL)
+	jpeg, err := s.sm.TestStream(ctx, src)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		// The link may carry a saved login filled in above; never echo it back.
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": urlcred.Scrub(err.Error())})
 		return
 	}
 	s.logAudit(r, "camera.test", "", "rtsp connection test")
@@ -64,12 +82,13 @@ func (s *Server) handleListCameras(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	links := seesCameraLinks(r)
 	out := make([]map[string]any, 0, len(cams))
 	for _, c := range cams {
 		if !s.allowedCamera(r, c.ID) {
 			continue // viewers only see cameras in their ACL
 		}
-		out = append(out, cameraView(c))
+		out = append(out, cameraView(c, links))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -81,8 +100,26 @@ func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	setETag(w, cameraView(c))
-	writeJSON(w, http.StatusOK, cameraView(c))
+	v := cameraView(c, seesCameraLinks(r))
+	setETag(w, v)
+	writeJSON(w, http.StatusOK, v)
+}
+
+// seesCameraLinks reports whether the caller is shown camera links at all. Only
+// admins (the web app, nvrctl, admin-owned tokens) are, and only with the login
+// masked; a viewer has no use for a camera's address.
+func seesCameraLinks(r *http.Request) bool {
+	c := auth.FromContext(r.Context())
+	return c != nil && c.Role == store.RoleAdmin
+}
+
+// newCameraMaskMsg answers a masked link where no saved login exists to fill it
+// from, e.g. a link copied from another camera into the add form.
+const newCameraMaskMsg = "This camera has no saved login yet. Replace the dots with the camera's username and password."
+
+// linkErrMsg words a urlcred refusal for the camera editor, naming the field.
+func linkErrMsg(field string, err error) string {
+	return field + " link: " + err.Error() + "."
 }
 
 // cameraReq uses pointers for optional fields so PUT updates only touch what the
@@ -132,6 +169,10 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name and rtspMainUrl are required")
 		return
 	}
+	if urlcred.HasMask(req.RTSPMainURL) || urlcred.HasMask(derefStr(req.RTSPSubURL, "")) {
+		writeError(w, http.StatusBadRequest, newCameraMaskMsg)
+		return
+	}
 	c := &store.Camera{
 		Name:              req.Name,
 		RTSPMainURL:       req.RTSPMainURL,
@@ -160,7 +201,7 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	s.syncStreams()
 	s.logAudit(r, "camera.create", c.Name, "mode="+c.RecordMode)
-	writeJSON(w, http.StatusCreated, cameraView(c))
+	writeJSON(w, http.StatusCreated, cameraView(c, true))
 }
 
 // validVendor normalises a vendor marking to one Aperture actually acts on. An
@@ -182,7 +223,7 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if !s.precondition(w, r, etagOf(cameraView(c))) {
+	if !s.precondition(w, r, etagOf(cameraView(c, true))) {
 		return
 	}
 	var req cameraReq
@@ -193,12 +234,29 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	if req.Name != "" {
 		c.Name = req.Name
 	}
+	// Links come back as they were shown: with the login masked. A mask means
+	// "keep the saved login" and is filled in again, but only for the host it was
+	// saved for (urlcred.Merge); anything else is taken as typed. A client that
+	// leaves a link out keeps it untouched.
+	oldMain, oldSub := c.RTSPMainURL, c.RTSPSubURL
 	if req.RTSPMainURL != "" {
-		c.RTSPMainURL = req.RTSPMainURL
+		u, err := urlcred.Merge(req.RTSPMainURL, oldMain, oldSub)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, linkErrMsg("Main stream", err))
+			return
+		}
+		c.RTSPMainURL = u
 	}
 	if req.RTSPSubURL != nil {
-		c.RTSPSubURL = *req.RTSPSubURL
+		u, err := urlcred.Merge(*req.RTSPSubURL, oldSub, oldMain)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, linkErrMsg("Sub stream", err))
+			return
+		}
+		c.RTSPSubURL = u
 	}
+	c.RTSPSubURL = urlcred.Follow(c.RTSPSubURL, oldMain, c.RTSPMainURL)
+	loginChanged := !urlcred.SameLogin(oldMain, c.RTSPMainURL) || !urlcred.SameLogin(oldSub, c.RTSPSubURL)
 	if req.Enabled != nil {
 		c.Enabled = *req.Enabled
 	}
@@ -266,9 +324,14 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 		// recorder so ffmpeg writes to (and the indexer scans) the new directory.
 		s.rec.RestartCamera(c.ID)
 	}
-	s.logAudit(r, "camera.update", c.Name, "mode="+c.RecordMode)
-	setETag(w, cameraView(c))
-	writeJSON(w, http.StatusOK, cameraView(c))
+	detail := "mode=" + c.RecordMode
+	if loginChanged {
+		detail += " login=changed" // that it changed, never what to
+	}
+	s.logAudit(r, "camera.update", c.Name, detail)
+	v := cameraView(c, true)
+	setETag(w, v)
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *Server) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +341,7 @@ func (s *Server) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	if !s.precondition(w, r, etagOf(cameraView(c))) {
+	if !s.precondition(w, r, etagOf(cameraView(c, true))) {
 		return
 	}
 	// Reclaim the camera's on-disk footage and thumbnails BEFORE deleting the
@@ -318,12 +381,20 @@ func (s *Server) syncStreams() {
 	}()
 }
 
-func cameraView(c *store.Camera) map[string]any {
+// cameraView renders a camera for the API. Its links never leave the server with
+// their login: with links=true they carry it masked (urlcred.Redact), otherwise
+// they are empty. The ETag is computed over this view too, so not even a hash of
+// a password reaches a client.
+func cameraView(c *store.Camera, links bool) map[string]any {
+	mainURL, subURL := "", ""
+	if links {
+		mainURL, subURL = urlcred.Redact(c.RTSPMainURL), urlcred.Redact(c.RTSPSubURL)
+	}
 	return map[string]any{
 		"id":                c.ID,
 		"name":              c.Name,
-		"rtspMainUrl":       c.RTSPMainURL,
-		"rtspSubUrl":        c.RTSPSubURL,
+		"rtspMainUrl":       mainURL,
+		"rtspSubUrl":        subURL,
 		"enabled":           c.Enabled,
 		"recordMode":        c.RecordMode,
 		"retentionDays":     c.RetentionDays,
