@@ -20,6 +20,10 @@ func mirrorTestSetup(t *testing.T) (*Janitor, *store.Store, string) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	j := New(&config.Config{}, st, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// These tests pin retention and promotion, not the free-space safety net, so
+	// report a roomy disk: the fixtures live in t.TempDir(), and on a host whose
+	// /tmp is a small tmpfs the net used to fire and delete the promoted segment.
+	j.du = func(string) (int64, int64, bool) { return 1 << 40, 1 << 39, true }
 	return j, st, t.TempDir()
 }
 

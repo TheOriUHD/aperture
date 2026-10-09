@@ -19,7 +19,7 @@ import (
 
 const (
 	interval          = 5 * time.Minute
-	minFreeBytesFloor = 5 << 30 // always try to keep at least 5 GiB free
+	minFreeBytesFloor = 5 << 30 // always try to keep at least 5 GiB free (see freeFloor)
 	minFreeFraction   = 0.07    // ...and at least 7% of the disk
 	deleteBatch       = 50
 	motionGraceMs     = 120_000 // wait 2 min before pruning non-event footage
@@ -42,11 +42,15 @@ type Janitor struct {
 	// leasesActive is set once per pass: true when any unexpired segment lease
 	// exists, so delete() consults the lease table only when it could matter.
 	leasesActive bool
+
+	// du reports a filesystem's total and free bytes (diskUsage); tests replace it
+	// so a pass does not depend on the machine's own disks.
+	du func(path string) (total, free int64, ok bool)
 }
 
 // New constructs a Janitor.
 func New(cfg *config.Config, st *store.Store, reg *storage.Registry, log *slog.Logger) *Janitor {
-	return &Janitor{cfg: cfg, st: st, reg: reg, log: log}
+	return &Janitor{cfg: cfg, st: st, reg: reg, log: log, du: diskUsage}
 }
 
 // EnforceNow runs a retention + reservation pass immediately (e.g. right after an
@@ -456,14 +460,11 @@ func (j *Janitor) enforceQuota(cameraID string, quota int64) {
 }
 
 func (j *Janitor) enforceFreeSpace() {
-	total, free, ok := diskUsage(j.activeDir())
+	total, free, ok := j.du(j.activeDir())
 	if !ok || total == 0 {
 		return
 	}
-	minFree := int64(float64(total) * minFreeFraction)
-	if minFree < minFreeBytesFloor {
-		minFree = minFreeBytesFloor
-	}
+	minFree := freeFloor(total)
 	if free >= minFree {
 		return
 	}
@@ -485,7 +486,7 @@ func (j *Janitor) enforceFreeSpace() {
 		if !progressed {
 			break // whole batch is export-protected; retry next pass
 		}
-		if _, free, ok = diskUsage(j.activeDir()); !ok {
+		if _, free, ok = j.du(j.activeDir()); !ok {
 			break
 		}
 	}
@@ -502,14 +503,11 @@ func (j *Janitor) enforceLocationFreeSpace(loc *store.StorageLocation) {
 	if path == "" {
 		return
 	}
-	total, free, ok := diskUsage(path)
+	total, free, ok := j.du(path)
 	if !ok || total == 0 {
 		return
 	}
-	minFree := int64(float64(total) * minFreeFraction)
-	if minFree < minFreeBytesFloor {
-		minFree = minFreeBytesFloor
-	}
+	minFree := freeFloor(total)
 	if free >= minFree {
 		return
 	}
@@ -529,7 +527,7 @@ func (j *Janitor) enforceLocationFreeSpace(loc *store.StorageLocation) {
 		if !progressed {
 			break // whole batch is export-protected; retry next pass
 		}
-		if _, free, ok = diskUsage(path); !ok {
+		if _, free, ok = j.du(path); !ok {
 			break
 		}
 	}
@@ -625,6 +623,22 @@ func (j *Janitor) exportLocked(s *store.Segment) bool {
 		}
 	}
 	return false
+}
+
+// freeFloor is how much the free-space safety nets keep free on a filesystem of
+// the given size: 7% of it and at least 5 GiB, but never more than a quarter of
+// it. Without that cap a filesystem smaller than the 5 GiB floor (a USB stick, a
+// small partition) could never satisfy it, and the net would delete every
+// segment on it on every pass.
+func freeFloor(total int64) int64 {
+	floor := int64(minFreeBytesFloor)
+	if q := total / 4; floor > q {
+		floor = q
+	}
+	if f := int64(float64(total) * minFreeFraction); f > floor {
+		floor = f
+	}
+	return floor
 }
 
 // diskUsage returns total and available bytes for the filesystem at path.
