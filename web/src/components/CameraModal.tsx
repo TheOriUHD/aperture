@@ -408,7 +408,7 @@ export function CameraModal({
               )}
             </div>
           )}
-          {isEdit && camera && <CameraOnvifPanel cameraId={camera.id} />}
+          {isEdit && camera && <CameraOnvifPanel cameraId={camera.id} vendorMarked={isReolink} />}
 
           {mode === "scheduled" &&
             (isEdit ? (
@@ -596,8 +596,9 @@ export function CameraModal({
             </div>
             <p className="text-[11px] text-fg-faint">
               Enables Reolink&apos;s own controls for this camera — spotlight and IR illuminators — which
-              ONVIF does not cover. Uses the camera&apos;s existing credentials, and stays on whether or not
-              the camera is reachable right now.
+              ONVIF does not cover. They sign in with the <span className="text-fg-muted">Camera account</span>{" "}
+              under Camera picture settings (the stream URL&apos;s account unless you set another), and stay
+              available whether or not the camera is reachable right now.
             </p>
           </div>
 

@@ -2,6 +2,7 @@ package reolink
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,5 +99,42 @@ func TestRedirectIsNotFollowed(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "unexpected response") {
 		t.Errorf("a redirect should not be reported as a malformed reply: %v", err)
+	}
+}
+
+// A camera that answers but refuses must come back as an *APIError carrying its
+// rspCode, not as a transport failure, so the caller can tell the operator what the
+// camera actually said instead of "unreachable".
+func TestRefusalIsAnAPIError(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.RawQuery, "Login") {
+			_, _ = w.Write([]byte(loginOK))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"cmd":"SetWhiteLed","code":1,"error":{"detail":"not support","rspCode":-9}}]`))
+	}))
+	defer srv.Close()
+
+	c := New(hostOf(srv.URL), "u", "p", 5*time.Second)
+	err := c.SetSpotlight(context.Background(), Spotlight{State: 1})
+	var ae *APIError
+	if !errors.As(err, &ae) {
+		t.Fatalf("err = %v (%T), want *APIError", err, err)
+	}
+	if ae.Cmd != "SetWhiteLed" || ae.Code != -9 || ae.Detail != "not support" {
+		t.Fatalf("APIError = %+v", ae)
+	}
+	if got := ae.Explain(); !strings.Contains(got, "does not support") || !strings.Contains(got, `"not support"`) {
+		t.Errorf("Explain() = %q", got)
+	}
+}
+
+// A code with no documented meaning is passed through in the camera's own words
+// rather than guessed at.
+func TestExplainKeepsUnknownCodesVerbatim(t *testing.T) {
+	got := (&APIError{Code: -99, Detail: "odd reply"}).Explain()
+	if !strings.Contains(got, "declined") || !strings.Contains(got, `"odd reply"`) || !strings.Contains(got, "-99") {
+		t.Errorf("Explain() = %q", got)
 	}
 }

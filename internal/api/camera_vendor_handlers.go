@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -142,13 +143,34 @@ func (s *Server) handleGetCameraVendor(w http.ResponseWriter, r *http.Request) {
 	if sp, err := c.GetSpotlight(ctx); err == nil {
 		out["spotlight"] = sp
 	} else {
-		out["error"] = err.Error()
+		_, msg := vendorFailure("read the spotlight", err)
+		out["error"] = msg
 	}
 	if ir, err := c.GetIR(ctx); err == nil {
 		out["ir"] = ir
 	}
 	storeVendorRead(id, out)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// vendorFailure words a failed vendor call for the operator. A refusal (the camera
+// answered and said no) and an unreachable camera need different fixes, so they get
+// different codes, and a refusal carries the camera's reason instead of being
+// flattened into "unreachable".
+func vendorFailure(what string, err error) (code, msg string) {
+	var ae *reolink.APIError
+	if errors.As(err, &ae) {
+		return "camera.refused", "The camera refused to " + what + ": " + ae.Explain() + "."
+	}
+	return "unreachable", "Could not reach the camera to " + what + ": " + err.Error() + "."
+}
+
+// writeVendorFailure reports a failed vendor call and logs it. The UI shows it only
+// briefly, so the journal is where it can still be found afterwards.
+func (s *Server) writeVendorFailure(w http.ResponseWriter, camID, what string, err error) {
+	code, msg := vendorFailure(what, err)
+	s.log.Warn("vendor: camera call failed", "camera", camID, "action", what, "code", code, "err", err)
+	writeErrorCode(w, http.StatusBadGateway, code, msg)
 }
 
 func (s *Server) handleSetCameraVendor(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +187,12 @@ func (s *Server) handleSetCameraVendor(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	// Validate before any camera is contacted, so a bad value can never leave half
+	// of a combined request applied.
+	if req.IR != nil && *req.IR != "Auto" && *req.IR != "Off" {
+		writeErrorCode(w, http.StatusBadRequest, "validation", "night vision must be Auto or Off")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -188,7 +216,7 @@ func (s *Server) handleSetCameraVendor(w http.ResponseWriter, r *http.Request) {
 	if req.Spotlight != nil {
 		cur, err := c.GetSpotlight(ctx)
 		if err != nil {
-			writeErrorCode(w, http.StatusBadGateway, "unreachable", err.Error())
+			s.writeVendorFailure(w, id, "read the spotlight", err)
 			return
 		}
 		next := *cur
@@ -207,14 +235,23 @@ func (s *Server) handleSetCameraVendor(w http.ResponseWriter, r *http.Request) {
 			next.Bright = *req.Spotlight.Bright
 		}
 		if err := c.SetSpotlight(ctx, next); err != nil {
-			writeErrorCode(w, http.StatusBadGateway, "unreachable", err.Error())
+			what := "change the spotlight"
+			switch {
+			case req.Spotlight.State != nil && *req.Spotlight.State == 1:
+				what = "turn the spotlight on"
+			case req.Spotlight.State != nil:
+				what = "turn the spotlight off"
+			case req.Spotlight.Bright != nil:
+				what = "change the spotlight brightness"
+			}
+			s.writeVendorFailure(w, id, what, err)
 			return
 		}
 		applied["spotlight"] = next
 	}
 	if req.IR != nil {
 		if err := c.SetIR(ctx, *req.IR); err != nil {
-			writeErrorCode(w, http.StatusBadGateway, "unreachable", err.Error())
+			s.writeVendorFailure(w, id, "change night vision", err)
 			return
 		}
 		applied["ir"] = map[string]any{"state": *req.IR}

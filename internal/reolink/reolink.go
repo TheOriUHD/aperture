@@ -110,6 +110,46 @@ func (c *Client) post(ctx context.Context, query string, payload any) ([]apiResp
 // errWrongScheme marks a failure that justifies retrying on the other scheme.
 var errWrongScheme = errors.New("wrong scheme")
 
+// APIError is a reply the CAMERA produced to refuse a command, as opposed to a
+// transport failure where it never answered. Keeping the two apart is what lets a
+// caller say "the camera said no, and why" instead of "the camera is unreachable",
+// which is how a refused spotlight used to look.
+type APIError struct {
+	Cmd    string // the command refused, e.g. "SetWhiteLed"
+	Code   int    // Reolink rspCode
+	Detail string // the camera's own words
+}
+
+func (e *APIError) Error() string { return e.Detail }
+
+// Explain turns the refusal into something an operator can act on. Only codes that
+// Reolink documents with a stable meaning are translated; anything else is passed
+// through as-is. The camera's own words are always kept alongside, because firmware
+// reuses codes loosely.
+func (e *APIError) Explain() string {
+	var why string
+	switch e.Code {
+	case -4:
+		why = "it rejected the values sent"
+	case -5:
+		why = "it has too many open sessions"
+	case -7:
+		why = "it rejected the username or password"
+	case -9:
+		why = "it says it does not support this"
+	case -13:
+		why = "it could not apply the setting"
+	case -26:
+		why = "the camera account is not allowed to do this"
+	default:
+		why = "it declined"
+	}
+	if e.Detail != "" {
+		return fmt.Sprintf("%s (camera said %q, code %d)", why, e.Detail, e.Code)
+	}
+	return fmt.Sprintf("%s (code %d)", why, e.Code)
+}
+
 func (c *Client) schemes() []string {
 	c.mu.Lock()
 	known := c.scheme
@@ -161,7 +201,7 @@ func (c *Client) postVia(ctx context.Context, scheme, query string, body []byte)
 		return nil, fmt.Errorf("the camera returned an unexpected response")
 	}
 	if len(out) > 0 && out[0].Error != nil {
-		return out, fmt.Errorf("%s", out[0].Error.Detail)
+		return out, &APIError{Cmd: out[0].Cmd, Code: out[0].Error.RspCode, Detail: out[0].Error.Detail}
 	}
 	return out, nil
 }

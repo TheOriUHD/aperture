@@ -172,7 +172,13 @@ export function CameraImagingOverlay({ cameraId, VidBtn }: {
                   </div>
                 </div>
               )}
-              {vendor.error && <p className="mt-1 text-[11px] text-rec">{vendor.error}</p>}
+              {/* A refused change says why, in the camera's own terms, instead of a
+                  control that silently snaps back. Cleared by the next attempt. */}
+              {(setVendor.error || vendor.error) && (
+                <p role="alert" className="mt-1 text-[11px] leading-snug text-rec">
+                  {setVendor.error instanceof Error ? setVendor.error.message : vendor.error}
+                </p>
+              )}
             </div>
           )}
 

@@ -15,7 +15,10 @@ import {
 // Everything here is optional and additive: it only contacts the camera once
 // switched on, only renders controls the camera actually reports, and a camera
 // that refuses or is unreachable shows the reason rather than breaking the page.
-export function CameraOnvifPanel({ cameraId }: { cameraId: string }) {
+// vendorMarked: the camera is marked as a vendor (Reolink) in the editor. Its local
+// controls sign in with the same camera account as ONVIF, so the account fields
+// must be reachable even while picture settings are switched off.
+export function CameraOnvifPanel({ cameraId, vendorMarked = false }: { cameraId: string; vendorMarked?: boolean }) {
   const { data, isFetching } = useCameraOnvif(cameraId);
   const setCfg = useSetCameraOnvif();
   const setImg = useSetCameraImaging();
@@ -79,7 +82,7 @@ export function CameraOnvifPanel({ cameraId }: { cameraId: string }) {
           </div>
           <p className="mt-0.5 text-[11px] text-fg-faint leading-relaxed">
             Adjust the camera&apos;s own image settings over ONVIF, live. Off by default; nothing
-            contacts the camera until you switch it on.
+            contacts the camera over ONVIF until you switch it on.
           </p>
         </div>
         <Switch
@@ -90,13 +93,16 @@ export function CameraOnvifPanel({ cameraId }: { cameraId: string }) {
         />
       </div>
 
-      {data.enabled && (
-        <div className="mt-3 space-y-3">
-          {/* Connection: defaults to the camera's streaming login, which is often
-              read-only over ONVIF — an admin account is needed to CHANGE settings. */}
-          <div className="grid grid-cols-3 gap-2">
+      {/* The account Aperture signs in to the camera itself with. ONVIF picture
+          settings AND the vendor controls (Reolink spotlight / IR) both use it, so it
+          is labelled for what it is and shown whenever either is in play — not only
+          while picture settings are on, which is where it used to hide. */}
+      {(data.enabled || vendorMarked) && (
+        <div className="mt-3">
+          <p className="text-xs font-medium text-fg-muted">Camera account</p>
+          <div className={`mt-1.5 grid gap-2 ${data.enabled ? "grid-cols-3" : "grid-cols-2"}`}>
             <div>
-              <label className="label">ONVIF user</label>
+              <label className="label">Username</label>
               <input
                 className="input h-8 text-xs"
                 placeholder="from stream URL"
@@ -116,19 +122,35 @@ export function CameraOnvifPanel({ cameraId }: { cameraId: string }) {
                 onBlur={() => pass && save({ id: cameraId, password: pass }).then(() => setPass(""))}
               />
             </div>
-            <div>
-              <label className="label">Port</label>
-              <input
-                className="input h-8 text-xs"
-                type="number"
-                placeholder="auto"
-                value={port || ""}
-                onChange={(e) => setPort(Number(e.target.value) || 0)}
-                onBlur={() => port !== data.port && save({ id: cameraId, port })}
-              />
-            </div>
+            {data.enabled && (
+              <div>
+                <label className="label">ONVIF port</label>
+                <input
+                  className="input h-8 text-xs"
+                  type="number"
+                  placeholder="auto"
+                  value={port || ""}
+                  onChange={(e) => setPort(Number(e.target.value) || 0)}
+                  onBlur={() => port !== data.port && save({ id: cameraId, port })}
+                />
+              </div>
+            )}
           </div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-fg-faint">
+            How Aperture signs in to the camera itself, for{" "}
+            {data.enabled && vendorMarked
+              ? "picture settings and the Reolink spotlight and night vision"
+              : vendorMarked
+                ? "the Reolink spotlight and night vision"
+                : "picture settings"}
+            . Leave blank to use the account in the stream URL.
+          </p>
+          {err && !data.enabled && <p className="mt-1.5 text-xs text-rec">{err}</p>}
+        </div>
+      )}
 
+      {data.enabled && (
+        <div className="mt-3 space-y-3">
           {isFetching && !probe && (
             <p className="flex items-center gap-2 text-xs text-fg-faint">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Contacting the camera…
