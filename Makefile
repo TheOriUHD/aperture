@@ -93,7 +93,7 @@ test:
 lint:
 	$(GO) vet ./...
 
-## Native systemd install (the deployment target; see MIGRATION.md).
+## Native systemd install (the deployment target).
 ## `install` needs root and does not start the units — pass --start yourself for
 ## a fresh box, or start them deliberately during a migration cutover.
 vendor:
@@ -105,7 +105,7 @@ install: build-native
 uninstall:
 	sudo deploy/uninstall.sh
 
-## Docker Compose stack (the OLD deployment shape — being retired, see MIGRATION.md)
+## Docker Compose stack (the older deployment shape; native systemd is the supported one)
 up:
 	cd deploy && docker compose up -d --build
 	$(MAKE) prune

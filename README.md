@@ -184,7 +184,7 @@ APERTURE_STREAM_HOST="192.168.1.10"            # the host's LAN IP, for RTSP res
 
 Open `http://<host>:8971`, create the first administrator, and add your cameras with their RTSP URLs. Configuration and state live in `/etc/aperture` and `/var/lib/aperture`, and both survive upgrades: re-running `make install` is the upgrade.
 
-> A Docker Compose stack (`make up`) still exists for experiments, but native systemd is the supported deployment — see [MIGRATION.md](MIGRATION.md).
+> A Docker Compose stack (`make up`) still exists for experiments, but native systemd is the supported deployment.
 
 ## Development
 
@@ -206,7 +206,6 @@ deploy/           systemd, install      internal/ext       extension supervisor
 
 ## Documentation
 
-- [ONBOARDING.md](ONBOARDING.md) — how the system fits together, the deploy runbook and hard-won gotchas
 - [docs/home-assistant.md](docs/home-assistant.md) — the Home Assistant integration
 - [docs/detection.md](docs/detection.md) — opt-in object detection
 - [docs/extensions](docs/extensions/README.md) — building extensions: manifest, permissions, SDK, panels

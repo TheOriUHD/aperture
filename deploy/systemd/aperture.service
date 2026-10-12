@@ -1,6 +1,6 @@
 [Unit]
 Description=Aperture NVR daemon
-Documentation=file:/usr/share/doc/aperture/ONBOARDING.md
+Documentation=https://github.com/TheOriUHD/aperture
 Wants=network-online.target aperture-go2rtc.service mosquitto.service
 After=network-online.target aperture-go2rtc.service mosquitto.service
 # An NVR must never be given up on. Without this, systemd's default rate limit
