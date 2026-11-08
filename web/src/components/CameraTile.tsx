@@ -10,7 +10,8 @@ export function CameraTile({
   camera: Camera;
   onOpen?: (c: Camera) => void;
 }) {
-  const recording = camera.enabled && camera.recordMode !== "never";
+  const recording = camera.recordingNow;
+  const idle = camera.enabled && camera.recordMode === "scheduled"; // outside its window
 
   return (
     <div
@@ -29,7 +30,7 @@ export function CameraTile({
             REC
           </span>
         ) : (
-          <span className="pill-offline">OFF</span>
+          <span className="pill-offline">{idle ? "IDLE" : "OFF"}</span>
         )}
       </div>
 

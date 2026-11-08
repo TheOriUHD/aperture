@@ -247,6 +247,7 @@ func main() {
 	// Home Assistant inbound control (record-mode Select / Arm switch) applies
 	// record-mode changes through the same reconcile path.
 	haPub.SetReconcile(reconcile)
+	haPub.SetShouldRecord(rec.ShouldRecord)
 	haPub.SetOnArmed(notifyEng.OnAlarmState) // alarm.state on HA-driven arms (Item 3)
 	// Local automation engine: events → matching automations → actions (notify,
 	// webhook, MQTT publish, set record mode).
@@ -287,7 +288,7 @@ func main() {
 	go weatherPoller.Run(bgCtx)
 
 	// Watchdog: detect stale recordings (wedged producers) and self-heal.
-	wd := watchdog.New(st, sm, log)
+	wd := watchdog.New(st, sm, rec, log)
 	wd.SetOnCameraState(notifyEng.OnCameraState)
 	go wd.Run(bgCtx)
 

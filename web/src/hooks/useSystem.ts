@@ -1,3 +1,4 @@
+import type { RecordingState } from "../lib/recordingState";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, uploadFile } from "../lib/api";
 
@@ -65,6 +66,7 @@ export interface CameraHealth {
   recordMode: string;
   recordingExpected: boolean;
   recordingOk: boolean;
+  recordingState: RecordingState;
   lastSegmentTs: number;
   liveOk: boolean;
   watchdogStale?: boolean;

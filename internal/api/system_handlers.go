@@ -216,9 +216,12 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var freed int64
-	delSeg := 0
+	delSeg, failed := 0, 0
 	for _, seg := range segs {
-		s.removeSegmentFile(seg)
+		if !s.removeSegmentFile(seg) {
+			failed++
+			continue
+		}
 		if s.st.DeleteSegment(seg.ID) == nil {
 			freed += seg.SizeBytes
 			delSeg++
@@ -236,7 +239,7 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.log.Info("storage purge", "camera", req.CameraID, "segments", delSeg, "events", delEv, "freedBytes", freed)
+	s.log.Info("storage purge", "camera", req.CameraID, "segments", delSeg, "events", delEv, "failed", failed, "freedBytes", freed)
 	cam := req.CameraID
 	if cam == "" {
 		cam = "all cameras"
@@ -245,6 +248,7 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"deletedSegments": delSeg,
 		"deletedEvents":   delEv,
+		"failedSegments":  failed,
 		"freedBytes":      freed,
 	})
 }

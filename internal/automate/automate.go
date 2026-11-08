@@ -147,7 +147,8 @@ func (e *Engine) runAction(a Action, ev *store.Event) {
 }
 
 func (e *Engine) setRecordMode(cameraID, mode string) {
-	if mode != store.ModeNever && mode != store.ModeContinuous && mode != store.ModeMotion {
+	if !e.st.RecordModeSettable(cameraID, mode) {
+		e.log.Warn("automation: refused record mode (unknown, or scheduled with no schedule set)", "camera", cameraID, "mode", mode)
 		return
 	}
 	cam, err := e.st.GetCamera(cameraID)

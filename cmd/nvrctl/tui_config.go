@@ -622,7 +622,7 @@ func (a *app) viewDashboard() string {
 		if c.Enabled {
 			online++
 		}
-		if c.Enabled && c.RecordMode != "never" {
+		if c.RecordingNow {
 			recording++
 		}
 	}

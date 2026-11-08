@@ -54,6 +54,8 @@ type Publisher struct {
 	siteName  func() string
 	reconcile func() // re-sync recorder + detector after an inbound record-mode change
 	onArmed   func(bool) // change-feed alarm.state hook (Item 3)
+	// shouldRecord says whether a camera is meant to be recording right now.
+	shouldRecord func(*store.Camera) bool
 
 	stateMu   sync.Mutex      // guards motion/recording — touched by the ticker AND the paho OnConnect goroutine
 	motion    map[string]bool // last published motion state per camera
@@ -70,6 +72,10 @@ func (p *Publisher) SetReconcile(fn func()) { p.reconcile = fn }
 // SetOnArmed registers a callback invoked when HA toggles the armed flag, so the
 // change feed emits alarm.state for HA-driven arms (not only API ones).
 func (p *Publisher) SetOnArmed(fn func(bool)) { p.onArmed = fn }
+
+// SetShouldRecord registers what the Recording sensor reports (the schedule lives
+// with the recorder).
+func (p *Publisher) SetShouldRecord(fn func(*store.Camera) bool) { p.shouldRecord = fn }
 
 // New constructs a Publisher. siteName returns the configured site name.
 func New(cfg *config.Config, st *store.Store, sm snapshotter, siteName func() string, log *slog.Logger) *Publisher {
@@ -270,6 +276,39 @@ func (p *Publisher) nvrDevice() map[string]any {
 	}
 }
 
+// cameraTopics is every retained topic Aperture publishes for one camera, so that a
+// deleted camera can take them all with it. A test fails when the publishers send a
+// camera topic this list doesn't name.
+func cameraTopics(prefix, cameraID string) []string {
+	return []string{
+		fmt.Sprintf("%s/binary_sensor/aperture_%s_motion/config", prefix, cameraID),
+		fmt.Sprintf("%s/binary_sensor/aperture_%s_recording/config", prefix, cameraID),
+		fmt.Sprintf("%s/camera/aperture_%s/config", prefix, cameraID),
+		fmt.Sprintf("%s/select/aperture_%s_record_mode/config", prefix, cameraID),
+		stateTopicBase + "/" + cameraID + "/motion",
+		stateTopicBase + "/" + cameraID + "/recording",
+		stateTopicBase + "/" + cameraID + "/snapshot",
+		stateTopicBase + "/" + cameraID + "/record_mode",
+	}
+}
+
+// ForgetCamera takes a deleted camera out of Home Assistant. Its topics are
+// retained, so without this the broker goes on announcing it and HA keeps a dead
+// device. An empty retained payload is how MQTT deletes one.
+func (p *Publisher) ForgetCamera(cameraID string) {
+	if !p.connected() {
+		p.log.Warn("ha: camera deleted while disconnected; Home Assistant keeps its device until cleared", "camera", cameraID)
+		return
+	}
+	for _, t := range cameraTopics(p.prefix(), cameraID) {
+		p.pub(t, true, "")
+	}
+	p.stateMu.Lock()
+	delete(p.motion, cameraID)
+	delete(p.recording, cameraID)
+	p.stateMu.Unlock()
+}
+
 // publishDiscovery (re)announces all entities to Home Assistant.
 func (p *Publisher) publishDiscovery() {
 	pfx := p.prefix()
@@ -349,11 +388,17 @@ func (p *Publisher) publishMotionRecording() {
 	for _, c := range cams {
 		motion := p.cameraInMotion(c.ID, now)
 		rec := c.Enabled && c.RecordMode != store.ModeNever
+		if p.shouldRecord != nil {
+			rec = p.shouldRecord(c)
+		}
 		// Compute what changed under the state lock (this runs on both the ticker
 		// goroutine and the paho OnConnect goroutine), then publish outside it.
 		p.stateMu.Lock()
 		motionChanged := p.motion[c.ID] != motion
-		recChanged := p.recording[c.ID] != rec
+		// The first pass always publishes: the topic is retained, so what the broker
+		// holds may be a value from before this process started.
+		prevRec, seen := p.recording[c.ID]
+		recChanged := !seen || prevRec != rec
 		p.motion[c.ID] = motion
 		p.recording[c.ID] = rec
 		p.stateMu.Unlock()

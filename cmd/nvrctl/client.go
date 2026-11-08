@@ -271,6 +271,7 @@ type cameraInfo struct {
 	RTSPSubURL      string  `json:"rtspSubUrl"`
 	Enabled         bool    `json:"enabled"`
 	RecordMode      string  `json:"recordMode"`
+	RecordingNow    bool    `json:"recordingNow"`
 	RetentionDays   int     `json:"retentionDays"`
 	MotionThreshold float64 `json:"motionThreshold"`
 	FPS             int     `json:"fps"`

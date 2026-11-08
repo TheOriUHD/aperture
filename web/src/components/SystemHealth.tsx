@@ -3,11 +3,11 @@ import { Activity, Server, Cctv, HardDrive, Home, CloudSun, Download, Upload, Fi
 import { useSystemStatus, useRestoreBackup, type SystemStatus } from "../hooks/useSystem";
 import { downloadFile } from "../lib/api";
 import { formatBytes, fmtRelative, fmtDuration } from "../lib/format";
-
-type Level = "ok" | "warn" | "down";
+import { recordingDisplay, type Level } from "../lib/recordingState";
 
 function Dot({ level }: { level: Level }) {
-  const color = level === "ok" ? "bg-online" : level === "warn" ? "bg-[#e0a23a]" : "bg-rec";
+  const color =
+    level === "ok" ? "bg-online" : level === "idle" ? "bg-fg-faint" : level === "warn" ? "bg-[#e0a23a]" : "bg-rec";
   return <span className={`h-2 w-2 rounded-full ${color} shrink-0`} />;
 }
 
@@ -96,7 +96,7 @@ export function SystemHealth() {
       <div className="mt-2 border-t border-line pt-2 space-y-1.5">
         {s.cameras.map((c) => {
           const live: Level = !c.enabled ? "warn" : c.liveOk ? "ok" : "down";
-          const rec: Level = !c.recordingExpected ? "warn" : c.recordingOk ? "ok" : "down";
+          const rec = recordingDisplay(c.recordingState);
           return (
             <div key={c.cameraId} className="flex items-center gap-3 text-xs">
               <Cctv className="h-3.5 w-3.5 text-fg-faint shrink-0" />
@@ -120,9 +120,9 @@ export function SystemHealth() {
                 <Dot level={live} />
                 <span className="text-fg-faint w-7">live</span>
               </span>
-              <span className="flex items-center gap-1.5" title="Recording">
-                <Dot level={rec} />
-                <span className="text-fg-faint w-8">{c.recordingExpected ? "rec" : "off"}</span>
+              <span className="flex items-center gap-1.5" title={rec.title}>
+                <Dot level={rec.level} />
+                <span className="text-fg-faint w-8">{rec.label}</span>
               </span>
               <span className="text-fg-faint w-16 text-right tabular-nums">
                 {c.lastSegmentTs ? fmtRelative(c.lastSegmentTs) : "—"}

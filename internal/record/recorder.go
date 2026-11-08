@@ -32,6 +32,15 @@ const (
 	// few MB; anything this large means the stream isn't rotating (no cut points),
 	// which would otherwise grow unbounded and escape retention.
 	maxSegmentBytes = 256 << 20 // 256 MiB
+
+	// durationSlack is how far a probed duration may exceed the time a file was
+	// being written before it stops being believed.
+	durationSlack = 5 // seconds
+
+	// scheduleStartGrace is how long a recording window may be open before a camera
+	// without new footage counts as failing: up to a minute for Reconcile to notice
+	// the window, then ffmpeg connecting and the first segment landing and uploading.
+	scheduleStartGrace = 3 * time.Minute
 )
 
 // Recorder supervises per-camera ffmpeg processes and indexes their output.
@@ -90,7 +99,8 @@ func (r *Recorder) preferSubRecording() bool {
 	return v == "low"
 }
 
-func (r *Recorder) shouldRecord(c *store.Camera) bool {
+// ShouldRecord reports whether a camera is meant to be recording right now.
+func (r *Recorder) ShouldRecord(c *store.Camera) bool {
 	if !c.Enabled || c.RTSPMainURL == "" {
 		return false
 	}
@@ -98,7 +108,7 @@ func (r *Recorder) shouldRecord(c *store.Camera) bool {
 	case store.ModeNever:
 		return false
 	case store.ModeScheduled:
-		return r.scheduledActive(c.ID)
+		return r.scheduledActive(c.ID, time.Now())
 	default:
 		// continuous + motion both capture to disk (motion is pruned to events
 		// by the retention janitor).
@@ -106,17 +116,33 @@ func (r *Recorder) shouldRecord(c *store.Camera) bool {
 	}
 }
 
-// scheduledActive reports whether the current time — in the site-profile
-// timezone, not the host's — falls inside one of a camera's recording windows.
-// Recording windows are authored against the site's wall clock, so a host TZ
-// that differs from the site (or a DST transition) must not shift them.
-// Reconcile re-checks every minute.
-func (r *Recorder) scheduledActive(cameraID string) bool {
+// RecordingDue reports whether footage should be arriving from a camera by now.
+// Everything that calls a camera broken goes through this, not ShouldRecord: a
+// camera outside its window has old footage on purpose, and at the moment a window
+// opens its newest footage is hours old too.
+func (r *Recorder) RecordingDue(c *store.Camera) bool {
+	return r.recordingDueAt(c, time.Now())
+}
+
+func (r *Recorder) recordingDueAt(c *store.Camera, now time.Time) bool {
+	if !c.Enabled || c.RecordMode == store.ModeNever {
+		return false
+	}
+	if c.RecordMode != store.ModeScheduled {
+		return true
+	}
+	return r.scheduledActive(c.ID, now) && r.scheduledActive(c.ID, now.Add(-scheduleStartGrace))
+}
+
+// scheduledActive reports whether now — in the site-profile timezone, not the
+// host's — falls inside one of a camera's recording windows. Recording windows are
+// authored against the site's wall clock, so a host TZ that differs from the site
+// (or a DST transition) must not shift them. Reconcile re-checks every minute.
+func (r *Recorder) scheduledActive(cameraID string, now time.Time) bool {
 	scheds, err := r.st.ListSchedules(cameraID)
 	if err != nil || len(scheds) == 0 {
 		return false
 	}
-	now := time.Now()
 	if p := site.Load(r.st); p.Timezone != "" {
 		if loc, err := time.LoadLocation(p.Timezone); err == nil {
 			now = now.In(loc)
@@ -151,7 +177,7 @@ func (r *Recorder) Reconcile() {
 	}
 	desired := map[string]*store.Camera{}
 	for _, c := range cams {
-		if r.shouldRecord(c) {
+		if r.ShouldRecord(c) {
 			desired[c.ID] = c
 		}
 	}
@@ -177,6 +203,18 @@ func (r *Recorder) Reconcile() {
 	}
 }
 
+// inputArgs opens a camera's restream for recording. Timestamps come from the clock,
+// not the stream: go2rtc can reconnect a camera under a running ffmpeg (a stream
+// restart, a dropped link) and the camera's RTP clock comes back hours away. The
+// segment muxer cuts on those timestamps, so it then splits at every keyframe or
+// never, and audio and video end up hours apart in the file.
+func inputArgs(src string) []string {
+	return []string{
+		"-rtsp_transport", "tcp", "-use_wallclock_as_timestamps", "1", "-fflags", "+genpts",
+		"-i", src,
+	}
+}
+
 // superviseFFmpeg keeps an ffmpeg recording process alive for one camera,
 // restarting with backoff on unexpected exit.
 func (r *Recorder) superviseFFmpeg(ctx context.Context, cam store.Camera) {
@@ -186,6 +224,7 @@ func (r *Recorder) superviseFFmpeg(ctx context.Context, cam store.Camera) {
 		return
 	}
 	backoff := time.Second
+	reencode, quickExits := wantsReencode(cam), 0
 	for ctx.Err() == nil {
 		// Source stream: honor the global recording-quality preference. "Prefer LQ"
 		// records the sub stream, but only for cameras that actually have one — it's
@@ -194,18 +233,20 @@ func (r *Recorder) superviseFFmpeg(ctx context.Context, cam store.Camera) {
 		if r.preferSubRecording() && cam.RTSPSubURL != "" {
 			src = r.sm.RTSPURLSub(cam.ID)
 		}
-		args := []string{
-			"-hide_banner", "-loglevel", "warning", "-nostdin",
-			"-rtsp_transport", "tcp", "-fflags", "+genpts",
-			"-i", src,
+		args := []string{"-hide_banner", "-loglevel", "warning", "-nostdin"}
+		args = append(args, inputArgs(src)...)
+		args = append(args,
 			// Record a single video + (optional) audio track. Some sources expose
 			// several video tracks (e.g. a dual-lens/"main+sub" feed); copying them
 			// all yields an mpegts the segment muxer can't rotate (one ever-growing
 			// file). Mapping the first video track keeps segmenting reliable.
 			"-map", "0:v:0", "-map", "0:a?",
-			// Video is stream-copied — the recording path stays transcode-free and
-			// near-zero CPU, which is the whole design.
-			"-c:v", "copy",
+		)
+		// Video is stream-copied — the recording path stays transcode-free and
+		// near-zero CPU, which is the whole design — unless this camera opted into
+		// a lower recording quality (quality.go).
+		args = append(args, videoArgs(cam, reencode)...)
+		args = append(args,
 			// Audio is NOT copied, and this is deliberate. ffmpeg 7.x announces the
 			// AAC track in the PMT and then writes zero packets to it when copying
 			// AAC out of RTSP into mpegts: the PID exists, carries no PES at all,
@@ -226,7 +267,7 @@ func (r *Recorder) superviseFFmpeg(ctx context.Context, cam store.Camera) {
 			// (restarts) are emitted as EXT-X-DISCONTINUITY by the API.
 			"-strftime", "1",
 			filepath.Join(dir, "%s.ts"),
-		}
+		)
 		cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 		start := time.Now()
 		err := cmd.Run()
@@ -235,6 +276,11 @@ func (r *Recorder) superviseFFmpeg(ctx context.Context, cam store.Camera) {
 		}
 		ran := time.Since(start)
 		r.log.Warn("recorder ffmpeg exited; restarting", "camera", cam.ID, "ran", ran.Round(time.Second), "err", err)
+		if reencode && !keepReencoding(ran, &quickExits) {
+			reencode = false
+			r.log.Error("recorder: re-encoding keeps failing, recording the original stream instead",
+				"camera", cam.ID, "name", cam.Name)
+		}
 		if ran > 30*time.Second {
 			backoff = time.Second
 		} else {
@@ -300,14 +346,8 @@ func (r *Recorder) indexOnce() {
 			}
 		}
 
-		// Safety net: if the newest file is still being written but has grown far
-		// past a normal segment, the stream has no usable cut points (e.g. a
-		// multi-video or keyframe-less source), so ffmpeg never rotates. Left alone
-		// it grows unbounded and — never being indexed — escapes retention and can
-		// fill the disk. Flag the camera for a restart, which closes the file so it
-		// gets indexed and becomes prunable.
 		for _, f := range files {
-			if f.epoch == maxEpoch && f.size > maxSegmentBytes && now.Sub(f.mtime) < 30*time.Second {
+			if f.epoch == maxEpoch && notRotating(f.size, f.mtime, now) {
 				stuckCams = append(stuckCams, cam.ID)
 			}
 		}
@@ -324,7 +364,7 @@ func (r *Recorder) indexOnce() {
 				continue
 			}
 			path := filepath.Join(dir, f.name)
-			dur := probeDuration(path)
+			dur := writtenDuration(probeDuration(path), f.epoch, f.mtime)
 			if dur <= 0 {
 				// Skip unreadable files; abandon only if they have gone stale.
 				if now.Sub(f.mtime) > 2*time.Minute {
@@ -351,9 +391,22 @@ func (r *Recorder) indexOnce() {
 		}
 	}
 
-	// Restart any camera whose active segment grew past the cap without rotating,
-	// so its file is closed + indexed and can't keep filling the disk.
-	for _, id := range stuckCams {
+	r.restartStuck(stuckCams)
+}
+
+// notRotating reports that the newest file, still being written, has grown far past
+// a normal segment: the stream has no usable cut points (a multi-video or
+// keyframe-less source, or timestamps that jumped backwards), so ffmpeg never
+// rotates. Left alone it grows unbounded and, never being indexed or uploaded,
+// escapes retention and can fill the disk.
+func notRotating(size int64, mtime, now time.Time) bool {
+	return size > maxSegmentBytes && now.Sub(mtime) < 30*time.Second
+}
+
+// restartStuck restarts cameras whose active segment grew past the cap without
+// rotating, which closes the file so it gets indexed and becomes prunable.
+func (r *Recorder) restartStuck(ids []string) {
+	for _, id := range ids {
 		r.log.Warn("recorder: active segment not rotating; restarting camera to cap file growth", "camera", id, "capBytes", maxSegmentBytes)
 		r.RestartCamera(id)
 	}
@@ -378,6 +431,7 @@ func (r *Recorder) uploadOnce() {
 		return
 	}
 	now := time.Now()
+	var stuckCams []string // cameras whose active segment won't rotate
 	for _, cam := range cams {
 		dir, locID, remote := r.resolveTarget(*cam)
 		if !remote {
@@ -415,6 +469,12 @@ func (r *Recorder) uploadOnce() {
 		}
 		sort.Slice(files, func(i, j int) bool { return files[i].epoch < files[j].epoch })
 
+		for _, f := range files {
+			if f.epoch == maxEpoch && notRotating(f.size, f.mtime, now) {
+				stuckCams = append(stuckCams, cam.ID)
+			}
+		}
+
 		backend, berr := r.reg.For(locID)
 		for _, f := range files {
 			// Complete once a newer file exists or it has gone quiet.
@@ -422,7 +482,7 @@ func (r *Recorder) uploadOnce() {
 				continue
 			}
 			spoolPath := filepath.Join(dir, f.name)
-			dur := probeDuration(spoolPath)
+			dur := writtenDuration(probeDuration(spoolPath), f.epoch, f.mtime)
 			if dur <= 0 {
 				if now.Sub(f.mtime) > 2*time.Minute {
 					r.log.Warn("recorder: unreadable spool segment, dropping", "path", spoolPath)
@@ -461,6 +521,8 @@ func (r *Recorder) uploadOnce() {
 		}
 		r.enforceSpoolCap(cam.ID, dir)
 	}
+
+	r.restartStuck(stuckCams)
 }
 
 // enforceSpoolCap drops the oldest un-uploaded segments once a camera's spool
@@ -670,6 +732,41 @@ func (r *Recorder) RestartCamera(id string) {
 	// new segments in the new directory carry later epochs than the old cursor, so
 	// they are indexed normally.
 	r.Reconcile()
+}
+
+// NeedsRecovery reports whether a camera whose footage has stopped arriving has
+// really stopped recording. It hasn't if ffmpeg is still writing: that footage is
+// only waiting on an upload, and restarting the stream under it does harm (see the
+// watchdog). Nor has a camera that isn't meant to be recording right now.
+func (r *Recorder) NeedsRecovery(c *store.Camera) bool {
+	if !r.ShouldRecord(c) {
+		return false
+	}
+	dir, _, _ := r.resolveTarget(*c)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return true
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".ts") {
+			continue
+		}
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) < 30*time.Second {
+			return false
+		}
+	}
+	return true
+}
+
+// writtenDuration caps a probed duration at how long the file was actually being
+// written. A timestamp jump inside a segment probes as hours of video, and an end
+// time in the future both breaks playback and hides the camera from the watchdog.
+func writtenDuration(probed float64, epoch int64, mtime time.Time) float64 {
+	written := mtime.Sub(time.Unix(epoch, 0)).Seconds()
+	if written > 0 && probed > written+durationSlack {
+		return written
+	}
+	return probed
 }
 
 // probeDuration returns a media file's duration in seconds, or 0 on failure.

@@ -169,3 +169,35 @@ func TestSFTPBackendRoundTrip(t *testing.T) {
 
 // id extracts a step's id (unexported field access within the package test).
 func (s Step) id() string { return s.ID }
+
+// Retention retries failed deletes, and on a location nothing uploads to any more
+// no one else would replace a dead connection.
+func TestSFTPRemoveRecoversFromADeadConnection(t *testing.T) {
+	host, port := startTestSFTP(t)
+	b, err := newSFTP(sftpSpec(t, host, port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+
+	src := filepath.Join(t.TempDir(), "seg.ts")
+	if err := os.WriteFile(src, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rel := "cam1/1700000001.ts"
+	if _, err := b.Put(src, rel); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	_ = b.(*sftpBackend).ssh.Close()
+
+	if err := b.Remove(rel); err == nil {
+		t.Fatal("remove over a dead connection reported success")
+	}
+	if err := b.Remove(rel); err != nil {
+		t.Fatalf("the retry should reconnect: %v", err)
+	}
+	if _, _, err := b.Open(rel); err == nil {
+		t.Fatal("the file is still there after the retry")
+	}
+}

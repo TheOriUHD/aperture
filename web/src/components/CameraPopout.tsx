@@ -62,7 +62,7 @@ export function CameraPopout({
     else void document.exitFullscreen();
   }
 
-  const recording = camera.enabled && camera.recordMode !== "never";
+  const recording = camera.recordingNow;
   const mobileFs = fs && !isDesktop;
 
   return (

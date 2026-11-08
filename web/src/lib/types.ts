@@ -62,6 +62,11 @@ export interface Camera {
   postrollMs: number;
   cooldownMs: number;
   minDurationMs: number;
+  // Recording quality ceilings; 0 keeps what the camera sends. Live view is unaffected.
+  recordHeight: number;
+  recordFps: number;
+  recordKbps: number;
+  recordingNow?: boolean; // meant to be recording right now; a schedule makes this flip
 }
 
 export interface StreamToken {

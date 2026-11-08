@@ -25,6 +25,44 @@ func (s *Server) dayStartMs() int64 {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).UnixMilli()
 }
 
+// Why a camera is or isn't recording, so that a camera idle by design can't be
+// mistaken for a broken one. Only recStateFailed is a problem.
+const (
+	recStateRecording    = "recording"    // footage is arriving
+	recStateNotScheduled = "notScheduled" // outside its recording schedule
+	recStateOff          = "off"          // disabled, or set to never record
+	recStateFailed       = "failed"       // should be recording and isn't
+)
+
+func recordingState(c *store.Camera, due, footageArriving bool) string {
+	switch {
+	case !c.Enabled || c.RecordMode == store.ModeNever:
+		return recStateOff
+	case footageArriving:
+		return recStateRecording
+	case !due:
+		return recStateNotScheduled
+	default:
+		return recStateFailed
+	}
+}
+
+// recordingDue is Recorder.RecordingDue, which owns the schedule.
+func (s *Server) recordingDue(c *store.Camera) bool {
+	if s.rec == nil {
+		return c.Enabled && c.RecordMode != store.ModeNever
+	}
+	return s.rec.RecordingDue(c)
+}
+
+// recordingNow is Recorder.ShouldRecord, which owns the schedule.
+func (s *Server) recordingNow(c *store.Camera) bool {
+	if s.rec == nil {
+		return c.Enabled && c.RecordMode != store.ModeNever
+	}
+	return s.rec.ShouldRecord(c)
+}
+
 // handleSystemStatus aggregates a live health snapshot: per-camera recording and
 // live-view status, go2rtc reachability, storage, and integration state. The
 // two camera signals are deliberately independent — recording pulls straight
@@ -33,12 +71,12 @@ func (s *Server) dayStartMs() int64 {
 func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.buildStatus(ctx))
+	writeJSON(w, http.StatusOK, s.buildStatus(ctx, seesDisabledCameras(r)))
 }
 
 // buildStatus assembles the health snapshot, shared by the status endpoint and
 // the diagnostics bundle.
-func (s *Server) buildStatus(ctx context.Context) map[string]any {
+func (s *Server) buildStatus(ctx context.Context, includeDisabled bool) map[string]any {
 	health := s.sm.Health(ctx)
 	cams, _ := s.st.ListCameras()
 	now := time.Now().UnixMilli()
@@ -47,13 +85,16 @@ func (s *Server) buildStatus(ctx context.Context) map[string]any {
 	camStatus := make([]map[string]any, 0, len(cams))
 	liveDown, recDown := 0, 0
 	for _, c := range cams {
+		if !c.Enabled && !includeDisabled {
+			continue
+		}
 		_, registered := health.Registered[stream.StreamName(c.ID)]
 
 		var newest int64
 		if st, err := s.st.CameraStat(c.ID); err == nil {
 			newest = st.NewestTS
 		}
-		recordingExpected := c.Enabled && c.RecordMode != store.ModeNever
+		recordingExpected := s.recordingDue(c)
 		recordingOk := newest > 0 && now-newest < store.RecordingGraceMs
 		liveOk := health.Reachable && registered
 
@@ -71,6 +112,7 @@ func (s *Server) buildStatus(ctx context.Context) map[string]any {
 			"recordMode":        c.RecordMode,
 			"recordingExpected": recordingExpected,
 			"recordingOk":       recordingOk,
+			"recordingState":    recordingState(c, recordingExpected, recordingOk),
 			"lastSegmentTs":     newest,
 			"liveOk":            liveOk,
 		}

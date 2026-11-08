@@ -38,7 +38,7 @@ interface Channel {
 }
 
 const OBJECTS = ["person", "car", "truck", "dog", "cat", "bicycle"];
-const MODES = ["never", "motion", "continuous"];
+const MODES = ["never", "motion", "continuous", "scheduled"];
 
 const blank = (): Automation => ({
   id: "",

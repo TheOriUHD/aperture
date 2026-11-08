@@ -24,6 +24,34 @@ const SENS: { v: number; label: string }[] = [
   { v: 0.012, label: "High" },
   { v: 0.006, label: "Very high" },
 ];
+// Recording quality ceilings; 0 keeps what the camera sends. Values above the
+// camera's own never upscale or pad frames, so they are safe to offer to every camera.
+const RECORD_HEIGHTS: [number, string][] = [
+  [0, "Original"],
+  [2160, "2160p (4K)"],
+  [1440, "1440p"],
+  [1080, "1080p"],
+  [720, "720p"],
+  [480, "480p"],
+];
+const RECORD_FPS: [number, string][] = [
+  [0, "Original"],
+  [30, "30 fps"],
+  [25, "25 fps"],
+  [20, "20 fps"],
+  [15, "15 fps"],
+  [10, "10 fps"],
+  [5, "5 fps"],
+];
+const RECORD_KBPS: [number, string][] = [
+  [0, "Automatic"],
+  [8000, "8 Mbps"],
+  [4000, "4 Mbps"],
+  [2000, "2 Mbps"],
+  [1000, "1 Mbps"],
+  [500, "500 kbps"],
+];
+
 function nearestSens(v: number): number {
   return SENS.reduce((a, b) => (Math.abs(b.v - v) < Math.abs(a.v - v) ? b : a), SENS[2]).v;
 }
@@ -62,6 +90,9 @@ export function CameraModal({
   const [shownSub, setShownSub] = useState("");
   const [mode, setMode] = useState<RecordMode>("continuous");
   const [retention, setRetention] = useState(7);
+  const [recordHeight, setRecordHeight] = useState(0);
+  const [recordFps, setRecordFps] = useState(0);
+  const [recordKbps, setRecordKbps] = useState(0);
   const [enabled, setEnabled] = useState(true);
   const [sensitivity, setSensitivity] = useState(0.02);
   const [preroll, setPreroll] = useState(5);
@@ -97,6 +128,9 @@ export function CameraModal({
       setShownSub(camera.rtspSubUrl);
       setMode(camera.recordMode);
       setRetention(camera.retentionDays);
+      setRecordHeight(camera.recordHeight ?? 0);
+      setRecordFps(camera.recordFps ?? 0);
+      setRecordKbps(camera.recordKbps ?? 0);
       setEnabled(camera.enabled);
       setSensitivity(nearestSens(camera.motionThreshold || 0.02));
       setPreroll(Math.round((camera.prerollMs || 5000) / 1000));
@@ -118,6 +152,9 @@ export function CameraModal({
       setShownSub("");
       setMode("continuous");
       setRetention(7);
+      setRecordHeight(0);
+      setRecordFps(0);
+      setRecordKbps(0);
       setEnabled(true);
       setSensitivity(0.02);
       setPreroll(5);
@@ -178,6 +215,9 @@ export function CameraModal({
       ...(isEdit && subOut === shownSub ? {} : { rtspSubUrl: subOut }),
       recordMode: mode,
       retentionDays: retention,
+      recordHeight,
+      recordFps,
+      recordKbps,
       enabled,
       motionThreshold: sensitivity,
       motionDetection: motionDet,
@@ -377,6 +417,46 @@ export function CameraModal({
                 onChange={(e) => setRetention(Math.max(1, Number(e.target.value) || 1))}
               />
             </div>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-fg-muted mb-1.5">Recording quality</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="label">Resolution</label>
+                <select className="input" value={recordHeight} onChange={(e) => setRecordHeight(Number(e.target.value))}>
+                  {RECORD_HEIGHTS.map(([v, label]) => (
+                    <option key={v} value={v}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Framerate</label>
+                <select className="input" value={recordFps} onChange={(e) => setRecordFps(Number(e.target.value))}>
+                  {RECORD_FPS.map(([v, label]) => (
+                    <option key={v} value={v}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Bitrate</label>
+                <select className="input" value={recordKbps} onChange={(e) => setRecordKbps(Number(e.target.value))}>
+                  {RECORD_KBPS.map(([v, label]) => (
+                    <option key={v} value={v}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <p className="text-[11px] text-fg-faint mt-1">
+              {recordHeight || recordFps || recordKbps
+                ? "Recordings are re-encoded to H.264 to save space, which takes about one CPU core per camera. Live view stays at full quality."
+                : "Recorded exactly as the camera sends it, using almost no CPU. Lower any of these to save space; live view stays at full quality."}
+            </p>
           </div>
           {/* Shown even with a single destination: hiding it made "where does this
               camera record?" invisible until a second location existed, which read

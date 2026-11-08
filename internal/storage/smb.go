@@ -169,6 +169,11 @@ func (b *smbBackend) Remove(rel string) error {
 		return err
 	}
 	if err := s.Remove(b.full(rel)); err != nil && !os.IsNotExist(err) {
+		// Unless the server only refused this file the connection may be dead, and on
+		// a location nothing uploads to any more, no one else would replace it.
+		if !os.IsPermission(err) {
+			b.drop()
+		}
 		return err
 	}
 	return nil
@@ -185,6 +190,7 @@ func (b *smbBackend) Stat() (Stat, error) {
 	}
 	info, err := s.Statfs(name)
 	if err != nil {
+		b.drop()
 		return Stat{}, err
 	}
 	bs := int64(info.BlockSize())

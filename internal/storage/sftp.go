@@ -201,6 +201,11 @@ func (b *sftpBackend) Remove(rel string) error {
 		return err
 	}
 	if err := c.Remove(b.full(rel)); err != nil && !os.IsNotExist(err) {
+		// Unless the server only refused this file the connection may be dead, and on
+		// a location nothing uploads to any more, no one else would replace it.
+		if !os.IsPermission(err) {
+			b.drop()
+		}
 		return err
 	}
 	return nil

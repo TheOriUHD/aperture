@@ -65,7 +65,7 @@ func statusCmd() *cobra.Command {
 				if cam.Enabled {
 					online++
 				}
-				if cam.Enabled && cam.RecordMode != "never" {
+				if cam.RecordingNow {
 					recording++
 				}
 			}

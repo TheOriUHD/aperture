@@ -40,7 +40,9 @@ func (p *Publisher) onCommand(_ mqtt.Client, m mqtt.Message) {
 }
 
 func (p *Publisher) setRecordModeCmd(cameraID, mode string) {
-	if mode != store.ModeNever && mode != store.ModeContinuous && mode != store.ModeMotion {
+	// Refusing leaves HA's select where it was: it only moves on the state topic.
+	if !p.st.RecordModeSettable(cameraID, mode) {
+		p.log.Warn("ha: refused record mode (unknown, or scheduled with no schedule set)", "camera", cameraID, "mode", mode)
 		return
 	}
 	cam, err := p.st.GetCamera(cameraID)
@@ -88,7 +90,7 @@ func (p *Publisher) publishControlDiscovery(pfx string, cams []*store.Camera) {
 			"unique_id":          "aperture_" + c.ID + "_record_mode",
 			"command_topic":      stateTopicBase + "/" + c.ID + "/set/record_mode",
 			"state_topic":        stateTopicBase + "/" + c.ID + "/record_mode",
-			"options":            []string{store.ModeNever, store.ModeMotion, store.ModeContinuous},
+			"options":            store.RecordModes,
 			"icon":               "mdi:record-rec",
 			"availability_topic": statusTopic,
 			"device":             dev,

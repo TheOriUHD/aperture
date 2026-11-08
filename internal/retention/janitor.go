@@ -23,6 +23,14 @@ const (
 	minFreeFraction   = 0.07    // ...and at least 7% of the disk
 	deleteBatch       = 50
 	motionGraceMs     = 120_000 // wait 2 min before pruning non-event footage
+
+	// deleteFailureBudget is how long one pass may lose to failing deletes on a
+	// location before leaving it alone until the next pass. A share that is down can
+	// take a full dial timeout per delete, with every other camera waiting behind it.
+	deleteFailureBudget = 30 * time.Second
+	// maxStuck is how many undeletable items an oldest-first loop reads past in a
+	// pass before giving up on the rest of it.
+	maxStuck = 500
 )
 
 // Janitor periodically prunes recorded segments.
@@ -46,11 +54,26 @@ type Janitor struct {
 	// du reports a filesystem's total and free bytes (diskUsage); tests replace it
 	// so a pass does not depend on the machine's own disks.
 	du func(path string) (total, free int64, ok bool)
+	// shareDu is du for a network location (shareUsage); tests replace it too.
+	shareDu func(locationID string) (total, free int64, ok bool)
+
+	// deleteTrouble tracks failed deletes per location for one pass (see removeFile).
+	deleteTrouble map[string]*deleteTrouble
+}
+
+// deleteTrouble is what went wrong deleting from one location during a pass.
+type deleteTrouble struct {
+	failed  int
+	skipped int           // deletes not attempted once the budget ran out
+	spent   time.Duration // time lost to failed deletes
+	first   error
 }
 
 // New constructs a Janitor.
 func New(cfg *config.Config, st *store.Store, reg *storage.Registry, log *slog.Logger) *Janitor {
-	return &Janitor{cfg: cfg, st: st, reg: reg, log: log, du: diskUsage}
+	j := &Janitor{cfg: cfg, st: st, reg: reg, log: log, du: diskUsage}
+	j.shareDu = j.shareUsage
+	return j
 }
 
 // EnforceNow runs a retention + reservation pass immediately (e.g. right after an
@@ -77,6 +100,8 @@ func (j *Janitor) Run(ctx context.Context) {
 func (j *Janitor) enforce() {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	j.deleteTrouble = map[string]*deleteTrouble{}
+	defer j.reportDeleteTrouble()
 	// Snapshot in-flight exports once per pass so no prune path deletes footage a
 	// render is about to read. A job that starts mid-pass is caught next tick.
 	j.activeExports = j.freshExports()
@@ -141,7 +166,8 @@ func (j *Janitor) enforce() {
 	}
 	// Each configured location enforces its own allocation independently. Local
 	// locations get a hard cap (or a free-space net when unallocated); network
-	// locations get a soft delete-oldest cap when an allocation is set.
+	// locations get a soft delete-oldest cap when an allocation is set, plus a
+	// free-space net either way, because the share's disk is not only ours to fill.
 	locs, _ := j.st.ListStorageLocations()
 	for _, loc := range locs {
 		if !loc.Enabled {
@@ -161,6 +187,7 @@ func (j *Janitor) enforce() {
 			if loc.AllocationBytes > 0 {
 				j.enforceLocationCap(loc.ID, loc.AllocationBytes, false)
 			}
+			j.enforceShareFreeSpace(loc)
 		}
 	}
 	j.reconcileReservation()
@@ -251,25 +278,25 @@ func (j *Janitor) enforceLocationCap(locationID string, capBytes int64, includeA
 	if err != nil {
 		return
 	}
-	deleted := 0
-	for total > target {
-		oldest, err := j.st.OldestEvictablesInLocation(locationID, deleteBatch)
-		if err != nil || len(oldest) == 0 {
+	deleted, stuck := 0, 0
+	for total > target && stuck < maxStuck {
+		// Whatever couldn't be evicted is still the oldest, so read past it.
+		oldest, err := j.st.OldestEvictablesInLocation(locationID, deleteBatch+stuck)
+		if err != nil || len(oldest) <= stuck {
 			break
 		}
-		progressed := false
-		for _, ev := range oldest {
+		for _, ev := range oldest[stuck:] {
 			if total <= target {
 				break
 			}
 			if ev.IsCopy {
 				// A mirror copy: freeing it loses nothing (the canonical survives
 				// elsewhere) — always the cheapest eviction.
-				j.removeCopyFile(ev.Copy)
-				if err := j.st.DeleteSegmentCopy(ev.Copy.SegmentID, ev.Copy.LocationID); err == nil {
+				if j.evictCopy(ev.Copy) {
 					total -= ev.Copy.SizeBytes
 					deleted++
-					progressed = true
+				} else {
+					stuck++
 				}
 				continue
 			}
@@ -279,11 +306,9 @@ func (j *Janitor) enforceLocationCap(locationID string, capBytes int64, includeA
 			if j.evictCanonical(ev.Seg) {
 				total -= ev.Seg.SizeBytes
 				deleted++
-				progressed = true
+			} else {
+				stuck++
 			}
-		}
-		if !progressed {
-			break // whole batch is export-protected; retry next pass
 		}
 	}
 	if deleted > 0 {
@@ -301,8 +326,7 @@ func (j *Janitor) enforceDestinationRetention(cameraID, locationID string, befor
 	removed := 0
 	if copies, err := j.st.ExpiredCopiesInLocation(cameraID, locationID, beforeMs, deleteBatch); err == nil {
 		for _, c := range copies {
-			j.removeCopyFile(c)
-			if err := j.st.DeleteSegmentCopy(c.SegmentID, c.LocationID); err == nil {
+			if j.evictCopy(c) {
 				removed++
 			}
 		}
@@ -351,38 +375,84 @@ func (j *Janitor) promoteAndRemove(s *store.Segment, copies []*store.SegmentCopy
 			break
 		}
 	}
-	oldPath, oldLoc := s.Path, s.LocationID
+	// The old file goes first: once promoted, nothing records it, so a failed delete
+	// would orphan it. A promote that fails after this is retried next pass, when
+	// the file already being gone counts as removed.
+	if !j.removeFile(s.Path, s.LocationID) {
+		return false
+	}
 	if err := j.st.PromoteCopy(s.ID, pick.LocationID); err != nil {
 		j.log.Error("retention: promote copy", "segment", s.ID, "err", err)
 		return false
 	}
-	if oldPath != "" && filepath.IsAbs(oldPath) {
-		if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
-			j.log.Error("retention: remove promoted-away file", "path", oldPath, "err", err)
-		}
-	} else if oldPath != "" && j.reg != nil {
-		if b, err := j.reg.For(oldLoc); err == nil {
-			_ = b.Remove(oldPath)
-		}
-	}
 	return true
 }
 
-// removeCopyFile best-effort deletes a mirror copy's physical file.
-func (j *Janitor) removeCopyFile(c *store.SegmentCopy) {
-	if c.Path == "" {
-		return
+// evictCopy removes a mirror copy, file first so a failed delete keeps its row.
+func (j *Janitor) evictCopy(c *store.SegmentCopy) bool {
+	if !j.removeFile(c.Path, c.LocationID) {
+		return false
 	}
-	if filepath.IsAbs(c.Path) {
-		if err := os.Remove(c.Path); err != nil && !os.IsNotExist(err) {
-			j.log.Error("retention: remove copy file", "path", c.Path, "err", err)
-		}
-		return
+	return j.st.DeleteSegmentCopy(c.SegmentID, c.LocationID) == nil
+}
+
+// removeFile deletes a footage file. A file that is already gone counts as removed.
+//
+// False means the file may still be there, so the caller must keep its row: the row
+// is the only record of the file, and retention can never reclaim what it can't see.
+// Dropping rows after failed deletes once left hundreds of GB of untracked footage on a
+// share until it filled. The next pass retries.
+func (j *Janitor) removeFile(path, locationID string) bool {
+	if path == "" {
+		return true
 	}
-	if j.reg != nil {
-		if b, err := j.reg.For(c.LocationID); err == nil {
-			_ = b.Remove(c.Path)
+	t := j.deleteTrouble[locationID]
+	if t != nil && t.spent >= deleteFailureBudget {
+		t.skipped++
+		return false
+	}
+	start := time.Now()
+	err := j.removeNow(path, locationID)
+	if err == nil {
+		return true
+	}
+	if t == nil {
+		if j.deleteTrouble == nil {
+			j.deleteTrouble = map[string]*deleteTrouble{}
 		}
+		t = &deleteTrouble{first: err}
+		j.deleteTrouble[locationID] = t
+	}
+	t.failed++
+	t.spent += time.Since(start)
+	return false
+}
+
+// removeNow deletes one file. Local footage holds an absolute path; network footage
+// holds a backend-relative path routed through the storage registry.
+func (j *Janitor) removeNow(path, locationID string) error {
+	if filepath.IsAbs(path) {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	if j.reg == nil {
+		return nil
+	}
+	b, err := j.reg.For(locationID)
+	if err != nil {
+		return err
+	}
+	return b.Remove(path)
+}
+
+// reportDeleteTrouble logs a pass's failed deletes once per location, not per file:
+// a share that is down would otherwise fail thousands of deletes every pass.
+func (j *Janitor) reportDeleteTrouble() {
+	for locationID, t := range j.deleteTrouble {
+		j.log.Warn("retention: could not delete footage, keeping it to retry next pass",
+			"location", locationID, "failed", t.failed, "notTried", t.skipped, "err", t.first)
 	}
 }
 
@@ -406,11 +476,14 @@ func (j *Janitor) pruneNonMotion(cameraID string, beforeMs int64) {
 	if err != nil {
 		return
 	}
+	removed := 0
 	for _, s := range segs {
-		j.delete(s)
+		if j.delete(s) {
+			removed++
+		}
 	}
-	if len(segs) > 0 {
-		j.log.Info("retention: pruned non-motion footage", "camera", cameraID, "count", len(segs))
+	if removed > 0 {
+		j.log.Info("retention: pruned non-motion footage", "camera", cameraID, "count", removed)
 	}
 }
 
@@ -419,11 +492,14 @@ func (j *Janitor) deleteExpired(cameraID string, beforeMs int64) {
 	if err != nil {
 		return
 	}
+	removed := 0
 	for _, s := range segs {
-		j.delete(s)
+		if j.delete(s) {
+			removed++
+		}
 	}
-	if len(segs) > 0 {
-		j.log.Info("retention: aged out segments", "camera", cameraID, "count", len(segs))
+	if removed > 0 {
+		j.log.Info("retention: aged out segments", "camera", cameraID, "count", removed)
 	}
 }
 
@@ -433,25 +509,23 @@ func (j *Janitor) enforceQuota(cameraID string, quota int64) {
 		return
 	}
 	bytes := stat.Bytes
-	deleted := 0
-	for bytes > quota {
-		oldest, err := j.st.OldestSegments(cameraID, deleteBatch)
-		if err != nil || len(oldest) == 0 {
+	deleted, stuck := 0, 0
+	for bytes > quota && stuck < maxStuck {
+		// Whatever couldn't be deleted is still the oldest, so read past it.
+		oldest, err := j.st.OldestSegments(cameraID, deleteBatch+stuck)
+		if err != nil || len(oldest) <= stuck {
 			break
 		}
-		progressed := false
-		for _, s := range oldest {
+		for _, s := range oldest[stuck:] {
 			if bytes <= quota {
 				break
 			}
 			if j.delete(s) {
 				bytes -= s.SizeBytes
 				deleted++
-				progressed = true
+			} else {
+				stuck++
 			}
-		}
-		if !progressed {
-			break // whole batch is export-protected; retry next pass
 		}
 	}
 	if deleted > 0 {
@@ -462,7 +536,7 @@ func (j *Janitor) enforceQuota(cameraID string, quota int64) {
 func (j *Janitor) enforceFreeSpace() {
 	// Only footage on the default location frees space on this disk; footage on
 	// other locations lives on their own filesystems.
-	if n := j.freeSpace(store.DefaultLocationID, j.activeDir()); n > 0 {
+	if n := j.freeSpace(store.DefaultLocationID, freeFloor, j.diskAt(j.activeDir())); n > 0 {
 		j.log.Warn("retention: low disk space, removed oldest on default location", "count", n)
 	}
 }
@@ -475,64 +549,101 @@ func (j *Janitor) enforceLocationFreeSpace(loc *store.StorageLocation) {
 	if path == "" {
 		return
 	}
-	if n := j.freeSpace(loc.ID, path); n > 0 {
+	if n := j.freeSpace(loc.ID, freeFloor, j.diskAt(path)); n > 0 {
 		j.log.Warn("retention: low disk space on location, removed oldest", "location", loc.ID, "count", n)
 	}
 }
 
-// freeSpace evicts from one location until the filesystem at path is back above
-// freeFloor, and returns how many items it removed. Mirror copies parked on the
-// location go first: each is redundant, so freeing it loses nothing. Only then is
-// canonical footage evicted, oldest first, through evictCanonical, which promotes
-// a surviving mirror instead of destroying it; footage with no mirror is deleted,
-// still subject to delete's export and lease protection.
-func (j *Janitor) freeSpace(locationID, path string) int {
-	total, free, ok := j.du(path)
+// enforceShareFreeSpace is the free-space safety net for a network share. An
+// allocation only limits what Aperture has indexed, and the disk behind a share has
+// other things on it, so a full share would otherwise surface only as failed uploads.
+func (j *Janitor) enforceShareFreeSpace(loc *store.StorageLocation) {
+	usage := func() (int64, int64, bool) { return j.shareDu(loc.ID) }
+	total, free, ok := usage()
+	if !ok || total == 0 || free >= shareFreeFloor(total) {
+		return
+	}
+	removed := j.freeSpace(loc.ID, shareFreeFloor, usage)
+	if _, now, ok := usage(); ok {
+		free = now
+	}
+	j.log.Warn("retention: network share is nearly full", "location", loc.ID, "name", loc.Name,
+		"freeBytes", free, "floorBytes", shareFreeFloor(total), "removed", removed)
+}
+
+// shareUsage reports a network location's capacity. A share that can't be asked is
+// skipped quietly: failed uploads already say so, every few seconds.
+func (j *Janitor) shareUsage(locationID string) (total, free int64, ok bool) {
+	if j.reg == nil {
+		return 0, 0, false
+	}
+	b, err := j.reg.For(locationID)
+	if err != nil {
+		return 0, 0, false
+	}
+	st, err := b.Stat()
+	if err != nil || !st.Supported {
+		return 0, 0, false
+	}
+	return st.Total, st.Free, true
+}
+
+// diskAt adapts du to one path, for freeSpace.
+func (j *Janitor) diskAt(path string) func() (int64, int64, bool) {
+	return func() (int64, int64, bool) { return j.du(path) }
+}
+
+// freeSpace evicts from one location until usage reports it back above floor, and
+// returns how many items it removed. Mirror copies parked on the location go first:
+// each is redundant, so freeing it loses nothing. Only then is canonical footage
+// evicted, oldest first, through evictCanonical, which promotes a surviving mirror
+// instead of destroying it; footage with no mirror is deleted, still subject to
+// delete's export and lease protection.
+func (j *Janitor) freeSpace(locationID string, floor func(total int64) int64, usage func() (total, free int64, ok bool)) int {
+	total, free, ok := usage()
 	if !ok || total == 0 {
 		return 0
 	}
-	minFree := freeFloor(total)
-	removed := 0
-	for free < minFree {
-		copies, err := j.st.OldestCopiesInLocation(locationID, deleteBatch)
+	minFree := floor(total)
+	removed, stuckCopies, stuckSegs := 0, 0, 0
+	for free < minFree && stuckCopies+stuckSegs < maxStuck {
+		// Whatever couldn't be evicted is still the oldest, so read past it.
+		copies, err := j.st.OldestCopiesInLocation(locationID, deleteBatch+stuckCopies)
 		if err != nil {
 			break
 		}
-		progressed := false
-		if len(copies) > 0 {
-			for _, c := range copies {
-				j.removeCopyFile(c)
-				if err := j.st.DeleteSegmentCopy(c.SegmentID, c.LocationID); err == nil {
+		if len(copies) > stuckCopies {
+			for _, c := range copies[stuckCopies:] {
+				if j.evictCopy(c) {
 					removed++
-					progressed = true
+				} else {
+					stuckCopies++
 				}
 			}
 		} else {
-			oldest, err := j.st.OldestSegmentsInLocation(locationID, deleteBatch)
-			if err != nil || len(oldest) == 0 {
+			oldest, err := j.st.OldestSegmentsInLocation(locationID, deleteBatch+stuckSegs)
+			if err != nil || len(oldest) <= stuckSegs {
 				break
 			}
-			for _, s := range oldest {
+			for _, s := range oldest[stuckSegs:] {
 				if j.evictCanonical(s) {
 					removed++
-					progressed = true
+				} else {
+					stuckSegs++
 				}
 			}
 		}
-		if !progressed {
-			break // whole batch is export-protected; retry next pass
-		}
-		if _, free, ok = j.du(path); !ok {
+		if _, free, ok = usage(); !ok {
 			break
 		}
 	}
 	return removed
 }
 
-// delete removes a segment's bytes and index row. It returns false without
-// deleting when the segment is protected by an in-flight export (see
-// exportLocked); callers that free space in a loop must treat a false result as
-// "no progress" so they don't spin re-selecting the same protected batch.
+// delete removes a segment's bytes and index row. It returns false without deleting
+// the row when the segment is protected by an in-flight export (see exportLocked) or
+// its file couldn't be removed; callers that free space in a loop must treat a false
+// result as "no progress" so they don't spin re-selecting the same batch.
 func (j *Janitor) delete(s *store.Segment) bool {
 	if j.exportLocked(s) {
 		return false
@@ -541,8 +652,9 @@ func (j *Janitor) delete(s *store.Segment) bool {
 	// copy (file + row) before the canonical file and row.
 	if copies, err := j.st.CopiesForSegment(s.ID); err == nil {
 		for _, c := range copies {
-			j.removeCopyFile(c)
-			_ = j.st.DeleteSegmentCopy(c.SegmentID, c.LocationID)
+			if !j.evictCopy(c) {
+				return false // the segment's row is what brings the next pass back here
+			}
 		}
 	}
 	// A held, unexpired lease overlapping this segment protects it (T2.8). Only
@@ -553,16 +665,8 @@ func (j *Janitor) delete(s *store.Segment) bool {
 			return false
 		}
 	}
-	// Local segments hold an absolute path; network segments hold a backend-
-	// relative path routed through the storage registry.
-	if s.Path != "" && filepath.IsAbs(s.Path) {
-		if err := os.Remove(s.Path); err != nil && !os.IsNotExist(err) {
-			j.log.Error("retention: remove file", "path", s.Path, "err", err)
-		}
-	} else if s.Path != "" && j.reg != nil {
-		if b, err := j.reg.For(s.LocationID); err == nil {
-			_ = b.Remove(s.Path)
-		}
+	if !j.removeFile(s.Path, s.LocationID) {
+		return false
 	}
 	if err := j.st.DeleteSegment(s.ID); err != nil {
 		j.log.Error("retention: delete row", "id", s.ID, "err", err)
@@ -632,6 +736,17 @@ func freeFloor(total int64) int64 {
 		floor = f
 	}
 	return floor
+}
+
+// shareFreeFloor is how much the net keeps free on a network share: the 5 GiB floor
+// with freeFloor's quarter cap, but no percentage. A NAS pool holds everything else
+// on that NAS, and 7% of 20 TB would have cameras' footage deleted to defend 1.4 TB
+// nobody reserved for them.
+func shareFreeFloor(total int64) int64 {
+	if q := total / 4; q < minFreeBytesFloor {
+		return q
+	}
+	return minFreeBytesFloor
 }
 
 // diskUsage returns total and available bytes for the filesystem at path.

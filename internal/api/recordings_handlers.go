@@ -24,23 +24,30 @@ import (
 
 // removeSegmentFile deletes a segment's bytes from wherever they live: local
 // segments store an absolute path (os.Remove); network segments store a
-// backend-relative path (routed through the storage registry).
-func (s *Server) removeSegmentFile(seg *store.Segment) {
+// backend-relative path (routed through the storage registry). It reports whether
+// the file is gone: a caller that can keep the row must, since the row is the only
+// record of the file and retention can't reclaim what it can't see.
+func (s *Server) removeSegmentFile(seg *store.Segment) bool {
 	if seg.Path == "" {
-		return
+		return true
 	}
+	var err error
 	if filepath.IsAbs(seg.Path) {
-		if err := os.Remove(seg.Path); err != nil && !os.IsNotExist(err) {
-			s.log.Warn("remove segment file", "path", seg.Path, "err", err)
+		if err = os.Remove(seg.Path); os.IsNotExist(err) {
+			err = nil
 		}
-		return
+	} else if s.registry != nil {
+		if b, e := s.registry.For(seg.LocationID); e != nil {
+			err = e
+		} else {
+			err = b.Remove(seg.Path)
+		}
 	}
-	if s.registry == nil {
-		return
+	if err != nil {
+		s.log.Warn("remove segment file", "path", seg.Path, "err", err)
+		return false
 	}
-	if b, err := s.registry.For(seg.LocationID); err == nil {
-		_ = b.Remove(seg.Path)
-	}
+	return true
 }
 
 // purgeCameraFiles removes every on-disk artifact owned by a camera — recorded
@@ -307,13 +314,16 @@ func (s *Server) handleDeleteRecordings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var freed int64
-	delSeg, skipped := 0, 0
+	delSeg, skipped, failed := 0, 0, 0
 	for _, seg := range segs {
 		if seg.Locked {
 			skipped++
 			continue
 		}
-		s.removeSegmentFile(seg)
+		if !s.removeSegmentFile(seg) {
+			failed++
+			continue
+		}
 		if s.st.DeleteSegment(seg.ID) == nil {
 			freed += seg.SizeBytes
 			delSeg++
@@ -337,12 +347,13 @@ func (s *Server) handleDeleteRecordings(w http.ResponseWriter, r *http.Request) 
 		name = cam.Name
 	}
 	s.log.Info("recordings removed", "camera", id, "segments", delSeg,
-		"events", delEv, "skippedLocked", skipped, "freedBytes", freed)
+		"events", delEv, "skippedLocked", skipped, "failed", failed, "freedBytes", freed)
 	s.logAudit(r, "recordings.remove", name, fmt.Sprintf("%d clips over %s", delSeg, time.Duration((to-from)*int64(time.Millisecond)).Round(time.Minute)))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"deletedSegments": delSeg,
 		"deletedEvents":   delEv,
 		"skippedLocked":   skipped,
+		"failedSegments":  failed,
 		"freedBytes":      freed,
 	})
 }
@@ -576,8 +587,12 @@ func (s *Server) handleBitrate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 	recorded, _ := s.st.TotalBytes()
 	cams, _ := s.st.ListCameras()
+	disabled := seesDisabledCameras(r)
 	perCam := make([]any, 0, len(cams))
 	for _, c := range cams {
+		if !c.Enabled && !disabled {
+			continue
+		}
 		if stat, err := s.st.CameraStat(c.ID); err == nil {
 			perCam = append(perCam, map[string]any{
 				"cameraId": c.ID,

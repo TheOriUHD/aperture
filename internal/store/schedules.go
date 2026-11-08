@@ -55,3 +55,18 @@ func (s *Store) SetSchedules(cameraID string, scheds []*Schedule) error {
 	}
 	return tx.Commit()
 }
+
+// RecordModeSettable reports whether a remote control (Home Assistant, an
+// automation) may switch a camera to mode. "scheduled" needs at least one recording
+// window: the recorder runs only inside a window, so with none the switch would
+// silently stop the camera recording, with nobody at a screen to notice.
+func (s *Store) RecordModeSettable(cameraID, mode string) bool {
+	if !ValidRecordMode(mode) {
+		return false
+	}
+	if mode != ModeScheduled {
+		return true
+	}
+	scheds, err := s.ListSchedules(cameraID)
+	return err == nil && len(scheds) > 0
+}

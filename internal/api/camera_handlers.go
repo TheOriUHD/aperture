@@ -83,14 +83,35 @@ func (s *Server) handleListCameras(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	links := seesCameraLinks(r)
+	disabled := seesDisabledCameras(r)
 	out := make([]map[string]any, 0, len(cams))
 	for _, c := range cams {
 		if !s.allowedCamera(r, c.ID) {
 			continue // viewers only see cameras in their ACL
 		}
-		out = append(out, cameraView(c, links))
+		if !c.Enabled && !disabled {
+			continue
+		}
+		v := cameraView(c, links)
+		v["recordingNow"] = s.recordingNow(c)
+		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// seesDisabledCameras reports whether a caller's camera lists include disabled
+// cameras. An outside integration's don't: a disabled camera streams nothing and
+// records nothing, so a dashboard could only draw a dead tile for it, and the web
+// app hides them from its own dashboard for the same reason. The web app and nvrctl
+// do get them, because that is where one is switched back on, and so do extensions,
+// which can be granted a disabled camera (Tapo Control is). An integration that
+// manages cameras asks with ?includeDisabled=true.
+func seesDisabledCameras(r *http.Request) bool {
+	c := auth.FromContext(r.Context())
+	if c == nil || c.Class != auth.ClassToken || c.ExtID != "" {
+		return true
+	}
+	return r.URL.Query().Get("includeDisabled") == "true"
 }
 
 func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +123,7 @@ func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	v := cameraView(c, seesCameraLinks(r))
 	setETag(w, v)
+	v["recordingNow"] = s.recordingNow(c) // after the ETag: it flips with the schedule
 	writeJSON(w, http.StatusOK, v)
 }
 
@@ -146,6 +168,9 @@ type cameraReq struct {
 	PostrollMs        *int     `json:"postrollMs"`
 	CooldownMs        *int     `json:"cooldownMs"`
 	MinDurationMs     *int     `json:"minDurationMs"`
+	RecordHeight      *int     `json:"recordHeight"` // recording quality; 0 = as the camera sends it
+	RecordFPS         *int     `json:"recordFps"`
+	RecordKbps        *int     `json:"recordKbps"`
 }
 
 // validDetectMethod clamps a per-camera object-detection override to a known
@@ -163,6 +188,10 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 	var req cameraReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	if msg := recordQualityProblem(req); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.RTSPMainURL) == "" {
@@ -194,6 +223,9 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 		PostrollMs:        derefInt(req.PostrollMs, 5000),
 		CooldownMs:        derefInt(req.CooldownMs, 5000),
 		MinDurationMs:     derefInt(req.MinDurationMs, 0),
+		RecordHeight:      derefInt(req.RecordHeight, 0),
+		RecordFPS:         derefInt(req.RecordFPS, 0),
+		RecordKbps:        derefInt(req.RecordKbps, 0),
 	}
 	if err := s.st.CreateCamera(c); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create camera")
@@ -202,6 +234,21 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 	s.syncStreams()
 	s.logAudit(r, "camera.create", c.Name, "mode="+c.RecordMode)
 	writeJSON(w, http.StatusCreated, cameraView(c, true))
+}
+
+// recordQualityProblem words what is wrong with a request's recording quality, or
+// returns "". The limits only catch nonsense; 0 means "as the camera sends it".
+func recordQualityProblem(req cameraReq) string {
+	bad := func(v *int, lo, hi int) bool { return v != nil && *v != 0 && (*v < lo || *v > hi) }
+	switch {
+	case bad(req.RecordHeight, 144, 4320):
+		return "recordHeight must be 0 or between 144 and 4320"
+	case bad(req.RecordFPS, 1, 120):
+		return "recordFps must be 0 or between 1 and 120"
+	case bad(req.RecordKbps, 100, 100000):
+		return "recordKbps must be 0 or between 100 and 100000"
+	}
+	return ""
 }
 
 // validVendor normalises a vendor marking to one Aperture actually acts on. An
@@ -229,6 +276,10 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	var req cameraReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, decodeErrMsg(err))
+		return
+	}
+	if msg := recordQualityProblem(req); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	if req.Name != "" {
@@ -314,14 +365,26 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	if req.MinDurationMs != nil {
 		c.MinDurationMs = *req.MinDurationMs
 	}
+	qualityBefore := [3]int{c.RecordHeight, c.RecordFPS, c.RecordKbps}
+	if req.RecordHeight != nil {
+		c.RecordHeight = *req.RecordHeight
+	}
+	if req.RecordFPS != nil {
+		c.RecordFPS = *req.RecordFPS
+	}
+	if req.RecordKbps != nil {
+		c.RecordKbps = *req.RecordKbps
+	}
+	qualityChanged := qualityBefore != [3]int{c.RecordHeight, c.RecordFPS, c.RecordKbps}
 	if err := s.st.UpdateCamera(c); err != nil {
 		writeStoreError(w, err)
 		return
 	}
 	s.syncStreams()
-	if locationChanged {
+	if locationChanged || (qualityChanged && s.rec != nil) {
 		// New footage must land on the new location: cleanly restart this camera's
-		// recorder so ffmpeg writes to (and the indexer scans) the new directory.
+		// recorder so ffmpeg writes to (and the indexer scans) the new directory. A
+		// quality change needs the same, since ffmpeg's arguments are set at start.
 		s.rec.RestartCamera(c.ID)
 	}
 	detail := "mode=" + c.RecordMode
@@ -353,6 +416,9 @@ func (s *Server) handleDeleteCamera(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.DeleteCamera(id); err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	if s.ha != nil {
+		s.ha.ForgetCamera(id)
 	}
 	s.syncStreams()
 	s.logAudit(r, "camera.delete", c.Name, "")
@@ -413,6 +479,9 @@ func cameraView(c *store.Camera, links bool) map[string]any {
 		"postrollMs":        c.PostrollMs,
 		"cooldownMs":        c.CooldownMs,
 		"minDurationMs":     c.MinDurationMs,
+		"recordHeight":      c.RecordHeight,
+		"recordFps":         c.RecordFPS,
+		"recordKbps":        c.RecordKbps,
 		"createdAtMs":       msFromSec(c.CreatedAt), // stored in seconds; wire is ms (DD-WIRE-TIME)
 		"updatedAtMs":       msFromSec(c.UpdatedAt),
 	}

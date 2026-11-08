@@ -6,6 +6,7 @@ export function useCameras() {
   return useQuery({
     queryKey: ["cameras"],
     queryFn: () => api.get<Camera[]>("/api/cameras"),
+    refetchInterval: 60_000, // recordingNow flips when a schedule window opens or closes
   });
 }
 
@@ -35,6 +36,9 @@ export interface CameraInput {
   postrollMs?: number;
   cooldownMs?: number;
   minDurationMs?: number;
+  recordHeight?: number;
+  recordFps?: number;
+  recordKbps?: number;
 }
 
 export function useCreateCamera() {

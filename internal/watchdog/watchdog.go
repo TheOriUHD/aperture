@@ -1,8 +1,8 @@
 // Package watchdog supervises camera health: it detects a camera whose recording
 // has gone stale (a wedged producer that hasn't exited, so the recorder's own
 // backoff never fires) and recovers it by force re-registering the go2rtc stream
-// — tearing down the wedged producer so the recorder reconnects. It also tracks
-// last-seen and daily restart counts to surface in the health dashboard.
+// and restarting the recorder on it. It also tracks last-seen and daily restart
+// counts to surface in the health dashboard.
 package watchdog
 
 import (
@@ -20,6 +20,13 @@ const (
 	recoverBackoff = 60 * time.Second // at most one recovery per camera per minute
 )
 
+// Recorder is the part of the recorder a recovery goes through.
+type Recorder interface {
+	RecordingDue(c *store.Camera) bool
+	NeedsRecovery(c *store.Camera) bool
+	RestartCamera(id string)
+}
+
 type camState struct {
 	lastSeen      int64
 	restartsToday int
@@ -31,6 +38,7 @@ type camState struct {
 type Watchdog struct {
 	st  *store.Store
 	sm  *stream.Manager
+	rec Recorder
 	log *slog.Logger
 
 	mu            sync.Mutex
@@ -40,8 +48,8 @@ type Watchdog struct {
 }
 
 // New constructs a Watchdog.
-func New(st *store.Store, sm *stream.Manager, log *slog.Logger) *Watchdog {
-	return &Watchdog{st: st, sm: sm, log: log, state: map[string]*camState{}}
+func New(st *store.Store, sm *stream.Manager, rec Recorder, log *slog.Logger) *Watchdog {
+	return &Watchdog{st: st, sm: sm, rec: rec, log: log, state: map[string]*camState{}}
 }
 
 // SetOnCameraState registers a callback invoked (async) with a camera's
@@ -93,7 +101,12 @@ func (w *Watchdog) tick(ctx context.Context) {
 		}
 		// newest==0 means the camera has never produced a segment — don't flag a
 		// brand-new/never-working camera as "stale" (recordingOk already shows it).
-		stale := newest > 0 && nowMs-newest > store.RecordingGraceMs
+		// Neither does a camera outside its schedule: its footage is old on purpose.
+		stale := newest > 0 && nowMs-newest > store.RecordingGraceMs && w.rec.RecordingDue(c)
+		// Stale says footage isn't arriving, which a failing upload causes too. Only
+		// a recorder that has stopped writing is worth recovering: restarting the
+		// stream under a healthy one is what the comment below warns about.
+		stalled := stale && w.rec.NeedsRecovery(c)
 
 		w.mu.Lock()
 		s := w.state[c.ID]
@@ -110,7 +123,7 @@ func (w *Watchdog) tick(ctx context.Context) {
 		if w.onCameraState != nil && (firstObs || was != stale) {
 			go w.onCameraState(c.ID, !stale)
 		}
-		needRecover := stale && time.Since(s.lastRecover) > recoverBackoff
+		needRecover := stalled && time.Since(s.lastRecover) > recoverBackoff
 		if needRecover {
 			s.lastRecover = now
 			s.restartsToday++
@@ -124,6 +137,10 @@ func (w *Watchdog) tick(ctx context.Context) {
 			if err := w.sm.Restart(ctx, cam); err != nil {
 				w.log.Warn("watchdog: recovery restart failed", "camera", c.ID, "err", err)
 			}
+			// ffmpeg stays connected through a stream restart and carries on from the
+			// new source's timestamps, which can be hours away from the old ones: the
+			// segmenter then cuts at every keyframe, or never. Start it fresh as well.
+			w.rec.RestartCamera(c.ID)
 		}
 	}
 }

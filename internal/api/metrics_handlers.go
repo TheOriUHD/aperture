@@ -65,6 +65,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		ok := newest > 0 && now-newest < store.RecordingGraceMs
 		fmt.Fprintf(&b, "aperture_camera_recording_ok{camera_id=%q,name=%q} %g\n", c.ID, c.Name, b2f(ok))
 	}
+	decl("aperture_camera_recording_expected", "1 if the camera should be recording now; alert on this with recording_ok 0.", "gauge")
+	for _, c := range cams {
+		fmt.Fprintf(&b, "aperture_camera_recording_expected{camera_id=%q,name=%q} %g\n", c.ID, c.Name, b2f(s.recordingDue(c)))
+	}
 	decl("aperture_camera_live_ok", "1 if the camera's go2rtc stream is registered.", "gauge")
 	for _, c := range cams {
 		_, reg := health.Registered[stream.StreamName(c.ID)]
@@ -94,7 +98,7 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
-	statusJSON, _ := json.MarshalIndent(s.buildStatus(ctx), "", "  ")
+	statusJSON, _ := json.MarshalIndent(s.buildStatus(ctx, true), "", "  ")
 	cfgJSON, _ := json.MarshalIndent(map[string]any{
 		"httpAddr":      s.cfg.HTTPAddr,
 		"dataDir":       s.cfg.DataDir,

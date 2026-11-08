@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"slices"
 )
 
 // Role enumerates access levels.
@@ -18,6 +19,15 @@ const (
 	ModeMotion     = "motion"
 	ModeScheduled  = "scheduled"
 )
+
+// RecordModes lists every recording mode, in the order controls offer them. It is
+// the single source of truth: Home Assistant discovery and commands and the
+// automation engine read it instead of keeping their own lists, which is how
+// "scheduled" went missing from them.
+var RecordModes = []string{ModeNever, ModeMotion, ModeContinuous, ModeScheduled}
+
+// ValidRecordMode reports whether mode is a recording mode.
+func ValidRecordMode(mode string) bool { return slices.Contains(RecordModes, mode) }
 
 // User is an account that can sign in.
 type User struct {
@@ -60,6 +70,9 @@ type Camera struct {
 	PostrollMs        int     `json:"postrollMs"`
 	CooldownMs        int     `json:"cooldownMs"`
 	MinDurationMs     int     `json:"minDurationMs"`
+	RecordHeight      int     `json:"recordHeight"` // record at most this tall (px); 0 = as sent
+	RecordFPS         int     `json:"recordFps"`    // record at most this framerate; 0 = as sent
+	RecordKbps        int     `json:"recordKbps"`   // record at this video bitrate; 0 = automatic
 	CreatedAt         int64   `json:"createdAt"`
 	UpdatedAt         int64   `json:"updatedAt"`
 }
