@@ -5,6 +5,7 @@ import { useObjectBoxes } from "./ObjectBox";
 import { LiveVideo } from "./LiveVideo";
 import { LiveConditions } from "./ConditionsOverlay";
 import { LiveObjectsOverlay } from "./LiveObjectsOverlay";
+import { ParkedBadge } from "./ObjectBox";
 import { ExtensionSlot } from "../ext/ExtensionSlot";
 import { fsVideoStyle, FullscreenChrome } from "./fullscreen";
 import { useScrollLock } from "../hooks/useScrollLock";
@@ -133,6 +134,7 @@ export function CameraPopout({
         >
           <LiveVideo camera={camera} fit="contain" videoRef={videoRef} fsStyle={mobileFs ? fsVideoStyle : undefined} />
           <LiveObjectsOverlay cameraId={camera.id} videoRef={videoRef} fit="contain" outline={false} />
+          <ParkedBadge cameraId={camera.id} className="absolute left-3 top-3 z-[7]" />
           <LiveConditions variant="full" className="top-3 right-14" cameraId={camera.id} />
           <button onClick={onClose} className="osd-btn absolute right-3 top-3" aria-label="Close" title="Close">
             <X className="h-4 w-4" />

@@ -11,13 +11,19 @@ export type LiveCamera = {
   moving: boolean;
   objects: LiveObject[];
   objectsAt: number; // when the objects arrived (ms); they go stale after OBJECT_TTL
+  parked: number; // vehicles standing still in view (the "P" badge)
+  parkedAt: number; // when that was last said; stale after PARKED_TTL
 };
 
 // A camera's boxes disappear this long after the last update, so a lost
 // "nothing here any more" message can't leave a box on screen.
 export const OBJECT_TTL = 1500;
 
-const EMPTY: LiveCamera = { moving: false, objects: [], objectsAt: 0 };
+// The parked mark is told with every recognised frame of a watched camera (at
+// least every 0.7 s); it goes after this long without word.
+export const PARKED_TTL = 2500;
+
+const EMPTY: LiveCamera = { moving: false, objects: [], objectsAt: 0, parked: 0, parkedAt: 0 };
 const state = new Map<string, LiveCamera>();
 const listeners = new Map<string, Set<() => void>>();
 
@@ -42,11 +48,17 @@ export function applyFeed(msg: FeedMsg): boolean {
     return true;
   }
   if (msg.type === "objects.live") {
-    const d = msg.data as { ts?: number; objects?: LiveObject[] } | undefined;
+    const d = msg.data as { ts?: number; objects?: LiveObject[]; parked?: number } | undefined;
     // A snapshot replayed on reconnect may be old; ignore what's already stale.
     const ts = d?.ts ?? msg.ts ?? Date.now();
     if (Date.now() - ts > OBJECT_TTL) return true;
-    update(id, { objects: Array.isArray(d?.objects) ? d!.objects! : [], objectsAt: Date.now() });
+    const now = Date.now();
+    update(id, {
+      objects: Array.isArray(d?.objects) ? d!.objects! : [],
+      objectsAt: now,
+      parked: typeof d?.parked === "number" ? d.parked : 0,
+      parkedAt: now,
+    });
     return true;
   }
   return false;

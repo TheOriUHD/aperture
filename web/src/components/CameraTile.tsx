@@ -4,6 +4,7 @@ import { Camera as CameraIcon, Maximize2, Play } from "lucide-react";
 import { LiveVideo } from "./LiveVideo";
 import { LiveConditions } from "./ConditionsOverlay";
 import { LiveObjectsOverlay } from "./LiveObjectsOverlay";
+import { ParkedBadge } from "./ObjectBox";
 import type { Camera } from "../lib/types";
 import type { RecordingState } from "../lib/recordingState";
 
@@ -61,8 +62,9 @@ export function CameraTile({
         </span>
       </div>
 
-      {/* Recording mark, top right. */}
-      <div className="absolute right-2.5 top-2.5">
+      {/* Parked vehicle and recording marks, top right. */}
+      <div className="absolute right-2.5 top-2.5 flex items-center gap-2">
+        <ParkedBadge cameraId={camera.id} />
         {failed ? (
           <span className="pill-red h-6 px-2" title="Recording should be running but is not">
             <span className="h-1.5 w-1.5 rounded-full bg-danger" />

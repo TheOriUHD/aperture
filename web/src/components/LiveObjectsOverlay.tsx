@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { OBJECT_TTL, useLiveCamera } from "../lib/liveState";
-import { ObjectBox, useObjectBoxes } from "./ObjectBox";
+import { ObjectBox, useHoveredBox, useObjectBoxes } from "./ObjectBox";
 import { useContentRect } from "./useContentRect";
 
 // LiveObjectsOverlay draws, over a live picture, a white outline round the
@@ -39,6 +39,8 @@ export function LiveObjectsOverlay({
   // Boxes go stale on their own: re-render once they expire.
   const age = Date.now() - live.objectsAt;
   const showBoxes = boxesOn && live.objects.length > 0 && age < OBJECT_TTL;
+  const keyed = showBoxes ? live.objects.map((o, i) => ({ ...o, key: String(o.id ?? `${o.label}-${i}`) })) : [];
+  const hovered = useHoveredBox(hostRef, rect, keyed);
   useEffect(() => {
     if (!showBoxes) return;
     const t = window.setTimeout(() => setTick((n) => n + 1), OBJECT_TTL - age + 20);
@@ -56,8 +58,13 @@ export function LiveObjectsOverlay({
       )}
       {showBoxes && (
         <div className="absolute" style={rect}>
-          {live.objects.map((o, i) => (
-            <ObjectBox key={o.id ?? `${o.label}-${i}`} {...o} glide={Math.round(Math.min(gap.current * 0.5, 150))} />
+          {keyed.map(({ key, ...o }) => (
+            <ObjectBox
+              key={key}
+              {...o}
+              expanded={key === hovered}
+              glide={Math.round(Math.min(gap.current * 0.5, 150))}
+            />
           ))}
         </div>
       )}

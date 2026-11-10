@@ -48,7 +48,7 @@ import { ExportCenter } from "../components/ExportCenter";
 import { CameraModal } from "../components/CameraModal";
 import { DetectionOverlay } from "../components/DetectionOverlay";
 import { LiveObjectsOverlay } from "../components/LiveObjectsOverlay";
-import { useObjectBoxes } from "../components/ObjectBox";
+import { ParkedBadge, useObjectBoxes } from "../components/ObjectBox";
 import { GridSearchOverlay, filterByRegion, type Region } from "../components/GridSearch";
 import { MultiCamGrid } from "../components/MultiCamGrid";
 import { AddCamerasModal } from "../components/AddCamerasModal";
@@ -1360,6 +1360,7 @@ export function Playback() {
               <span className="shrink-0 tabular-nums text-white/85">{fmtClock(overlayTime)}</span>
               <span className="h-3.5 w-px shrink-0 bg-white/25" />
               <span className="truncate">{selected.name}</span>
+              {isLive && <ParkedBadge cameraId={selected.id} />}
             </div>
           )}
           {selected && !gridOpen && !multiActive && (

@@ -55,7 +55,8 @@ type liveCam struct {
 	moving bool
 	cells  []timedCells // recent motion maps
 
-	shown bool // objects are on screen (so a clear is owed)
+	shown  bool // objects are on screen (so a clear is owed)
+	parked int  // parked vehicles last reported
 
 	tracks []tracked          // objects followed from frame to frame
 	path   []store.TrackPoint // positions not yet written for the event
@@ -78,6 +79,7 @@ type tracked struct {
 	movedAt time.Time  // when it last moved (see acceptLocked)
 	shownAt time.Time  // when it last counted (was boxed)
 	anchor  LiveObject // where it was when first seen or when it last moved
+	born    time.Time  // when the tracker first saw it
 }
 
 type timedCells struct {
@@ -314,8 +316,10 @@ func (l *Live) detect(ctx context.Context, id string, frame []byte, w, h int, at
 	cands := candidates(res.Boxes, cfg)
 	l.trackLocked(c, cands, at)
 	objs := acceptLocked(c, cands, motionMap, cfg, at)
-	publish := len(objs) > 0 || c.shown
+	parked := parkedLocked(c, objs, at)
+	publish := len(objs) > 0 || c.shown || parked > 0 || c.parked > 0
 	c.shown = len(objs) > 0
+	c.parked = parked
 	saveEvent, eventID := l.aggregateLocked(c, objs)
 	var best []store.EventObject
 	if saveEvent {
@@ -333,7 +337,7 @@ func (l *Live) detect(ctx context.Context, id string, frame []byte, w, h int, at
 		}
 	}
 	if publish {
-		l.publish("objects.live", id, map[string]any{"ts": at.UnixMilli(), "objects": objs})
+		l.publish("objects.live", id, map[string]any{"ts": at.UnixMilli(), "objects": objs, "parked": parked})
 	}
 	if saveEvent {
 		l.e.saveObjects(eventID, id, best)
@@ -380,7 +384,7 @@ func (l *Live) trackLocked(c *liveCam, objs []LiveObject, at time.Time) {
 		}
 		l.nextObj++
 		o.ID = l.nextObj
-		c.tracks = append(c.tracks, tracked{id: o.ID, label: o.Label, box: *o, seen: at, anchor: *o})
+		c.tracks = append(c.tracks, tracked{id: o.ID, label: o.Label, box: *o, seen: at, anchor: *o, born: at})
 		used[len(c.tracks)-1] = true
 	}
 }
@@ -614,6 +618,32 @@ func acceptLocked(c *liveCam, cands []LiveObject, moved []bool, cfg Config, at t
 		out = append(out, t.box)
 	}
 	return out
+}
+
+// parkedAfter is how long a vehicle must stand in view, not moving, to count
+// as parked.
+const parkedAfter = 3 * time.Second
+
+// parkedLocked counts the vehicles in view that stand still: recognised in
+// this frame for a few seconds now, but not boxed (they haven't moved within
+// the last minute). The live view marks such a camera with a "P".
+func parkedLocked(c *liveCam, shown []LiveObject, at time.Time) int {
+	boxed := map[int64]bool{}
+	for _, o := range shown {
+		boxed[o.ID] = true
+	}
+	n := 0
+	for _, t := range c.tracks {
+		switch t.label {
+		case "car", "truck", "bus", "motorcycle":
+		default:
+			continue
+		}
+		if t.seen.Equal(at) && !boxed[t.id] && at.Sub(t.born) >= parkedAfter {
+			n++
+		}
+	}
+	return n
 }
 
 // displaced reports whether an object's box went somewhere since a: its

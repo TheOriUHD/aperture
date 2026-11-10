@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { LiveVideo } from "./LiveVideo";
 import { LiveObjectsOverlay } from "./LiveObjectsOverlay";
+import { ParkedBadge } from "./ObjectBox";
 import { EmptyState } from "./ui/EmptyState";
 import { useCameraGroups } from "../hooks/useGroups";
 import { api } from "../lib/api";
@@ -257,6 +258,7 @@ function MobileCameraTile({
     >
       <LiveVideo camera={camera} fit="cover" quality={view === "list" ? "auto" : "low"} videoRef={videoRef} />
       <LiveObjectsOverlay cameraId={camera.id} videoRef={videoRef} fit="cover" />
+      <ParkedBadge cameraId={camera.id} className="absolute right-2 top-2 z-[7]" />
 
       {view === "list" && (
         <div className="pill osd-surface absolute left-2 top-2 tabular-nums text-white/90">

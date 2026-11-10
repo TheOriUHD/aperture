@@ -187,6 +187,10 @@ func TestParkedCarsDontCount(t *testing.T) {
 			t.Fatalf("parked car boxed at frame %d: %+v", i, got)
 		}
 	}
+	// Standing there for 4 s: it counts as parked (the "P" in the live view).
+	if n := parkedLocked(c, nil, t0.Add(19*200*time.Millisecond)); n != 1 {
+		t.Fatalf("parked = %d, want 1", n)
+	}
 	// It drives off to the right: boxed.
 	var got []LiveObject
 	for i := 0; i < 5; i++ {
@@ -194,6 +198,9 @@ func TestParkedCarsDontCount(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("driving car not boxed: %+v", got)
+	}
+	if n := parkedLocked(c, got, t0.Add(4*time.Second+4*200*time.Millisecond)); n != 0 {
+		t.Fatalf("a driving car counted as parked")
 	}
 	// It stops there: still boxed for a while, then let go.
 	for dt := 5 * time.Second; dt <= 30*time.Second; dt += time.Second {

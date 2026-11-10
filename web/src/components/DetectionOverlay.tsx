@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { MotionEvent } from "../lib/types";
-import { ObjectBox } from "./ObjectBox";
+import { ObjectBox, useHoveredBox } from "./ObjectBox";
 import { useContentRect } from "./useContentRect";
 
 // One recognised object's position at one moment (GET /cameras/{id}/tracks).
@@ -103,11 +103,13 @@ export function DetectionOverlay({
     );
   }
 
+  const hovered = useHoveredBox(hostRef, rect, boxes);
+
   return (
     <div ref={hostRef} className="pointer-events-none absolute inset-0 z-[6] overflow-hidden">
       <div className="absolute" style={rect}>
         {boxes.map(({ key, ...b }) => (
-          <ObjectBox key={key} {...b} />
+          <ObjectBox key={key} {...b} expanded={key === hovered} />
         ))}
       </div>
     </div>
