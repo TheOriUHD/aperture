@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Home, Thermometer } from "lucide-react";
+import { Car, Footprints, Home, Package, PawPrint, PersonStanding, Thermometer, Users, Video, CircleDot, SquareParking } from "lucide-react";
 import { Switch } from "./ui/Switch";
 import { SettingsHeading, SettingsRow } from "./ui/Layout";
 import { CopyIconButton, IntegrationHeader, SectionTitle, StatusPill, ToggleRow } from "./IntegrationParts";
@@ -134,6 +134,26 @@ export function HomeAssistant() {
 
       {ha?.enabled && (
         <>
+          <SectionTitle description="Each camera appears as a device with these entities. Cameras switched out of Home Assistant (in their settings) get none.">
+            What Home Assistant gets
+          </SectionTitle>
+          <div className="grid gap-x-8 gap-y-2.5 py-1 sm:grid-cols-2">
+            <EntityLine icon={Video} name="Camera" detail="A snapshot every few seconds" />
+            <EntityLine icon={Footprints} name="Motion" detail="On while the camera sees motion, also on cameras that record nothing" />
+            <EntityLine icon={CircleDot} name="Recording" detail="On while it records, plus a record-mode selector" />
+            <EntityLine icon={PersonStanding} name="Person" detail="Occupancy: on while a person is there, also sitting still" />
+            <EntityLine icon={Users} name="People" detail="How many people it sees" />
+            <EntityLine icon={Car} name="Vehicle" detail="Occupancy: a vehicle in view, moving or parked" />
+            <EntityLine icon={SquareParking} name="Parked vehicle" detail="A vehicle standing still (the blue P)" />
+            <EntityLine icon={PawPrint} name="Animal" detail="Occupancy: an animal in view" />
+            <EntityLine icon={Package} name="Package" detail="A delivered parcel waits (cameras watching for packages)" />
+          </div>
+          <p className="pb-2 text-xs leading-relaxed text-fg-faint">
+            Person, People, Vehicle, Parked vehicle, Animal and Package come from object recognition, on the cameras it
+            watches. So that they stay right while nothing moves, recognition looks at the published cameras every second
+            or so (every few seconds on a CPU) while Home Assistant is connected.
+          </p>
+
           <SectionTitle
             description="Thermometer readings on the broker. Assign one to a camera in its settings to show it on the overlay."
           >
@@ -222,6 +242,18 @@ export function HomeAssistant() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function EntityLine({ icon: Icon, name, detail }: { icon: typeof Home; name: string; detail: string }) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-fg-muted" />
+      <div className="min-w-0">
+        <p className="text-[13px] font-medium text-fg">{name}</p>
+        <p className="text-xs leading-relaxed text-fg-faint">{detail}</p>
+      </div>
     </div>
   );
 }

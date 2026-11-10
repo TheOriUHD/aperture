@@ -1,7 +1,9 @@
 // Package ha integrates Aperture with Home Assistant over MQTT (outbound: HA
 // connects to the broker and auto-discovers Aperture's entities). It publishes
 // MQTT discovery configs and live state for per-camera motion + recording
-// binary sensors, a snapshot camera entity, and NVR storage/event sensors.
+// binary sensors, a snapshot camera entity, presence from object recognition
+// (person, people, vehicle, animal, parked vehicle, package), and NVR
+// storage/event sensors.
 package ha
 
 import (
@@ -52,7 +54,7 @@ type Publisher struct {
 	client    mqtt.Client
 	current   Settings
 	siteName  func() string
-	reconcile func() // re-sync recorder + detector after an inbound record-mode change
+	reconcile func()     // re-sync recorder + detector after an inbound record-mode change
 	onArmed   func(bool) // change-feed alarm.state hook (Item 3)
 	// shouldRecord says whether a camera is meant to be recording right now.
 	shouldRecord func(*store.Camera) bool
@@ -60,9 +62,34 @@ type Publisher struct {
 	stateMu   sync.Mutex      // guards motion/recording — touched by the ticker AND the paho OnConnect goroutine
 	motion    map[string]bool // last published motion state per camera
 	recording map[string]bool
+	present   map[string]Presence // last published presence per camera
+
+	presence     func(cameraID string) (Presence, bool) // what recognition sees (ok=false: it doesn't look)
+	keepPresence func(ids map[string]bool)              // ask recognition to look at these even when nothing moves
+	liveMotion   func(cameraID string) bool             // motion right now, also on cameras that record nothing
+	keptAll      bool                                   // keepPresence was last called with cameras
 
 	sensorMu sync.Mutex         // guards the inbound HA sensor cache
 	sensors  map[string]*Sensor // entity id -> latest reading
+}
+
+// Presence is who and what a camera sees now (from local object recognition).
+type Presence struct {
+	Person   bool
+	People   int
+	Vehicle  bool // moving or parked
+	Animal   bool
+	Parked   bool
+	Package  bool // a delivered parcel waits
+	Packages bool // the camera watches for packages (its Package entity exists)
+}
+
+// SetPresence wires presence from object recognition: what a camera sees, a
+// way to keep recognition looking at the published cameras while Home
+// Assistant is connected, and live motion (which, unlike events, cameras that
+// record nothing have too).
+func (p *Publisher) SetPresence(presence func(string) (Presence, bool), keep func(map[string]bool), liveMotion func(string) bool) {
+	p.presence, p.keepPresence, p.liveMotion = presence, keep, liveMotion
 }
 
 // SetReconcile wires the callback that applies a record-mode change immediately
@@ -81,7 +108,8 @@ func (p *Publisher) SetShouldRecord(fn func(*store.Camera) bool) { p.shouldRecor
 func New(cfg *config.Config, st *store.Store, sm snapshotter, siteName func() string, log *slog.Logger) *Publisher {
 	return &Publisher{
 		cfg: cfg, st: st, sm: sm, siteName: siteName, log: log,
-		motion: map[string]bool{}, recording: map[string]bool{},
+		motion:  map[string]bool{},
+		present: map[string]Presence{}, recording: map[string]bool{},
 		sensors: map[string]*Sensor{},
 	}
 }
@@ -121,8 +149,13 @@ func (p *Publisher) Run(ctx context.Context) {
 				p.Reconcile() // pick up settings changes / retry connect
 			}
 			if !p.connected() {
+				p.keepLooking(nil)
 				continue
 			}
+			if n%5 == 1 {
+				p.keepLooking(p.publishedCameraIDs())
+			}
+			p.publishPresence()
 			if n%2 == 0 {
 				p.publishMotionRecording()
 			}
@@ -285,6 +318,18 @@ func cameraTopics(prefix, cameraID string) []string {
 		fmt.Sprintf("%s/binary_sensor/aperture_%s_recording/config", prefix, cameraID),
 		fmt.Sprintf("%s/camera/aperture_%s/config", prefix, cameraID),
 		fmt.Sprintf("%s/select/aperture_%s_record_mode/config", prefix, cameraID),
+		fmt.Sprintf("%s/binary_sensor/aperture_%s_person/config", prefix, cameraID),
+		fmt.Sprintf("%s/sensor/aperture_%s_people/config", prefix, cameraID),
+		fmt.Sprintf("%s/binary_sensor/aperture_%s_vehicle/config", prefix, cameraID),
+		fmt.Sprintf("%s/binary_sensor/aperture_%s_animal/config", prefix, cameraID),
+		fmt.Sprintf("%s/binary_sensor/aperture_%s_parked/config", prefix, cameraID),
+		fmt.Sprintf("%s/binary_sensor/aperture_%s_package/config", prefix, cameraID),
+		stateTopicBase + "/" + cameraID + "/person",
+		stateTopicBase + "/" + cameraID + "/people",
+		stateTopicBase + "/" + cameraID + "/vehicle",
+		stateTopicBase + "/" + cameraID + "/animal",
+		stateTopicBase + "/" + cameraID + "/parked",
+		stateTopicBase + "/" + cameraID + "/package",
 		stateTopicBase + "/" + cameraID + "/motion",
 		stateTopicBase + "/" + cameraID + "/recording",
 		stateTopicBase + "/" + cameraID + "/snapshot",
@@ -329,6 +374,7 @@ func (p *Publisher) ForgetCamera(cameraID string) {
 	p.stateMu.Lock()
 	delete(p.motion, cameraID)
 	delete(p.recording, cameraID)
+	delete(p.present, cameraID)
 	p.stateMu.Unlock()
 }
 
@@ -374,6 +420,7 @@ func (p *Publisher) publishDiscovery() {
 			"device":             dev,
 		}
 		p.pub(fmt.Sprintf("%s/camera/aperture_%s/config", pfx, c.ID), true, mustJSON(camCfg))
+		p.publishPresenceDiscovery(pfx, c.ID, dev)
 	}
 
 	nvr := p.nvrDevice()
@@ -411,7 +458,7 @@ func (p *Publisher) publishMotionRecording() {
 	cams = haCameras(cams)
 	now := time.Now().UnixMilli()
 	for _, c := range cams {
-		motion := p.cameraInMotion(c.ID, now)
+		motion := p.cameraInMotion(c.ID, now) || (p.liveMotion != nil && p.liveMotion(c.ID))
 		rec := c.Enabled && c.RecordMode != store.ModeNever
 		if p.shouldRecord != nil {
 			rec = p.shouldRecord(c)

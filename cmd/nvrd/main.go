@@ -307,6 +307,14 @@ func main() {
 	})
 	audioDet.SetOnEventClose(notifyEng.OnEventClose) // audio event.closed (Item 3)
 	// Package deliveries and pick-ups are events of their own (detect/packages.go).
+	// Home Assistant presence: who and what each camera sees (person, people,
+	// vehicle, animal, parked vehicle, package), with recognition looking at
+	// the published cameras every second or so while HA is connected.
+	haPub.SetPresence(func(id string) (ha.Presence, bool) {
+		p, ok := detectEng.Presence(id)
+		return ha.Presence{Person: p.Person, People: p.People, Vehicle: p.Vehicle, Animal: p.Animal,
+			Parked: p.Parked, Package: p.Package, Packages: p.Packages}, ok
+	}, detectEng.KeepPresence, detectEng.Moving)
 	detectEng.SetEventSink(cfg.RecordingsDir, func(ev *store.Event) {
 		notifyEng.OnEvent(ev)
 		webhookDisp.OnEvent(ev)

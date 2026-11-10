@@ -216,3 +216,32 @@ func TestParkedCarsDontCount(t *testing.T) {
 		t.Fatalf("parked car still boxed a minute after it stopped: %+v", got)
 	}
 }
+
+// Presence counts what recognition counted, and holds a few seconds past the
+// last frame that saw it (no flapping on a missed frame).
+func TestPresence(t *testing.T) {
+	cfg := Config{Mode: ModeLocal}
+	l := &Live{cams: map[string]*liveCam{}}
+	c := l.cam("room")
+	c.enabled = true
+	t0 := time.Now()
+	two := candidates([]ai.Box{
+		{Class: 0, Score: 0.9, X: 0.1, Y: 0.2, W: 0.15, H: 0.6},
+		{Class: 0, Score: 0.88, X: 0.6, Y: 0.2, W: 0.15, H: 0.6},
+	}, cfg)
+	l.trackLocked(c, two, t0)
+	objs := acceptLocked(c, two, make([]bool, len(cellsAt(0, 0, 0, 0))), cfg, t0)
+	c.notePresenceLocked(objs, 1, t0)
+	c.parked, c.parkedAt = 1, t0
+
+	p, ok := l.presence("room", t0.Add(time.Second))
+	if !ok || !p.Person || p.People != 2 || !p.Vehicle || !p.Parked || p.Animal {
+		t.Fatalf("presence = %+v (ok %v)", p, ok)
+	}
+	if p, _ := l.presence("room", t0.Add(presenceHold+time.Second)); p.Person || p.People != 0 || p.Parked {
+		t.Fatalf("presence outlived its hold: %+v", p)
+	}
+	if _, ok := l.presence("garden", t0); ok {
+		t.Fatal("a camera recognition doesn't look at reported presence")
+	}
+}

@@ -121,6 +121,7 @@ func (s *Server) handleGetAI(w http.ResponseWriter, r *http.Request) {
 		"labels":      cfg.Labels,
 		"sensitivity": cfg.Sensitivity,
 		"packages":    s.detect.PackageWatches(),
+		"presence":    s.presenceAll(),
 	})
 }
 
@@ -359,4 +360,19 @@ func (s *Server) handleDeleteAIModel(w http.ResponseWriter, r *http.Request) {
 	s.logAudit(r, "detection.model.remove", id, "detection model removed")
 	s.emitConfig("detection")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// presenceAll is what each camera sees now (cameras recognition looks at).
+func (s *Server) presenceAll() map[string]detect.Presence {
+	out := map[string]detect.Presence{}
+	cams, err := s.st.ListCameras()
+	if err != nil {
+		return out
+	}
+	for _, c := range cams {
+		if p, ok := s.detect.Presence(c.ID); ok {
+			out[c.ID] = p
+		}
+	}
+	return out
 }

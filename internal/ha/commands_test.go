@@ -272,9 +272,11 @@ func TestForgottenCameraLeavesNothingRetained(t *testing.T) {
 	if err := st.CreateCamera(&store.Camera{ID: "c1", Name: "c1", Enabled: true, RecordMode: store.ModeContinuous, RetentionDays: 7}); err != nil {
 		t.Fatal(err)
 	}
+	p.SetPresence(func(string) (Presence, bool) { return Presence{Person: true, People: 1, Packages: true}, true }, nil, nil)
 	p.publishDiscovery()
 	p.publishMotionRecording()
 	p.publishControlState()
+	p.publishPresence()
 	p.pub(stateTopicBase+"/c1/snapshot", true, []byte("jpeg"))
 
 	listed := cameraTopics(p.prefix(), "c1")

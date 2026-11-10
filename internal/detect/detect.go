@@ -376,6 +376,49 @@ func (e *Engine) watchInterval() time.Duration {
 	return 700 * time.Millisecond
 }
 
+// presenceInterval is how often a camera followed for presence is looked at
+// when nothing moves and nobody watches.
+func (e *Engine) presenceInterval() time.Duration {
+	if e.ai != nil && e.ai.Provider() == "cuda" {
+		return time.Second
+	}
+	return 3 * time.Second
+}
+
+// Presence is who and what a camera sees now (see Live.presence); ok is false
+// when local recognition doesn't look at the camera.
+func (e *Engine) Presence(cameraID string) (Presence, bool) {
+	if e == nil || e.live == nil || !e.ai.Running() {
+		return Presence{}, false
+	}
+	p, ok := e.live.presence(cameraID, time.Now())
+	if ok && e.pkgs != nil {
+		p.Packages = e.pkgs.watching(cameraID)
+		p.Package = p.Packages && len(e.pkgs.liveObjects(cameraID)) > 0
+	}
+	return p, ok
+}
+
+// KeepPresence makes recognition look at these cameras every second or so
+// (every few on a CPU) even when nothing moves: Home Assistant follows them.
+func (e *Engine) KeepPresence(ids map[string]bool) {
+	if e == nil || e.live == nil {
+		return
+	}
+	e.live.keepPresence(ids)
+}
+
+// Moving reports whether a camera sees motion right now.
+func (e *Engine) Moving(cameraID string) bool {
+	if e == nil || e.live == nil {
+		return false
+	}
+	e.live.mu.Lock()
+	defer e.live.mu.Unlock()
+	c := e.live.cams[cameraID]
+	return c != nil && c.moving
+}
+
 // liveInterval is the shortest gap between two frames of one camera.
 func (e *Engine) liveInterval() time.Duration {
 	if e.ai != nil && e.ai.Provider() == "cuda" {

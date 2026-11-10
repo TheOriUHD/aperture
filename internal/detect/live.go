@@ -41,8 +41,14 @@ type Live struct {
 }
 
 type liveCam struct {
-	enabled bool // recognition is on for this camera
-	viewers int  // live-view connections watching it right now
+	enabled  bool // recognition is on for this camera
+	viewers  int  // live-view connections watching it right now
+	presence bool // Home Assistant follows who is there: look now and then even when nothing moves
+
+	seen     map[string]time.Time // presence group (person, vehicle, animal) -> last counted
+	people   int                  // people counted in the last recognised frame
+	peopleAt time.Time
+	parkedAt time.Time // when parked was last worked out
 
 	frame   []byte
 	w, h    int
@@ -158,6 +164,10 @@ func (l *Live) FrameRate(cameraID string) int {
 	return 5
 }
 
+// looking reports whether a camera's frames are being recognised: while it
+// moves, while someone watches it, or while Home Assistant follows presence.
+func (c *liveCam) looking() bool { return c.moving || c.viewers > 0 || c.presence }
+
 // OnFrame implements motion.FrameSink: keep the latest frame of a moving camera.
 func (l *Live) OnFrame(cameraID string, w, h int, rgb []byte) {
 	if l.e.pkgs != nil {
@@ -165,7 +175,7 @@ func (l *Live) OnFrame(cameraID string, w, h int, rgb []byte) {
 	}
 	l.mu.Lock()
 	c := l.cams[cameraID]
-	if c == nil || !c.enabled || (!c.moving && c.viewers == 0) {
+	if c == nil || !c.enabled || !c.looking() {
 		l.mu.Unlock()
 		return
 	}
@@ -213,8 +223,8 @@ func (l *Live) OnMotionState(cameraID string, active bool) {
 	c.moving = active
 	// A watched camera keeps recognising (and so keeps its boxes up to date);
 	// an unwatched one drops everything when it stops moving.
-	clear := !active && c.shown && c.viewers == 0
-	if !active && c.viewers == 0 {
+	clear := !active && c.shown && c.viewers == 0 && !c.presence
+	if !active && c.viewers == 0 && !c.presence {
 		c.frame = nil
 		c.cells = nil
 		c.shown = false
@@ -261,6 +271,7 @@ func (l *Live) next() (string, *liveCam, []byte, int, int, time.Time) {
 	}
 	interval := l.e.liveInterval()
 	watchInterval := l.e.watchInterval()
+	presenceInterval := l.e.presenceInterval()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.inUse >= maxInFlight {
@@ -271,10 +282,14 @@ func (l *Live) next() (string, *liveCam, []byte, int, int, time.Time) {
 	var pc *liveCam
 	for id, c := range l.cams {
 		gap := interval
-		if !c.moving {
+		switch {
+		case c.moving:
+		case c.viewers > 0:
 			gap = watchInterval
+		default:
+			gap = presenceInterval
 		}
-		if !c.enabled || (!c.moving && c.viewers == 0) || c.busy || c.frame == nil || c.seq == c.doneSeq || now.Sub(c.lastRun) < gap {
+		if !c.enabled || !c.looking() || c.busy || c.frame == nil || c.seq == c.doneSeq || now.Sub(c.lastRun) < gap {
 			continue
 		}
 		if pc == nil || c.lastRun.Before(pc.lastRun) {
@@ -314,7 +329,7 @@ func (l *Live) detect(ctx context.Context, id string, frame []byte, w, h int, at
 		return
 	}
 	c.busy = false
-	if err != nil || (!c.moving && c.viewers == 0) {
+	if err != nil || !c.looking() {
 		l.mu.Unlock()
 		l.poke()
 		return
@@ -326,7 +341,8 @@ func (l *Live) detect(ctx context.Context, id string, frame []byte, w, h int, at
 	parked := parkedLocked(c, objs, at)
 	publish := len(objs) > 0 || c.shown || parked > 0 || c.parked > 0
 	c.shown = len(objs) > 0
-	c.parked = parked
+	c.parked, c.parkedAt = parked, at
+	c.notePresenceLocked(objs, parked, at)
 	saveEvent, eventID := l.aggregateLocked(c, objs)
 	var best []store.EventObject
 	if saveEvent {
@@ -693,7 +709,7 @@ func (l *Live) watch(cameraID string) func() {
 			l.mu.Lock()
 			c := l.cam(cameraID)
 			c.viewers--
-			idle := c.viewers <= 0 && !c.moving
+			idle := c.viewers <= 0 && !c.moving && !c.presence
 			if c.viewers < 0 {
 				c.viewers = 0
 			}
@@ -736,3 +752,104 @@ func clampInt(v, lo, hi int) int {
 }
 
 func round3(v float64) float64 { return float64(int(v*1000+0.5)) / 1000 }
+
+// ---- presence (Home Assistant) ----------------------------------------------
+
+// presenceHold is how long a group counts as there after it was last counted:
+// a missed frame or two doesn't make Home Assistant flap.
+const presenceHold = 5 * time.Second
+
+// presenceGroup is the group a label counts towards ("" for none).
+func presenceGroup(label string) string {
+	switch label {
+	case "person":
+		return "person"
+	case "car", "truck", "bus", "motorcycle", "bicycle":
+		return "vehicle"
+	case "dog", "cat", "bird", "horse", "sheep", "cow", "bear":
+		return "animal"
+	}
+	return ""
+}
+
+// notePresenceLocked records what a recognised frame counted. A parked vehicle
+// is there too, even though it gets no box.
+func (c *liveCam) notePresenceLocked(objs []LiveObject, parked int, at time.Time) {
+	if c.seen == nil {
+		c.seen = map[string]time.Time{}
+	}
+	people := 0
+	for _, o := range objs {
+		g := presenceGroup(o.Label)
+		if g == "" {
+			continue
+		}
+		c.seen[g] = at
+		if g == "person" {
+			people++
+		}
+	}
+	if parked > 0 {
+		c.seen["vehicle"] = at
+	}
+	c.people, c.peopleAt = people, at
+}
+
+// Presence is who and what a camera sees now, for Home Assistant.
+type Presence struct {
+	Person  bool `json:"person"`
+	People  int  `json:"people"`
+	Vehicle bool `json:"vehicle"` // moving or parked
+	Animal  bool `json:"animal"`
+	Parked  bool `json:"parked"`
+	Package bool `json:"package"` // a delivered parcel waits (cameras watching for packages)
+	// Packages: the camera watches for packages (the Package entity exists).
+	Packages bool `json:"packages"`
+}
+
+// presence reports a camera's presence; ok is false when recognition doesn't
+// look at it.
+func (l *Live) presence(id string, now time.Time) (Presence, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	c := l.cams[id]
+	if c == nil || !c.enabled {
+		return Presence{}, false
+	}
+	fresh := func(t time.Time) bool { return !t.IsZero() && now.Sub(t) < presenceHold }
+	p := Presence{Person: fresh(c.seen["person"]), Vehicle: fresh(c.seen["vehicle"]), Animal: fresh(c.seen["animal"]),
+		Parked: c.parked > 0 && fresh(c.parkedAt)}
+	if p.Person && fresh(c.peopleAt) {
+		p.People = max(c.people, 1)
+	} else if p.Person {
+		p.People = 1
+	}
+	return p, true
+}
+
+// keepPresence makes recognition look at these cameras now and then even when
+// nothing moves and nobody watches, so presence stays true for someone sitting
+// still (and false once they've gone).
+func (l *Live) keepPresence(ids map[string]bool) {
+	l.mu.Lock()
+	changed := false
+	for id, c := range l.cams {
+		if c.presence != ids[id] {
+			c.presence = ids[id]
+			changed = true
+			if !c.presence && !c.moving && c.viewers == 0 {
+				c.frame, c.cells, c.tracks, c.shown = nil, nil, nil, false
+			}
+		}
+	}
+	for id := range ids {
+		if l.cams[id] == nil {
+			l.cam(id).presence = true
+			changed = true
+		}
+	}
+	l.mu.Unlock()
+	if changed {
+		l.poke()
+	}
+}
