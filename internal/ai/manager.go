@@ -100,8 +100,9 @@ type Manager struct {
 	want       *Settings // nil: object recognition is off
 	gen        int       // bumped on every reconfiguration
 	installing bool
-	installGen int // gen of the running download
-	runGen     int // gen of the loop keeping the detector running (0: none)
+	installGen int           // gen of the running download
+	installed  chan struct{} // closed once the latest download has stopped
+	runGen     int           // gen of the loop keeping the detector running (0: none)
 	progress   Progress
 	cancel     context.CancelFunc
 	worker     *Worker
@@ -285,15 +286,22 @@ func (m *Manager) Configure(s *Settings, download bool) {
 	}
 	switch {
 	case len(jobs) > 0 && download:
+		if m.cancel != nil {
+			// A download started on its own (a model just chosen) replaces
+			// the running one; both would share tmp/.
+			m.cancel()
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		m.cancel = cancel
+		prev, done := m.installed, make(chan struct{})
+		m.installed = done
 		m.installing, m.installGen = true, gen
 		m.progress = Progress{Active: true, Stage: "Starting the download", Phase: "download", Total: Bytes(jobs)}
 		m.state, m.err, m.note = "installing", "", ""
 		// A detector already running keeps recognising until the new files
 		// are in place (the switch to a GPU is a 3 GB download).
 		m.mu.Unlock()
-		go m.install(ctx, gen, jobs)
+		go m.install(ctx, gen, jobs, prev, done)
 	case len(jobs) > 0:
 		m.stopWorkerLocked()
 		if !m.installing {
@@ -316,13 +324,22 @@ func (m *Manager) Configure(s *Settings, download bool) {
 	m.changed()
 }
 
-func (m *Manager) install(ctx context.Context, gen int, jobs []job) {
-	err := m.store.Install(ctx, jobs, func(p Progress) {
-		m.mu.Lock()
-		m.progress = p
-		m.mu.Unlock()
-		m.changed()
-	})
+func (m *Manager) install(ctx context.Context, gen int, jobs []job, prev, done chan struct{}) {
+	if prev != nil {
+		<-prev // the replaced download has stopped (it may clear tmp/ when done)
+	}
+	err := ctx.Err()
+	if err == nil {
+		err = m.store.Install(ctx, jobs, func(p Progress) {
+			m.mu.Lock()
+			if m.installGen == gen {
+				m.progress = p
+			}
+			m.mu.Unlock()
+			m.changed()
+		})
+	}
+	close(done)
 	m.mu.Lock()
 	if m.installGen != gen {
 		// A newer download replaced this one.

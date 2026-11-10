@@ -84,7 +84,7 @@ func TestCPUKeepsRecognisingWhileTheGPUDownloads(t *testing.T) {
 	defer func() { cuda.Artifacts = saved }()
 
 	m := NewManager(dir, bin, 3, slog.Default())
-	defer m.Configure(nil, false)
+	defer stopManager(m)
 	auto := Settings{Device: "auto", Model: "auto"}
 	m.Configure(&auto, false)
 	waitFor(t, "the CPU detector", func() bool { return m.Status().State == "running" })
@@ -174,7 +174,7 @@ func TestMissingModelKeepsTheGPU(t *testing.T) {
 	defer stall(&pm.Artifact)()
 
 	m := NewManager(dir, "/nonexistent/apdetect", 3, slog.Default())
-	defer m.Configure(nil, false)
+	defer stopManager(m)
 
 	// Automatic: the all-in-one model, which finds parcels itself.
 	m.Configure(&Settings{Device: "auto", Model: "auto", Packages: true}, false)
@@ -195,5 +195,17 @@ func TestMissingModelKeepsTheGPU(t *testing.T) {
 	}
 	if got := packageModel(Settings{Packages: true}, Device{Kind: "gpu"}, aio); got != nil {
 		t.Fatal("an all-in-one model got a separate package model anyway")
+	}
+}
+
+// stopManager turns recognition off and waits until a download has stopped
+// (it writes into the test's temp dir).
+func stopManager(m *Manager) {
+	m.Configure(nil, false)
+	m.mu.Lock()
+	done := m.installed
+	m.mu.Unlock()
+	if done != nil {
+		<-done
 	}
 }
