@@ -443,6 +443,8 @@ func (s *Server) routes() http.Handler {
 		g.Post("/system/ai/cancel", adminScoped(ScopeDetectionWrite), s.handleCancelAI)
 		g.Post("/system/ai/disable", adminScoped(ScopeDetectionWrite), s.handleDisableAI)
 		g.Delete("/system/ai/files", adminScoped(ScopeDetectionWrite), s.handleRemoveAIFiles)
+		g.Post("/system/ai/models", adminScoped(ScopeDetectionWrite), s.handleAddAIModel)
+		g.Delete("/system/ai/models/{id}", adminScoped(ScopeDetectionWrite), s.handleDeleteAIModel)
 		g.Get("/webhooks", adminScoped(ScopeAutomationRead), s.handleListWebhooks)
 		g.Post("/webhooks", adminScoped(ScopeAutomationWrite), s.handleCreateWebhook)
 		g.Put("/webhooks/{id}", adminScoped(ScopeAutomationWrite), s.handleUpdateWebhook)

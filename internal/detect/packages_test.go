@@ -120,3 +120,32 @@ func TestPackageFlickerIsNoDelivery(t *testing.T) {
 		t.Fatal("the one-off sighting was kept")
 	}
 }
+
+// With an all-in-one model, a parcel put down is boxed in the very frame; one
+// in someone's hands, or one that's part of the scene, is not.
+func TestLiveParcelBoxes(t *testing.T) {
+	e := &Engine{}
+	p := newPackages(e, nil)
+	p.cams["door"] = &pkgCam{on: true, baselined: true, parcels: []*parcel{
+		{id: 1, box: pkgBox(0.8, 0.8, 0.6), scene: true, confirmed: true},
+	}}
+	frame := []ai.Box{
+		pkgBox(0.8, 0.8, 0.6),  // the scene's storage box
+		pkgBox(0.3, 0.7, 0.35), // just put down
+		personBox(0.5, 0.2),
+		{Class: ai.PackageClass, Score: 0.9, X: 0.55, Y: 0.4, W: 0.08, H: 0.08}, // carried
+		pkgBox(0.1, 0.1, 0.2), // too unsure
+	}
+	got := p.liveCandidates("door", frame, "normal")
+	if len(got) != 1 || got[0].X != 0.3 {
+		t.Fatalf("live parcels = %+v, want only the one just put down", got)
+	}
+	// Boxed although it never moves.
+	l := &Live{cams: map[string]*liveCam{}}
+	c := l.cam("door")
+	at := time.Now()
+	l.trackLocked(c, got, at)
+	if out := acceptLocked(c, got, make([]bool, len(cellsAt(0, 0, 0, 0))), Config{Mode: ModeLocal}, at); len(out) != 1 {
+		t.Fatalf("standing parcel not boxed: %+v", out)
+	}
+}

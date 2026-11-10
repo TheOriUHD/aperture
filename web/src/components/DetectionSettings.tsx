@@ -14,6 +14,7 @@ import {
   Power,
   ScanEye,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { Segmented, SettingsRow } from "./ui/Layout";
 import { api } from "../lib/api";
@@ -43,6 +44,14 @@ type ModelView = {
   installed: boolean;
   recommended: boolean;
   ms: number;
+  arch: "yolox" | "detr";
+  labels: string; // coco80 | coco91 | obj365 | custom
+  classes: number;
+  allInOne?: boolean;
+  gpuOnly?: boolean;
+  tier?: string;
+  license?: string;
+  custom?: boolean;
 };
 type AIStatus = {
   state: "off" | "needs-download" | "installing" | "starting" | "running" | "error";
@@ -73,8 +82,9 @@ type AIStatus = {
   files: number;
   upgrade?: Device;
   upgradeDownload?: number;
-  packages?: ModelView; // the package model for this device
+  packages?: ModelView; // the separate package model for this device
   packagesRunning?: boolean;
+  packagesLive?: boolean; // the main model finds parcels on every frame
 };
 type PackageWatch = { checkedAt?: number; parcels: number; scene: number };
 type AIResponse = {
@@ -99,6 +109,7 @@ interface DetectionConfig {
   model?: string;
   sensitivity?: "low" | "normal" | "high";
   packages?: string[]; // cameras watching for packages
+  packageMode?: "auto" | "live" | "separate";
 }
 
 const DEFAULTS: DetectionConfig = {
@@ -231,6 +242,14 @@ export function DetectionSettings() {
           <SettingsRow label="Cameras" hint="It looks while a camera sees motion." align="start">
             <CoveredCameras />
           </SettingsRow>
+          <SettingsRow label="Model" hint="Faster or sharper; All-in-one also finds parcels, on a GPU." align="start">
+            <ModelTiers
+              status={status}
+              cfg={cfg}
+              busy={busy}
+              onPick={(model) => (enabled ? enable(cfg.device ?? "auto", model) : saveCfg({ model }))}
+            />
+          </SettingsRow>
           <SettingsRow label="Recognise" hint="Leaves, shadows and furniture never count." align="start">
             <GroupChips labels={cfg.labels} onChange={(labels) => saveCfg({ labels })} disabled={busy} />
           </SettingsRow>
@@ -251,6 +270,8 @@ export function DetectionSettings() {
               status={status}
               watches={ai?.packages ?? {}}
               onChange={(packages) => saveCfg({ packages })}
+              mode={cfg.packageMode ?? "auto"}
+              onMode={(packageMode) => saveCfg({ packageMode })}
               disabled={busy}
             />
           </SettingsRow>
@@ -269,10 +290,10 @@ export function DetectionSettings() {
             aria-expanded={optionsOpen}
           >
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${optionsOpen ? "" : "-rotate-90"}`} />
-            Options: hardware, model and downloads
+            Advanced: hardware, every model, your own models, downloads
           </button>
           {optionsOpen && (
-            <Options status={status} cfg={cfg} enabled={enabled} busy={busy} onApply={(d, m) => (enabled ? enable(d, m) : saveCfg({ device: d, model: m }))} onRemove={() => call(() => api.del("/api/system/ai/files"))} />
+            <Options status={status} cfg={cfg} enabled={enabled} busy={busy} onApply={(d, m) => (enabled ? enable(d, m) : saveCfg({ device: d, model: m }))} onRemove={() => call(() => api.del("/api/system/ai/files"))} onChanged={() => void refetch()} />
           )}
         </div>
       )}
@@ -398,7 +419,7 @@ function MainCard({
           <div className="min-w-0 space-y-1 text-sm">
             {where}
             <p className="text-xs text-fg-muted">
-              {status.model.name} model ({status.model.detail.split(" · ")[0]})
+              {status.model.name} · {status.model.detail.split(" · ")[0]}
               {status.state === "running" &&
                 (status.ms ? (
                   <>
@@ -508,14 +529,19 @@ function PackageCameras({
   status,
   watches,
   onChange,
+  mode,
+  onMode,
   disabled,
 }: {
   selected: string[];
   status: AIStatus;
   watches: Record<string, PackageWatch>;
   onChange: (ids: string[]) => void;
+  mode: "auto" | "live" | "separate";
+  onMode: (m: "auto" | "live" | "separate") => void;
   disabled: boolean;
 }) {
+  const canLive = !!status.model.allInOne;
   const { data: cameras } = useCameras();
   const list = watchedCameras(cameras ?? []);
   const on = new Set(selected.filter((id) => list.some((c) => c.id === id)));
@@ -527,6 +553,7 @@ function PackageCameras({
   };
   const pm = status.packages;
   const loading = on.size > 0 && status.state === "running" && !status.packagesRunning;
+  const separate = mode === "separate" || !canLive;
   if (list.length === 0) return <p className="text-[13px] text-fg-muted">No camera is watched yet.</p>;
   return (
     <div className="space-y-2">
@@ -555,8 +582,35 @@ function PackageCameras({
       <p className="text-xs leading-relaxed text-fg-faint">
         A parcel counts once it stays put after whoever brought it has gone; each delivery and pick-up is an event with
         its picture, also on live-view cameras. Pick the cameras that see your door.
-        {pm && !pm.installed && on.size === 0 && <> The first one downloads a small extra model ({bytes(pm.size)}).</>}
+        {separate && pm && !pm.installed && on.size === 0 && <> The first one downloads a small extra model ({bytes(pm.size)}).</>}
       </p>
+      {on.size > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <Segmented
+            value={mode}
+            onChange={onMode}
+            options={[
+              { value: "auto", label: "Automatic", title: "Live with an all-in-one model, otherwise the separate check" },
+              {
+                value: "live",
+                label: "Live",
+                title: canLive ? "On every frame, by the all-in-one model" : "Needs the All-in-one model",
+                disabled: !canLive,
+              },
+              { value: "separate", label: "Separate check", title: "A small extra model looks every few seconds; works with any model and on a CPU" },
+            ]}
+          />
+          <span className="text-xs text-fg-faint">
+            {status.packagesLive
+              ? "Now: live, on every frame. A parcel is boxed as it is put down."
+              : status.packagesRunning
+                ? `Now: a separate check every few seconds${pm ? ` (${pm.name === "Packages" ? "D-FINE-S" : pm.name})` : ""}.`
+                : mode === "live" && !canLive
+                  ? "Live needs the All-in-one model."
+                  : ""}
+          </span>
+        </div>
+      )}
       {loading ? (
         <p className="flex items-center gap-1.5 text-xs text-fg-muted">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the package model…
@@ -701,6 +755,108 @@ function GroupChips({
 
 // ---- options ----------------------------------------------------------------
 
+// ---- the model: simple tiers ------------------------------------------------
+
+// The simple choice: a few named tiers, from fastest to the all-in-one model
+// (people, vehicles, animals and parcels in one, on a GPU). Everything else is
+// under Advanced.
+const TIERS: { tier: string; label: string }[] = [
+  { tier: "fast", label: "Fast" },
+  { tier: "balanced", label: "Balanced" },
+  { tier: "accurate", label: "Accurate" },
+  { tier: "best", label: "Best" },
+  { tier: "all-in-one", label: "All-in-one" },
+];
+
+function ModelTiers({
+  status,
+  cfg,
+  busy,
+  onPick,
+}: {
+  status: AIStatus;
+  cfg: DetectionConfig;
+  busy: boolean;
+  onPick: (model: string) => void;
+}) {
+  const current = cfg.model || "auto";
+  const gpu = status.device.kind === "gpu";
+  const byTier = new Map(status.models.filter((m) => m.tier).map((m) => [m.tier!, m]));
+  const auto = status.models.find((m) => m.recommended);
+  const picked = current === "auto" ? auto : status.models.find((m) => m.id === current);
+  const advanced = current !== "auto" && !picked?.tier;
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        <TierChip active={current === "auto"} disabled={busy} onClick={() => onPick("auto")} title={`Picks for the hardware: ${auto?.name ?? "Balanced"} now`}>
+          Automatic
+        </TierChip>
+        {TIERS.map(({ tier, label }) => {
+          const m = byTier.get(tier);
+          if (!m) return null;
+          const blocked = m.gpuOnly && !gpu;
+          return (
+            <TierChip
+              key={tier}
+              active={current === m.id}
+              disabled={busy || blocked}
+              onClick={() => onPick(m.id)}
+              title={blocked ? "Needs an NVIDIA GPU" : `${m.detail} · about ${Math.max(1, Math.round(m.ms))} ms per picture · ${bytes(m.size)}`}
+            >
+              {label}
+            </TierChip>
+          );
+        })}
+        {advanced && picked && <TierChip active disabled onClick={() => {}} title={picked.detail}>{picked.name}</TierChip>}
+      </div>
+      {picked && (
+        <p className="text-xs leading-relaxed text-fg-faint">
+          {current === "auto" && <span className="text-fg-muted">Automatic: {picked.name}. </span>}
+          {picked.detail} · about {Math.max(1, Math.round(picked.ms))} ms per picture
+          {!picked.installed && picked.size > 0 && ` · ${bytes(picked.size)} to download`}
+          {picked.labels === "obj365" && (
+            <span className="block">Trained on Objects365, whose terms may not allow commercial use; at home that's fine.</span>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function TierChip({
+  active,
+  disabled,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      title={title}
+      className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] transition-colors disabled:cursor-not-allowed ${
+        active
+          ? "border-brand/60 bg-brand/10 text-brand"
+          : "border-line-strong text-fg-muted hover:border-[#3a3e43] hover:text-fg disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-fg-muted"
+      }`}
+    >
+      {active && <Check className="h-3.5 w-3.5" />}
+      {children}
+    </button>
+  );
+}
+
+// ---- the model: advanced ----------------------------------------------------
+
 function Options({
   status,
   cfg,
@@ -708,6 +864,7 @@ function Options({
   busy,
   onApply,
   onRemove,
+  onChanged,
 }: {
   status: AIStatus;
   cfg: DetectionConfig;
@@ -715,9 +872,11 @@ function Options({
   busy: boolean;
   onApply: (device: string, model: string) => void;
   onRemove: () => void;
+  onChanged: () => void;
 }) {
   const [device, setDevice] = useState(cfg.device || "auto");
   const [model, setModel] = useState(cfg.model || "auto");
+  const [err, setErr] = useState("");
   useEffect(() => {
     setDevice(cfg.device || "auto");
     setModel(cfg.model || "auto");
@@ -730,6 +889,8 @@ function Options({
   });
   const gpus = status.devices.filter((d) => d.kind === "gpu");
   const auto = status.devices.find((d) => d.preferred);
+  const builtIn = status.models.filter((m) => !m.custom);
+  const own = status.models.filter((m) => m.custom);
 
   const applyLabel = !changed
     ? "Saved"
@@ -738,6 +899,17 @@ function Options({
         ? `Switch & download (${bytes(plan.download)})`
         : `Save (download ${bytes(plan.download)} when enabled)`
       : "Save";
+
+  async function remove(id: string) {
+    setErr("");
+    try {
+      await api.del(`/api/system/ai/models/${encodeURIComponent(id)}`);
+      if (model === id) setModel(cfg.model || "auto");
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not remove the model");
+    }
+  }
 
   return (
     <div className="mt-3 divide-y divide-line rounded-lg border border-line [&>*]:px-4">
@@ -752,19 +924,35 @@ function Options({
           ]}
         />
       </SettingsRow>
-      <SettingsRow label="Model" hint="Bigger models see small and far-away things better, and need more power." align="start">
-        <div className="grid max-w-xl gap-1.5">
-          <ModelOption id="auto" active={model === "auto"} onPick={setModel} title="Automatic" detail={`Picks for the hardware (${status.models.find((m) => m.recommended)?.name ?? "Balanced"} now)`} />
-          {status.models.map((m) => (
+      <SettingsRow label="Model" hint="Every model on offer, and the ones you added. Bigger ones see small and far-away things better." align="start">
+        <div className="grid max-w-2xl gap-1.5">
+          <ModelOption
+            id="auto"
+            active={model === "auto"}
+            onPick={setModel}
+            title="Automatic"
+            detail={`Picks for the hardware (${status.models.find((m) => m.recommended)?.name ?? "Balanced"} now)`}
+          />
+          {builtIn.map((m) => (
+            <ModelOption key={m.id} id={m.id} active={model === m.id} onPick={setModel} title={m.name} detail={modelDetail(m)} />
+          ))}
+          {own.length > 0 && <p className="mt-2 text-xs font-medium text-fg-muted">Your models</p>}
+          {own.map((m) => (
             <ModelOption
               key={m.id}
               id={m.id}
               active={model === m.id}
               onPick={setModel}
               title={m.name}
-              detail={`${m.detail} · about ${Math.max(1, Math.round(m.ms))} ms per picture · ${bytes(m.size)}${m.installed ? " · downloaded" : ""}`}
+              detail={modelDetail(m)}
+              onRemove={cfg.model === m.id ? undefined : () => void remove(m.id)}
             />
           ))}
+          {err && <p className="text-xs text-danger">{err}</p>}
+          <AddModel onAdded={(id) => {
+            setModel(id);
+            onChanged();
+          }} />
         </div>
       </SettingsRow>
       <SettingsRow label="">
@@ -780,12 +968,26 @@ function Options({
             </button>
           )}
           {enabled && status.files > 0 && (
-            <span className="text-xs text-fg-faint">Downloads use {bytes(status.files)} · {bytes(Math.max(0, status.diskFree))} free</span>
+            <span className="text-xs text-fg-faint">
+              Models and runtimes use {bytes(status.files)} · {bytes(Math.max(0, status.diskFree))} free
+            </span>
           )}
         </div>
       </SettingsRow>
     </div>
   );
+}
+
+function modelDetail(m: ModelView): string {
+  const classes =
+    m.labels === "obj365" ? "365 kinds of objects" : m.labels === "custom" ? `${m.classes} classes of its own` : "80 COCO classes";
+  const parts = [m.detail, m.arch === "detr" ? "DETR" : "YOLOX", classes];
+  if (m.allInOne && m.custom) parts.push("finds parcels");
+  parts.push(`about ${Math.max(1, Math.round(m.ms || 0))} ms per picture`);
+  if (m.size > 0) parts.push(bytes(m.size));
+  if (m.installed) parts.push(m.custom ? "added" : "downloaded");
+  if (m.license && !m.custom) parts.push(m.license);
+  return parts.filter(Boolean).join(" · ");
 }
 
 function ModelOption({
@@ -794,32 +996,176 @@ function ModelOption({
   onPick,
   title,
   detail,
+  onRemove,
 }: {
   id: string;
   active: boolean;
   onPick: (id: string) => void;
   title: string;
   detail: string;
+  onRemove?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => onPick(id)}
-      aria-pressed={active}
-      className={`flex items-start gap-2.5 rounded-md border px-3 py-2 text-left transition-colors ${
+    <div
+      className={`flex items-start gap-2.5 rounded-md border px-3 py-2 transition-colors ${
         active ? "border-brand/60 bg-brand/[0.07]" : "border-line hover:border-line-strong"
       }`}
     >
-      <span
-        className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${active ? "border-brand bg-brand" : "border-fg-faint"}`}
-      >
-        {active && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-      </span>
-      <span className="min-w-0">
-        <span className="block text-[13px] font-medium text-fg">{title}</span>
-        <span className="block text-xs text-fg-faint">{detail}</span>
-      </span>
-    </button>
+      <button type="button" onClick={() => onPick(id)} aria-pressed={active} className="flex min-w-0 flex-1 items-start gap-2.5 text-left">
+        <span
+          className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${active ? "border-brand bg-brand" : "border-fg-faint"}`}
+        >
+          {active && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[13px] font-medium text-fg">{title}</span>
+          <span className="block text-xs leading-relaxed text-fg-faint">{detail}</span>
+        </span>
+      </button>
+      {onRemove && (
+        <button type="button" className="btn-ghost h-7 shrink-0 px-2" onClick={onRemove} title="Remove this model" aria-label="Remove this model">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// AddModel takes an .onnx file of the operator's own. Aperture loads it once
+// to learn its format (YOLOX or DETR-style) and classes (COCO, Objects365 or
+// its own); only when it can't tell the classes does it ask for their names.
+function AddModel({ onAdded }: { onAdded: (id: string) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [name, setName] = useState("");
+  const [classes, setClasses] = useState("");
+  const [askClasses, setAskClasses] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [err, setErr] = useState("");
+  const [open, setOpen] = useState(false);
+
+  function send() {
+    if (!file) return;
+    setErr("");
+    setProgress(0);
+    const fd = new FormData();
+    if (name.trim()) fd.append("name", name.trim());
+    if (classes.trim()) fd.append("classes", classes);
+    fd.append("file", file);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/v1/system/ai/models");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) setProgress(e.loaded / e.total);
+      if (e.loaded === e.total) setChecking(true);
+    };
+    xhr.onload = () => {
+      setProgress(null);
+      setChecking(false);
+      let body: { id?: string; error?: string; message?: string } = {};
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        /* not JSON */
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body.id) {
+        setFile(null);
+        setName("");
+        setClasses("");
+        setAskClasses(false);
+        setOpen(false);
+        onAdded(body.id);
+        return;
+      }
+      const msg = body.error || body.message || `The upload failed (${xhr.status})`;
+      if (/paste their names|names were given/.test(msg)) setAskClasses(true);
+      setErr(msg);
+    };
+    xhr.onerror = () => {
+      setProgress(null);
+      setChecking(false);
+      setErr("The upload broke off");
+    };
+    xhr.send(fd);
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="link mt-1 inline-flex w-fit items-center gap-1.5 text-xs" onClick={() => setOpen(true)}>
+        <Upload className="h-3.5 w-3.5" /> Add your own model (.onnx)
+      </button>
+    );
+  }
+  const busy = progress !== null;
+  return (
+    <div className="mt-1 space-y-2.5 rounded-md border border-line p-3">
+      <p className="text-xs leading-relaxed text-fg-muted">
+        A YOLOX model or a DETR-style one (D-FINE, RT-DETR, RF-DETR exports with logits and boxes), as an ONNX file up to 2 GB.
+        Aperture loads it once to learn its format and classes. Its people, vehicles, animals and parcels are recognised;
+        other classes are left out.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="btn-outline cursor-pointer">
+          <Upload className="h-4 w-4" />
+          {file ? file.name : "Choose a file"}
+          <input
+            type="file"
+            accept=".onnx"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null;
+              setFile(f);
+              setErr("");
+              if (f && !name) setName(f.name.replace(/\.onnx$/i, ""));
+            }}
+          />
+        </label>
+        <input
+          className="input h-9 w-56"
+          placeholder="Name (optional)"
+          value={name}
+          disabled={busy}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </div>
+      {askClasses && (
+        <label className="block space-y-1">
+          <span className="text-xs text-fg-muted">Class names, one per line, in the model's order</span>
+          <textarea
+            className="input min-h-[96px] w-full max-w-md py-2 font-mono text-xs"
+            value={classes}
+            disabled={busy}
+            onChange={(e) => setClasses(e.target.value)}
+            placeholder={"person\ncar\nparcel"}
+          />
+        </label>
+      )}
+      {busy && (
+        <div className="max-w-md">
+          <div className="h-1.5 overflow-hidden rounded-full bg-ink-650">
+            <div className="h-full rounded-full bg-brand transition-[width] duration-200" style={{ width: `${Math.round((progress ?? 0) * 100)}%` }} />
+          </div>
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-fg-faint">
+            {checking ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking the model…
+              </>
+            ) : (
+              `Uploading · ${Math.round((progress ?? 0) * 100)}%`
+            )}
+          </p>
+        </div>
+      )}
+      {err && <p className="text-xs leading-relaxed text-danger">{err}</p>}
+      <div className="flex items-center gap-2">
+        <button className="btn-primary" disabled={!file || busy} onClick={send}>
+          Add model
+        </button>
+        <button className="btn-ghost" disabled={busy} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 

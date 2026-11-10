@@ -81,8 +81,11 @@ type Config struct {
 	Device      string `json:"device,omitempty"`
 	Model       string `json:"model,omitempty"`
 	Sensitivity string `json:"sensitivity,omitempty"` // low | normal | high
-	// Packages lists the cameras watching for packages (see packages.go).
-	Packages []string `json:"packages,omitempty"`
+	// Packages lists the cameras watching for packages (see packages.go), and
+	// PackageMode how parcels are found: "auto", "live" (an all-in-one model
+	// on every frame) or "separate" (a small extra model every few seconds).
+	Packages    []string `json:"packages,omitempty"`
+	PackageMode string   `json:"packageMode,omitempty"`
 }
 
 // defaultLabels are recognised when no list is set: people, vehicles and
@@ -130,7 +133,7 @@ func (c Config) liveAllow(label string, score float64) bool {
 
 // aiSettings is the device and model choice for internal/ai.
 func (c Config) aiSettings() ai.Settings {
-	s := ai.Settings{Device: c.Device, Model: c.Model}
+	s := ai.Settings{Device: c.Device, Model: c.Model, PackageMode: c.PackageMode}
 	if s.Device == "" {
 		s.Device = "auto"
 	}

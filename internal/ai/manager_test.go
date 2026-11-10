@@ -134,9 +134,10 @@ func TestRateMeter(t *testing.T) {
 	}
 }
 
-// A GPU setup that only lacks the package model fetches it and stays on the
-// GPU; it must not take the missing file for a GPU that isn't set up.
-func TestPackageModelAloneKeepsTheGPU(t *testing.T) {
+// A GPU setup that only lacks a model (a new automatic default, or the
+// package model) fetches it and stays on the GPU; it must not take the missing
+// file for a GPU that isn't set up.
+func TestMissingModelKeepsTheGPU(t *testing.T) {
 	fakeNVIDIA(t)
 	dir := t.TempDir()
 	s := Store{Dir: dir}
@@ -162,19 +163,37 @@ func TestPackageModelAloneKeepsTheGPU(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(stop)
+	stall := func(a *Artifact) func() {
+		saved := *a
+		a.URL = srv.URL + "/" + a.Name + ".onnx"
+		return func() { *a = saved }
+	}
+	aio := ModelByID("dfine-x-obj365")
+	defer stall(&aio.Artifact)()
 	pm := &PackageModels[0]
-	saved := pm.Artifact
-	pm.Artifact.URL = srv.URL + "/model.onnx"
-	defer func() { pm.Artifact = saved }()
+	defer stall(&pm.Artifact)()
 
 	m := NewManager(dir, "/nonexistent/apdetect", 3, slog.Default())
 	defer m.Configure(nil, false)
+
+	// Automatic: the all-in-one model, which finds parcels itself.
 	m.Configure(&Settings{Device: "auto", Model: "auto", Packages: true}, false)
 	st := m.Status()
-	if st.State != "installing" || st.Upgrade != nil {
-		t.Fatalf("state %s, upgrade %+v: want the package model downloading for the GPU", st.State, st.Upgrade)
+	if st.State != "installing" || st.Upgrade != nil || st.Install.Total != aio.Artifact.Size {
+		t.Fatalf("state %s, upgrade %+v, %d bytes: want the all-in-one model downloading for the GPU", st.State, st.Upgrade, st.Install.Total)
 	}
-	if st.Install.Total != pm.Artifact.Size {
-		t.Fatalf("downloading %d bytes, want just the package model (%d)", st.Install.Total, pm.Artifact.Size)
+
+	// YOLOX-M with parcels checked separately: just the package model.
+	m.Configure(&Settings{Device: "auto", Model: "yolox-m", Packages: true, PackageMode: "separate"}, false)
+	st = m.Status()
+	if st.State != "installing" || st.Upgrade != nil || st.Install.Total != pm.Artifact.Size {
+		t.Fatalf("state %s, %d bytes: want just the package model (%d)", st.State, st.Install.Total, pm.Artifact.Size)
+	}
+	// The all-in-one model with "separate" asked for still needs it too.
+	if got := packageModel(Settings{Packages: true, PackageMode: "separate"}, Device{Kind: "gpu"}, aio); got == nil {
+		t.Fatal("separate parcel check ignored with an all-in-one model")
+	}
+	if got := packageModel(Settings{Packages: true}, Device{Kind: "gpu"}, aio); got != nil {
+		t.Fatal("an all-in-one model got a separate package model anyway")
 	}
 }

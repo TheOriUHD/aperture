@@ -78,6 +78,7 @@ type pkgCam struct {
 	checking  bool
 	next      time.Time
 	checkedAt time.Time // the last look
+	observed  time.Time // the last live frame taken as a look
 	lastLook  time.Time // the look before this one (in update)
 	moving    bool
 	motionAt  time.Time // when motion last started or stopped
@@ -174,6 +175,91 @@ func (p *packages) motion(id string, active bool) {
 	}
 	if soon.Before(c.next) {
 		c.next = soon
+	}
+}
+
+// watching reports whether a camera watches for packages.
+func (p *packages) watching(id string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c := p.cams[id]
+	return c != nil && c.on
+}
+
+// liveCandidates are the parcels to box live in a frame of the all-in-one
+// model: standing ones above the threshold, not in anyone's hands, and not
+// part of the scene (what stood there all along).
+func (p *packages) liveCandidates(id string, boxes []ai.Box, sensitivity string) []LiveObject {
+	th := packageThreshold(sensitivity)
+	var people []ai.Box
+	for _, b := range boxes {
+		if b.Class == 0 && b.Score >= 0.4 {
+			people = append(people, b)
+		}
+	}
+	p.mu.Lock()
+	var scene []ai.Box
+	if c := p.cams[id]; c != nil {
+		for _, pc := range c.parcels {
+			if pc.scene {
+				scene = append(scene, pc.box)
+			}
+		}
+	}
+	p.mu.Unlock()
+	var out []LiveObject
+	for _, b := range boxes {
+		if b.Class != ai.PackageClass || float64(b.Score) < th {
+			continue
+		}
+		area := float64(b.W * b.H)
+		if area < pkgMinArea || area > pkgMaxArea || covered(b, people, 0.5) {
+			continue
+		}
+		inScene := false
+		for _, s := range scene {
+			if ai.IoU(s, b) > 0.3 {
+				inScene = true
+				break
+			}
+		}
+		if !inScene {
+			out = append(out, LiveObject{Label: "package", Score: round2(float64(b.Score)),
+				X: round3(float64(b.X)), Y: round3(float64(b.Y)), W: round3(float64(b.W)), H: round3(float64(b.H))})
+		}
+	}
+	return out
+}
+
+// observe takes a live frame of the all-in-one model as a look (at most one a
+// second): parcels are noticed as they happen, not at the next scheduled look.
+func (p *packages) observe(id string, boxes []ai.Box, frame []byte, w, h int) {
+	now := time.Now()
+	th := packageThreshold(p.e.LoadConfig().Sensitivity)
+	p.mu.Lock()
+	c := p.cams[id]
+	if c == nil || !c.on || c.checking || now.Sub(c.observed) < time.Second {
+		p.mu.Unlock()
+		return
+	}
+	c.observed, c.checkedAt = now, now
+	delivered, taken := c.update(ai.PeopleAndPackages(boxes), th, now, func() int64 { p.nextID++; return p.nextID })
+	// Live frames keep coming while it moves or is watched: the scheduled
+	// look can wait.
+	if later := now.Add(pkgBusyEvery); c.next.Before(later) {
+		c.next = later
+	}
+	p.mu.Unlock()
+	if len(delivered)+len(taken) == 0 {
+		return
+	}
+	cp := make([]byte, len(frame))
+	copy(cp, frame)
+	for _, pc := range delivered {
+		p.raise(id, pc, true, cp, w, h)
+	}
+	for _, pc := range taken {
+		p.raise(id, pc, false, cp, w, h)
 	}
 }
 

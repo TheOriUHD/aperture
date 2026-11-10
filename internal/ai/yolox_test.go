@@ -110,7 +110,7 @@ func TestTilesForPanoramicFrames(t *testing.T) {
 	}
 }
 
-func TestDecodeDFINE(t *testing.T) {
+func TestDecodeDETR(t *testing.T) {
 	const q, c = 3, 366
 	logits := make([]float32, q*c)
 	for i := range logits {
@@ -124,7 +124,7 @@ func TestDecodeDFINE(t *testing.T) {
 	logits[0*c+1] = 2     // person 0.88
 	logits[1*c+121] = 0.5 // luggage 0.62
 	logits[1*c+21] = 0.2  // storage box 0.55
-	got := DecodeDFINE(logits, boxes, q, c, 0.3)
+	got := DecodeDETR(logits, boxes, q, c, PackageVocab(VocabMap(LabelsObjects365, Objects365)), 0.3)
 	if len(got) != 2 {
 		t.Fatalf("got %d boxes: %+v", len(got), got)
 	}

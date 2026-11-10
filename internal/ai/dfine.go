@@ -2,31 +2,19 @@ package ai
 
 import "math"
 
-// The package model is D-FINE trained on Objects365, whose 365 classes include
-// the boxes and bags parcels look like; COCO's (YOLOX's) don't. It runs beside
-// the main model, only now and then, on the cameras watching for packages.
+// DETR-family models (D-FINE, RT-DETR, RF-DETR as exported by onnx-community)
+// take a stretched RGB picture and answer with a fixed number of queries, each
+// a box and a score per class. Aperture runs them as the main model (the
+// all-in-one D-FINE-X on Objects365 finds parcels too) and as the separate
+// package model (D-FINE-S on Objects365).
 
-// PackageClass is the class a package box carries in a Result (beside COCO's
-// person, 0).
+// PackageClass is the class a package box carries in a Result (beside the
+// COCO classes).
 const PackageClass = 1000
 
-// Objects365 class indices (index 0 is "None").
-const o365Person = 1
-
-// o365Package are the classes that count as a package. A parcel at the door
-// comes out as any of them depending on its shape and wrapping (a soft
-// crumpled one reads as luggage or a bag), so they are taken together.
-var o365Package = [...]int{
-	21,  // Storage box
-	121, // Luggage
-	195, // Briefcase
-	14,  // Handbag/Satchel
-	39,  // Backpack
-}
-
 // Stretch converts a region of a packed RGB24 frame into the planar RGB input
-// D-FINE expects: resized to size×size without keeping the aspect ratio (as it
-// was trained), values 0..1.
+// DETR models expect: resized to size×size without keeping the aspect ratio
+// (as they were trained), values 0..1.
 func Stretch(rgb []byte, w, h, rx, ry, rw, rh, size int, dst []float32) {
 	plane := size * size
 	sx := float64(rw) / float64(size)
@@ -57,27 +45,30 @@ func Stretch(rgb []byte, w, h, rx, ry, rw, rh, size int, dst []float32) {
 	}
 }
 
-// DecodeDFINE turns D-FINE's outputs (logits [1,Q,C], boxes [1,Q,4] as centre
-// x, centre y, width, height of the input, 0..1) into person and package boxes
-// (top-left x, y, width, height, 0..1) scoring at least minScore. Each query is
-// one object; for a package its score is the best of the package classes.
-func DecodeDFINE(logits, boxes []float32, queries, classes int, minScore float32) []Box {
-	if queries <= 0 || classes <= o365Package[len(o365Package)-1] || len(logits) < queries*classes || len(boxes) < queries*4 {
+// DecodeDETR turns a DETR model's outputs (logits [1,Q,C], boxes [1,Q,4] as
+// centre x, centre y, width, height of the input, 0..1) into boxes (top-left
+// x, y, width, height, 0..1) of Aperture's classes scoring at least minScore.
+// vocab maps each model class to Aperture's (see VocabMap; -1 = not
+// reported). Each query is one object, and its class is the best of the
+// reported ones: a parcel scoring 0.3 as "storage box" and 0.5 as a picture
+// frame is still a parcel.
+func DecodeDETR(logits, boxes []float32, queries, classes int, vocab []int, minScore float32) []Box {
+	if queries <= 0 || classes <= 0 || len(vocab) < classes || len(logits) < queries*classes || len(boxes) < queries*4 {
 		return nil
 	}
-	sigmoid := func(v float32) float32 { return float32(1 / (1 + math.Exp(-float64(v)))) }
 	var out []Box
 	for q := 0; q < queries; q++ {
 		row := logits[q*classes : (q+1)*classes]
-		person := sigmoid(row[o365Person])
-		var pkg float32
-		for _, k := range o365Package {
-			pkg = max(pkg, sigmoid(row[k]))
+		class, best := -1, float32(math.Inf(-1))
+		for k, v := range vocab[:classes] {
+			if v >= 0 && row[k] > best {
+				class, best = v, row[k]
+			}
 		}
-		class, score := 0, person
-		if pkg > person {
-			class, score = PackageClass, pkg
+		if class < 0 {
+			continue
 		}
+		score := float32(1 / (1 + math.Exp(-float64(best))))
 		if score < minScore {
 			continue
 		}
@@ -85,8 +76,8 @@ func DecodeDFINE(logits, boxes []float32, queries, classes int, minScore float32
 		x, y := clamp01(b[0]-b[2]/2), clamp01(b[1]-b[3]/2)
 		out = append(out, Box{Class: class, Score: score, X: x, Y: y, W: clamp01(b[0]+b[2]/2) - x, H: clamp01(b[1]+b[3]/2) - y})
 	}
-	// Queries rarely overlap, but the same parcel can be split across two
-	// package classes.
+	// Queries rarely overlap, but the same object can be split across two
+	// classes that map to one label.
 	return NMS(out, 0.6)
 }
 

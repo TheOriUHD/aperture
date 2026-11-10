@@ -27,7 +27,9 @@ type WorkerConfig struct {
 	Threads  int      // CPU threads per inference
 	LibDirs  []string // added to LD_LIBRARY_PATH (CUDA libraries)
 	MinScore float64  // lowest score the worker reports
-	Packages string   // package model (.onnx), optional
+	Packages string   // separate package model (.onnx), optional
+	Arch     string   // main model format: yolox | detr
+	Classes  string   // main model class list: a label set or a file (see apdetect -classes)
 }
 
 // ErrWorkerGone is returned for requests the worker can no longer answer.
@@ -60,6 +62,12 @@ func StartWorker(ctx context.Context, cfg WorkerConfig, log *slog.Logger) (*Work
 	}
 	if cfg.Packages != "" {
 		args = append(args, "-packages", cfg.Packages)
+	}
+	if cfg.Arch != "" {
+		args = append(args, "-arch", cfg.Arch)
+	}
+	if cfg.Classes != "" {
+		args = append(args, "-classes", cfg.Classes)
 	}
 	cmd := exec.Command(cfg.Bin, args...)
 	env := os.Environ()

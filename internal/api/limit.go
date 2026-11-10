@@ -30,6 +30,7 @@ import (
 const (
 	jsonBodyLimit      = 1 << 20   // 1 MiB
 	multipartBodyLimit = 256 << 20 // 256 MiB (backup restore / import)
+	modelUploadLimit   = 2 << 30   // 2 GiB: a detection model the operator adds
 )
 
 // readBodyTimeout bounds how long a small (non-multipart) request body may take
@@ -55,6 +56,9 @@ func (s *Server) limitBody(next http.Handler) http.Handler {
 		multipart := strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/")
 		if multipart {
 			cap = multipartBodyLimit
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/system/ai/models") {
+				cap = modelUploadLimit
+			}
 		}
 		if r.ContentLength > cap {
 			writeErrorCode(w, http.StatusRequestEntityTooLarge, "payload_too_large", "request body too large")

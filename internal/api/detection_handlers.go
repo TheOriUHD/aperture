@@ -1,8 +1,16 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/TheOriUHD/aperture/internal/ai"
 	"github.com/TheOriUHD/aperture/internal/detect"
@@ -44,8 +52,14 @@ func (s *Server) handleSetDetection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "device must be auto, cpu or cuda")
 		return
 	}
-	if c.Model != "" && c.Model != "auto" && ai.ModelByID(c.Model) == nil {
+	if c.Model != "" && c.Model != "auto" && !s.modelExists(c.Model) {
 		writeError(w, http.StatusBadRequest, "unknown model")
+		return
+	}
+	switch c.PackageMode {
+	case "", "auto", "live", "separate":
+	default:
+		writeError(w, http.StatusBadRequest, "packageMode must be auto, live or separate")
 		return
 	}
 	seen := map[string]bool{}
@@ -155,7 +169,9 @@ func (s *Server) handlePlanAI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	d, mod, bytes := m.Plan(ai.Settings{Device: q.Get("device"), Model: q.Get("model")})
+	cfg := s.detect.LoadConfig()
+	d, mod, bytes := m.Plan(ai.Settings{Device: q.Get("device"), Model: q.Get("model"),
+		Packages: len(cfg.Packages) > 0, PackageMode: cfg.PackageMode})
 	writeJSON(w, http.StatusOK, map[string]any{"device": d, "model": mod.ID, "modelName": mod.Name, "download": bytes})
 }
 
@@ -222,4 +238,125 @@ func (s *Server) handleTestDetection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "backend": backend, "detections": dets})
+}
+
+// modelExists reports whether a model id is known (catalog or added).
+func (s *Server) modelExists(id string) bool {
+	if m := s.detect.AI(); m != nil {
+		return m.HasModel(id)
+	}
+	return ai.ModelByID(id) != nil
+}
+
+// handleAddAIModel takes a detection model the operator uploads (multipart:
+// "file", optional "name", "arch" and "classes"). The file is streamed to disk
+// while its SHA-256 is taken; Aperture then loads it once to find its format
+// and classes before keeping it.
+func (s *Server) handleAddAIModel(w http.ResponseWriter, r *http.Request) {
+	m := s.detect.AI()
+	if m == nil {
+		writeError(w, http.StatusNotFound, "object recognition is not available in this build")
+		return
+	}
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "send the model as multipart/form-data")
+		return
+	}
+	up := ai.CustomUpload{}
+	field := func(p io.Reader) string {
+		b, _ := io.ReadAll(io.LimitReader(p, 64<<10))
+		return string(b)
+	}
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			if up.Path != "" {
+				_ = os.Remove(up.Path)
+			}
+			writeError(w, http.StatusBadRequest, "the upload broke off")
+			return
+		}
+		switch part.FormName() {
+		case "name":
+			up.Name = field(part)
+		case "arch":
+			up.Arch = strings.TrimSpace(field(part))
+		case "classes":
+			up.Classes = field(part)
+		case "file":
+			if up.Path != "" {
+				continue
+			}
+			path, err := m.UploadPath()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "could not store the model")
+				return
+			}
+			f, err := os.Create(path)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "could not store the model")
+				return
+			}
+			h := sha256.New()
+			n, err := io.Copy(io.MultiWriter(f, h), part)
+			cerr := f.Close()
+			up.Path, up.Size, up.SHA256 = path, n, hex.EncodeToString(h.Sum(nil))
+			if err != nil || cerr != nil {
+				_ = os.Remove(path)
+				writeError(w, http.StatusRequestEntityTooLarge, "the upload broke off or is larger than 2 GB")
+				return
+			}
+			if up.Name == "" {
+				up.Name = strings.TrimSuffix(filepath.Base(part.FileName()), filepath.Ext(part.FileName()))
+			}
+		}
+		part.Close()
+	}
+	if up.Path == "" || up.Size == 0 {
+		if up.Path != "" {
+			_ = os.Remove(up.Path)
+		}
+		writeError(w, http.StatusBadRequest, "no model file in the upload")
+		return
+	}
+	switch up.Arch {
+	case "", "yolox", "detr":
+	default:
+		_ = os.Remove(up.Path)
+		writeError(w, http.StatusBadRequest, "arch must be yolox or detr")
+		return
+	}
+	v, err := m.AddCustomModel(r.Context(), up)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	s.logAudit(r, "detection.model.add", v.ID, "detection model added: "+v.Name)
+	s.emitConfig("detection")
+	writeJSON(w, http.StatusOK, v)
+}
+
+// handleDeleteAIModel removes a model the operator added.
+func (s *Server) handleDeleteAIModel(w http.ResponseWriter, r *http.Request) {
+	m := s.detect.AI()
+	if m == nil {
+		writeError(w, http.StatusNotFound, "object recognition is not available in this build")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := m.RemoveCustomModel(id); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "no such model")
+			return
+		}
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	s.logAudit(r, "detection.model.remove", id, "detection model removed")
+	s.emitConfig("detection")
+	w.WriteHeader(http.StatusNoContent)
 }

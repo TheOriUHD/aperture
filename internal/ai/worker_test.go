@@ -24,6 +24,8 @@ import (
 //	APERTURE_TEST_LIBDIRS   colon-separated CUDA library folders (for cuda)
 //	APERTURE_TEST_RUNS      runs to time after the first three (benchmark)
 //	APERTURE_TEST_PACKAGES  the package model (.onnx), to run it too
+//	APERTURE_TEST_ARCH      the main model format (yolox, detr) and
+//	APERTURE_TEST_CLASSES   its class list (coco80, obj365, a file)
 func TestWorkerIntegration(t *testing.T) {
 	bin, lib, model := os.Getenv("APERTURE_TEST_APDETECT"), os.Getenv("APERTURE_TEST_ORT_LIB"), os.Getenv("APERTURE_TEST_MODEL")
 	if bin == "" || lib == "" || model == "" {
@@ -39,7 +41,8 @@ func TestWorkerIntegration(t *testing.T) {
 	if d := os.Getenv("APERTURE_TEST_LIBDIRS"); d != "" {
 		libDirs = strings.Split(d, ":")
 	}
-	w, err := StartWorker(ctx, WorkerConfig{Bin: bin, Lib: lib, Model: model, Provider: provider, Threads: 3, LibDirs: libDirs, MinScore: minScore(), Packages: os.Getenv("APERTURE_TEST_PACKAGES")}, slog.Default())
+	w, err := StartWorker(ctx, WorkerConfig{Bin: bin, Lib: lib, Model: model, Provider: provider, Threads: 3, LibDirs: libDirs, MinScore: minScore(), Packages: os.Getenv("APERTURE_TEST_PACKAGES"),
+		Arch: os.Getenv("APERTURE_TEST_ARCH"), Classes: os.Getenv("APERTURE_TEST_CLASSES")}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}

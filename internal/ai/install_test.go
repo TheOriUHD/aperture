@@ -163,7 +163,7 @@ func TestDevicesOnAVirtualMachine(t *testing.T) {
 	write("usr/lib/x86_64-linux-gnu/libcuda.so.1", "")
 	devs = Devices(6)
 	d := PickDevice(devs, "auto")
-	if d.ID != "cuda" || d.Name != "NVIDIA GeForce RTX 5060" || d.Driver != "580.82.07" || DefaultModel(d) != "yolox-m" {
+	if d.ID != "cuda" || d.Name != "NVIDIA GeForce RTX 5060" || d.Driver != "580.82.07" || DefaultModel(d) != "dfine-x-obj365" {
 		t.Fatalf("GPU with driver: %+v", d)
 	}
 	if PickDevice(devs, "cpu").ID != "cpu" {

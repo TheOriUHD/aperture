@@ -84,7 +84,7 @@ func PickDevice(devs []Device, want string) Device {
 // DefaultModel picks the model for a device: the best one that keeps up.
 func DefaultModel(d Device) string {
 	if d.Kind == "gpu" {
-		return "yolox-m"
+		return "dfine-x-obj365" // all-in-one: parcels live too
 	}
 	if d.Threads > 0 && d.Threads <= 2 {
 		return "yolox-nano"

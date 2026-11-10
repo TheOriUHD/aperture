@@ -85,7 +85,12 @@ func (s Store) artifactDir(pack string, a Artifact) string {
 	return filepath.Join(s.Dir, "packs", pack, a.Name)
 }
 
-func (s Store) modelPath(m *Model) string { return filepath.Join(s.Dir, "models", m.ID+".onnx") }
+func (s Store) modelPath(m *Model) string {
+	if m.Custom {
+		return filepath.Join(s.customDir(), m.ID+".onnx")
+	}
+	return filepath.Join(s.Dir, "models", m.ID+".onnx")
+}
 
 // installed reports whether a finished install of exactly this file is there.
 func installed(marker, sha string) bool {
@@ -105,6 +110,10 @@ func (s Store) PackInstalled(p *Pack) bool {
 
 // ModelInstalled reports whether a model is installed.
 func (s Store) ModelInstalled(m *Model) bool {
+	if m.Custom {
+		_, err := os.Stat(s.modelPath(m))
+		return err == nil
+	}
 	return installed(s.modelPath(m)+".sha256", m.Artifact.SHA256)
 }
 
@@ -142,7 +151,7 @@ func (s Store) Missing(p *Pack, models ...*Model) []job {
 		}
 	}
 	for _, m := range models {
-		if m != nil && !s.ModelInstalled(m) {
+		if m != nil && !m.Custom && !s.ModelInstalled(m) {
 			label := "the " + m.Name + " detection model"
 			if isPackageModel(m.Artifact) {
 				label = "the package model"
@@ -162,10 +171,10 @@ func isPackageModel(a Artifact) bool {
 	return false
 }
 
-// onlyPackageModels reports whether jobs fetch nothing but package models.
-func onlyPackageModels(jobs []job) bool {
+// onlyModels reports whether jobs fetch nothing but model files.
+func onlyModels(jobs []job) bool {
 	for _, j := range jobs {
-		if !isPackageModel(j.a) {
+		if j.a.Kind != "file" {
 			return false
 		}
 	}

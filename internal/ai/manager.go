@@ -15,8 +15,12 @@ import (
 type Settings struct {
 	Device string `json:"device"` // auto | cpu | cuda
 	Model  string `json:"model"`  // auto | a model id
-	// Packages loads the package model too (some camera watches for parcels).
+	// Packages: some camera watches for parcels.
 	Packages bool `json:"packages,omitempty"`
+	// PackageMode is how parcels are found: "live" by an all-in-one main model
+	// on every frame, "separate" by a small extra model every few seconds, or
+	// "auto" (live when the main model can, else separate).
+	PackageMode string `json:"packageMode,omitempty"`
 }
 
 // ModelView is a model as the settings page shows it.
@@ -29,6 +33,25 @@ type ModelView struct {
 	Installed   bool    `json:"installed"`
 	Recommended bool    `json:"recommended"`
 	Ms          float64 `json:"ms"` // rough time per frame on the chosen device
+	Arch        string  `json:"arch"`
+	Labels      string  `json:"labels"`  // coco80 | coco91 | obj365 | custom
+	Classes     int     `json:"classes"` // how many classes it knows
+	AllInOne    bool    `json:"allInOne,omitempty"`
+	GPUOnly     bool    `json:"gpuOnly,omitempty"`
+	Tier        string  `json:"tier,omitempty"`
+	License     string  `json:"license,omitempty"`
+	Custom      bool    `json:"custom,omitempty"`
+}
+
+func viewOf(mm *Model, d Device, installed, recommended bool) ModelView {
+	v := ModelView{ID: mm.ID, Name: mm.Name, Detail: mm.Detail, Input: mm.Input, Size: mm.Artifact.Size,
+		Installed: installed, Recommended: recommended, Ms: mm.MsCPU, Arch: mm.ArchOf(), Labels: mm.LabelSetOf(),
+		Classes: len(mm.ClassList()), AllInOne: mm.AllInOne, GPUOnly: mm.GPUOnly, Tier: mm.Tier, License: mm.License,
+		Custom: mm.Custom}
+	if d.Kind == "gpu" {
+		v.Ms = mm.MsGPU
+	}
+	return v
 }
 
 // Status is the state of object recognition for the settings page.
@@ -55,10 +78,12 @@ type Status struct {
 	// the CPU meanwhile. UpgradeDownload is what switching would fetch.
 	Upgrade         *Device `json:"upgrade,omitempty"`
 	UpgradeDownload int64   `json:"upgradeDownload,omitempty"`
-	// Packages is the package model for this device; PackagesRunning says
-	// the detector has it loaded (some camera watches for packages).
+	// Packages is the separate package model for this device; PackagesRunning
+	// says parcels are being looked for (by it, or live by the main model:
+	// PackagesLive).
 	Packages        *ModelView `json:"packages,omitempty"`
 	PackagesRunning bool       `json:"packagesRunning,omitempty"`
+	PackagesLive    bool       `json:"packagesLive,omitempty"`
 }
 
 // Manager installs runtimes and models on request and keeps a detector
@@ -82,7 +107,7 @@ type Manager struct {
 	worker     *Worker
 	device     Device
 	model      *Model
-	pkgModel   *Model // package model the worker has loaded
+	pkgModel   *Model // separate package model the worker has loaded
 	state      string
 	err, note  string
 	ms         float64
@@ -148,20 +173,42 @@ func (m *Manager) devices() []Device {
 func (m *Manager) resolve(s Settings) (Device, *Pack, *Model) {
 	d := PickDevice(m.devices(), s.Device)
 	p := PackByID(d.PackID)
-	mod := ModelByID(s.Model)
+	mod := m.modelByID(s.Model)
 	if mod == nil {
 		mod = ModelByID(DefaultModel(d))
 	}
 	return d, p, mod
 }
 
-// packageModel is the package model for settings on a device (nil when no
-// camera watches for packages).
-func packageModel(s Settings, d Device) *Model {
+// modelByID finds a catalog model or one the operator added.
+func (m *Manager) modelByID(id string) *Model {
+	if mod := ModelByID(id); mod != nil {
+		return mod
+	}
+	return m.store.CustomModel(id)
+}
+
+// HasModel reports whether a model id exists (catalog or added).
+func (m *Manager) HasModel(id string) bool { return m.modelByID(id) != nil }
+
+// packageModel is the separate package model the settings need on a device:
+// none when no camera watches for packages, or when the main model finds
+// parcels itself and the separate check wasn't asked for.
+func packageModel(s Settings, d Device, mod *Model) *Model {
 	if !s.Packages {
 		return nil
 	}
+	if s.PackageMode != "separate" && mod != nil && mod.AllInOne {
+		return nil
+	}
 	return PackageModelFor(d)
+}
+
+func sameModel(a, b *Model) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.ID == b.ID
 }
 
 // Plan reports what enabling with these settings would download.
@@ -169,7 +216,7 @@ func (m *Manager) Plan(s Settings) (Device, *Model, int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	d, p, mod := m.resolve(s)
-	return d, mod, Bytes(m.store.Missing(p, mod, packageModel(s, d)))
+	return d, mod, Bytes(m.store.Missing(p, mod, packageModel(s, d, mod)))
 }
 
 // Configure applies the operator's choice. nil turns recognition off (files
@@ -198,7 +245,7 @@ func (m *Manager) Configure(s *Settings, download bool) {
 		return
 	}
 	d, p, mod := m.resolve(*s)
-	pm := packageModel(*s, d)
+	pm := packageModel(*s, d, mod)
 	jobs := m.store.Missing(p, mod, pm)
 	if len(jobs) > 0 && !download && m.store.updating(jobs) {
 		// A newer version of something already installed (Aperture was
@@ -211,16 +258,16 @@ func (m *Manager) Configure(s *Settings, download bool) {
 	if !download || m.upgrade == nil || m.upgrade.ID != d.ID {
 		m.upgrade = nil
 	}
-	if !download && (s.Device == "" || s.Device == "auto") && d.Kind == "gpu" && len(m.store.Missing(p, mod)) > 0 {
+	if !download && (s.Device == "" || s.Device == "auto") && d.Kind == "gpu" && !m.store.PackInstalled(p) {
 		// A GPU appeared after setup. Keep recognising on the CPU with what is
 		// already downloaded, and offer the switch instead of stopping.
 		cpu := PickDevice(m.devices(), "cpu")
 		cp := PackByID("cpu")
-		cm := ModelByID(s.Model)
-		if cm == nil {
+		cm := m.modelByID(s.Model)
+		if cm == nil || cm.GPUOnly {
 			cm = ModelByID(DefaultModel(cpu))
 		}
-		cpm := packageModel(*s, cpu)
+		cpm := packageModel(*s, cpu, cm)
 		if len(m.store.Missing(cp, cm)) == 0 {
 			gpu := d
 			m.upgrade = &gpu
@@ -228,10 +275,12 @@ func (m *Manager) Configure(s *Settings, download bool) {
 			jobs = m.store.Missing(p, mod, pm)
 		}
 	}
-	if len(jobs) > 0 && !download && onlyPackageModels(jobs) {
-		// A camera started watching for packages: the small package model
-		// comes without asking again, like an update.
-		m.log.Info("object recognition: downloading the package model")
+	if len(jobs) > 0 && !download && onlyModels(jobs) && m.store.PackInstalled(p) {
+		// The runtime is there and only a model is missing: one just chosen,
+		// the package model for a camera that started watching for parcels,
+		// or a new automatic default. It comes without asking again, like an
+		// update; recognition keeps running meanwhile.
+		m.log.Info("object recognition: downloading a model")
 		download = true
 	}
 	switch {
@@ -252,7 +301,7 @@ func (m *Manager) Configure(s *Settings, download bool) {
 		}
 		m.mu.Unlock()
 	default:
-		same := m.worker != nil && m.device.ID == d.ID && m.model == mod && m.pkgModel == pm
+		same := m.worker != nil && m.device.ID == d.ID && sameModel(m.model, mod) && sameModel(m.pkgModel, pm)
 		if !same {
 			m.stopWorkerLocked()
 			m.state, m.err = "starting", ""
@@ -326,6 +375,11 @@ func (m *Manager) run(gen int, d Device, p *Pack, mod *Model, pm *Model) {
 		cfg := WorkerConfig{
 			Bin: m.bin, Lib: m.store.LibPath(p), Model: m.store.ModelPath(mod),
 			Provider: provider, Threads: m.threads, LibDirs: m.store.LibDirs(p), MinScore: 0.25,
+			Arch: mod.ArchOf(), Classes: m.store.ClassesArg(mod),
+		}
+		if mod.AllInOne {
+			// Parcels score low (a flat box at night: 0.2-0.4); nvrd decides.
+			cfg.MinScore = 0.12
 		}
 		if pm != nil {
 			cfg.Packages = m.store.ModelPath(pm)
@@ -482,23 +536,60 @@ func (m *Manager) Detect(ctx context.Context, rgb []byte, w, h int) (Result, err
 	return res, err
 }
 
-// PackagesReady reports whether the package model is loaded.
+// PackagesReady reports whether parcels can be looked for: by the separate
+// package model, or by the main model itself.
 func (m *Manager) PackagesReady() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.worker != nil && m.worker.Hello().Packages
+	return m.worker != nil && (m.worker.Hello().Packages || m.liveLocked())
 }
 
-// DetectPackages looks for people and packages in one frame with the package
-// model (see dfine.go): person boxes carry class 0, packages PackageClass.
+// PackagesLive reports whether the main model finds parcels on every frame
+// (an all-in-one model, and the separate check not asked for).
+func (m *Manager) PackagesLive() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.liveLocked()
+}
+
+func (m *Manager) liveLocked() bool {
+	return m.worker != nil && m.worker.Hello().Combined && m.pkgModel == nil &&
+		m.want != nil && m.want.Packages && m.want.PackageMode != "separate"
+}
+
+// DetectPackages looks for people and packages in one frame: person boxes
+// carry class 0, packages PackageClass. It uses the separate package model,
+// or the main model when that finds parcels itself.
 func (m *Manager) DetectPackages(ctx context.Context, rgb []byte, w, h int) (Result, error) {
 	m.mu.Lock()
 	wk := m.worker
+	live := m.liveLocked()
 	m.mu.Unlock()
-	if wk == nil || !wk.Hello().Packages {
+	if wk == nil {
 		return Result{}, ErrWorkerGone
 	}
+	if !wk.Hello().Packages {
+		if !live {
+			return Result{}, ErrWorkerGone
+		}
+		res, err := wk.DetectKind(ctx, KindObjects, rgb, w, h)
+		if err == nil {
+			res.Boxes = PeopleAndPackages(res.Boxes)
+		}
+		return res, err
+	}
 	return wk.DetectKind(ctx, KindPackages, rgb, w, h)
+}
+
+// PeopleAndPackages keeps the person and package boxes.
+func PeopleAndPackages(boxes []Box) []Box {
+	out := boxes[:0:0]
+	for _, b := range boxes {
+		if b.Class == 0 || b.Class == PackageClass {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // Status describes the current state.
@@ -523,49 +614,40 @@ func (m *Manager) Status() Status {
 	}
 	s.Device = d
 	def := DefaultModel(d)
+	all := make([]*Model, 0, len(Models))
 	for i := range Models {
-		mm := &Models[i]
-		v := ModelView{ID: mm.ID, Name: mm.Name, Detail: mm.Detail, Input: mm.Input, Size: mm.Artifact.Size,
-			Installed: m.store.ModelInstalled(mm), Recommended: mm.ID == def, Ms: mm.MsCPU}
-		if d.Kind == "gpu" {
-			v.Ms = mm.MsGPU
-		}
+		all = append(all, &Models[i])
+	}
+	for _, cm := range m.store.CustomModels() {
+		all = append(all, cm)
+	}
+	for _, mm := range all {
+		v := viewOf(mm, d, m.store.ModelInstalled(mm), mm.ID == def)
 		s.Models = append(s.Models, v)
-		if mm == mod {
+		if mod != nil && mm.ID == mod.ID {
 			s.Model = v
 		}
 	}
-	pm := packageModel(want, d)
-	// The package model is described whether or not a camera wants it (the
-	// page shows what watching for packages would download).
+	pm := packageModel(want, d, mod)
+	// The separate package model is described whether or not a camera wants
+	// it (the page shows what watching for packages would download).
 	if v := PackageModelFor(d); v != nil {
-		pv := ModelView{ID: v.ID, Name: v.Name, Detail: v.Detail, Input: v.Input, Size: v.Artifact.Size,
-			Installed: m.store.ModelInstalled(v), Recommended: true, Ms: v.MsCPU}
-		if d.Kind == "gpu" {
-			pv.Ms = v.MsGPU
-		}
+		pv := viewOf(v, d, m.store.ModelInstalled(v), true)
 		s.Packages = &pv
 	}
-	if pm != nil {
-		v := ModelView{ID: pm.ID, Name: pm.Name, Detail: pm.Detail, Input: pm.Input, Size: pm.Artifact.Size,
-			Installed: m.store.ModelInstalled(pm), Recommended: true, Ms: pm.MsCPU}
-		if d.Kind == "gpu" {
-			v.Ms = pm.MsGPU
-		}
-		s.Packages = &v
-		s.PackagesRunning = m.worker != nil && m.worker.Hello().Packages
-	}
+	s.PackagesLive = m.liveLocked()
+	s.PackagesRunning = m.worker != nil && (m.worker.Hello().Packages || s.PackagesLive)
 	if !m.installing {
 		s.Download = Bytes(m.store.Missing(p, mod, pm))
 	}
 	if m.upgrade != nil {
 		u := *m.upgrade
 		s.Upgrade = &u
-		gm := ModelByID(want.Model)
+		gm := m.modelByID(want.Model)
 		if gm == nil {
 			gm = ModelByID(DefaultModel(u))
 		}
-		s.UpgradeDownload = Bytes(m.store.Missing(PackByID(u.PackID), gm, packageModel(want, u)))
+		s.UpgradeDownload = Bytes(m.store.Missing(PackByID(u.PackID), gm, packageModel(want, u, gm)))
 		if m.worker == nil {
 			s.Download = 0
 		}

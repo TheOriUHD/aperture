@@ -28,7 +28,10 @@ type Hello struct {
 	Providers []string `json:"providers,omitempty"` // what the library offers
 	Input     int      `json:"input,omitempty"`     // model input side in pixels
 	WarmupMs  float64  `json:"warmupMs,omitempty"`
-	Packages  bool     `json:"packages,omitempty"` // the package model is loaded too
+	Packages  bool     `json:"packages,omitempty"` // the separate package model is loaded too
+	Arch      string   `json:"arch,omitempty"`     // yolox | detr
+	Classes   int      `json:"classes,omitempty"`  // classes the main model knows
+	Combined  bool     `json:"combined,omitempty"` // the main model finds parcels itself
 }
 
 // Result is the reply to one frame.
@@ -113,4 +116,47 @@ func ReadFrameKind(r *bufio.Reader, buf []byte) (kind int, id uint32, width, hei
 	rgb = buf[:n]
 	_, err = io.ReadFull(r, rgb)
 	return
+}
+
+// Probe is what apdetect -probe says about a model.
+type Probe struct {
+	Ready   bool          `json:"ready"`
+	Error   string        `json:"error,omitempty"`
+	Input   []int64       `json:"input,omitempty"`   // input shape (-1 = any)
+	Size    int           `json:"size,omitempty"`    // side it was run at
+	Outputs []ProbeOutput `json:"outputs,omitempty"` // as run on a blank picture
+	Arch    string        `json:"arch,omitempty"`    // yolox | detr | "" (not recognised)
+	Classes int           `json:"classes,omitempty"` // classes the outputs carry
+}
+
+// ProbeOutput is one model output.
+type ProbeOutput struct {
+	Name  string  `json:"name"`
+	Shape []int64 `json:"shape"`
+}
+
+// GuessFormat tells a model's format by its outputs: YOLOX has one
+// [1, N, 5+classes] output; a DETR model has boxes [1, Q, 4] and logits
+// [1, Q, classes].
+func GuessFormat(outs []ProbeOutput) (arch string, classes int) {
+	if len(outs) == 1 && len(outs[0].Shape) == 3 && outs[0].Shape[2] >= 6 {
+		return "yolox", int(outs[0].Shape[2]) - 5
+	}
+	var boxes, logits *ProbeOutput
+	for i := range outs {
+		o := &outs[i]
+		if len(o.Shape) != 3 {
+			continue
+		}
+		switch {
+		case o.Shape[2] == 4 && boxes == nil:
+			boxes = o
+		case logits == nil:
+			logits = o
+		}
+	}
+	if boxes != nil && logits != nil && boxes.Shape[1] == logits.Shape[1] && logits.Shape[2] > 0 {
+		return "detr", int(logits.Shape[2])
+	}
+	return "", 0
 }

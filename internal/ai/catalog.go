@@ -27,8 +27,8 @@ type Pack struct {
 	LibDirs []string
 }
 
-// Model is a downloadable detection model. All are YOLOX (Apache-2.0), trained
-// on COCO's 80 classes.
+// Model is a detection model: one of the catalog's (downloaded on demand) or
+// one the operator added (Custom).
 type Model struct {
 	ID       string
 	Name     string // shown to people
@@ -38,6 +38,39 @@ type Model struct {
 	// MsCPU and MsGPU are rough per-frame times (one 6-thread desktop CPU core
 	// pair; one mid-range NVIDIA GPU), used to pick a default and show a hint.
 	MsCPU, MsGPU float64
+
+	Arch     string   // "yolox" (default) or "detr" (D-FINE, RT-DETR, RF-DETR)
+	Labels   string   // label set: coco80 (default), obj365, or "custom" (Classes)
+	Classes  []string // a custom model's class names
+	AllInOne bool     // also finds parcels: no separate package model needed
+	GPUOnly  bool     // too slow on a CPU to offer in the simple tiers
+	Tier     string   // its place in the simple choice ("" = advanced only)
+	License  string
+	Custom   bool // added by the operator
+}
+
+// ArchOf is a model's format, "yolox" when unset.
+func (m *Model) ArchOf() string {
+	if m.Arch == "" {
+		return "yolox"
+	}
+	return m.Arch
+}
+
+// ClassList is the model's class names.
+func (m *Model) ClassList() []string {
+	if len(m.Classes) > 0 {
+		return m.Classes
+	}
+	return ClassNames(m.Labels)
+}
+
+// LabelSetOf is the model's label set, coco80 when unset.
+func (m *Model) LabelSetOf() string {
+	if m.Labels == "" {
+		return LabelsCOCO
+	}
+	return m.Labels
 }
 
 // ONNX Runtime 1.31's CUDA 12 build carries kernels for every GPU from Pascal
@@ -133,27 +166,58 @@ var Packs = []Pack{
 
 const yoloxBase = "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/"
 
-// Models are the detection models on offer, fastest first.
+// Models are the detection models on offer, fastest first. The YOLOX ones and
+// D-FINE-X COCO are trained on COCO's 80 classes. The all-in-one ones are
+// D-FINE trained on Objects365 (365 classes: parcels and bags too); the D-FINE
+// authors note such checkpoints "may be subject to the Objects365 dataset
+// terms", so they say so where they are offered.
 var Models = []Model{
 	{
 		ID: "yolox-nano", Name: "Fast", Detail: "YOLOX-Nano · for small CPUs", Input: 416, MsCPU: 9, MsGPU: 2,
+		Tier: "fast", License: "Apache-2.0",
 		Artifact: Artifact{Name: "yolox-nano", Kind: "file", URL: yoloxBase + "yolox_nano.onnx",
 			SHA256: "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d", Size: 3659407},
 	},
 	{
 		ID: "yolox-tiny", Name: "Balanced", Detail: "YOLOX-Tiny · the default on a CPU", Input: 416, MsCPU: 30, MsGPU: 3,
+		Tier: "balanced", License: "Apache-2.0",
 		Artifact: Artifact{Name: "yolox-tiny", Kind: "file", URL: yoloxBase + "yolox_tiny.onnx",
 			SHA256: "427cc366d34e27ff7a03e2899b5e3671425c262ea2291f88bb942bc1cc70b0f7", Size: 20219662},
 	},
 	{
 		ID: "yolox-s", Name: "Accurate", Detail: "YOLOX-S · sharper, for strong CPUs", Input: 640, MsCPU: 110, MsGPU: 4,
+		Tier: "accurate", License: "Apache-2.0",
 		Artifact: Artifact{Name: "yolox-s", Kind: "file", URL: yoloxBase + "yolox_s.onnx",
 			SHA256: "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063", Size: 35858002},
 	},
 	{
-		ID: "yolox-m", Name: "Best", Detail: "YOLOX-M · the default on a GPU", Input: 640, MsCPU: 300, MsGPU: 6,
+		ID: "yolox-m", Name: "Best", Detail: "YOLOX-M · people, vehicles and animals", Input: 640, MsCPU: 300, MsGPU: 12,
+		Tier: "best", License: "Apache-2.0",
 		Artifact: Artifact{Name: "yolox-m", Kind: "file", URL: yoloxBase + "yolox_m.onnx",
 			SHA256: "21ff6cfdeb53b013bac2249599e55f00bff3cfdfdab37ed7a4620818c1d15b3f", Size: 101259744},
+	},
+	{
+		ID: "dfine-x-obj365", Name: "All-in-one", Detail: "D-FINE-X (Objects365) · people, vehicles, animals and parcels in one model; the default on a GPU",
+		Input: 640, MsCPU: 900, MsGPU: 24, Arch: "detr", Labels: LabelsObjects365, AllInOne: true, GPUOnly: true, Tier: "all-in-one",
+		License: "Apache-2.0 code; trained on Objects365, whose terms may limit commercial use",
+		Artifact: Artifact{Name: "dfine-x-obj365", Kind: "file",
+			URL:    hfBase + "dfine_x_obj365-ONNX/resolve/8b0ccdfc94d2a405acaaeceade13b6d2b4fccd16/onnx/model.onnx",
+			SHA256: "8499ca27e2ee289f0b664a2def6c3d574ae2765186460f18454969cf0d14e137", Size: 251726476},
+	},
+	{
+		ID: "dfine-l-obj365", Name: "All-in-one (lighter)", Detail: "D-FINE-L (Objects365) · the all-in-one model at half the size",
+		Input: 640, MsCPU: 500, MsGPU: 16, Arch: "detr", Labels: LabelsObjects365, AllInOne: true, GPUOnly: true,
+		License: "Apache-2.0 code; trained on Objects365, whose terms may limit commercial use",
+		Artifact: Artifact{Name: "dfine-l-obj365", Kind: "file",
+			URL:    hfBase + "dfine_l_obj365-ONNX/resolve/32323e9a0c74b22803a2ad5b315a8fed61801e6a/onnx/model.onnx",
+			SHA256: "cd0dfa92a2e0e2ab3d4a7c2e6252ebc094aa77b67f2f9dc1a010dd350a9a2f3e", Size: 125936360},
+	},
+	{
+		ID: "dfine-x-coco", Name: "Sharpest (COCO)", Detail: "D-FINE-X (COCO) · the most accurate for people, vehicles and animals; no parcels",
+		Input: 640, MsCPU: 900, MsGPU: 24, Arch: "detr", Labels: LabelsCOCO, GPUOnly: true, License: "Apache-2.0",
+		Artifact: Artifact{Name: "dfine-x-coco", Kind: "file",
+			URL:    hfBase + "dfine_x_coco-ONNX/resolve/b67b16d98f1f95e2af0b6d0b8f74ad956557fe8c/onnx/model.onnx",
+			SHA256: "644fb5124c9c035a6082f23419da693c19ac857bd984ab7af5e353779368a03b", Size: 251138448},
 	},
 }
 
@@ -169,6 +233,7 @@ const hfBase = "https://huggingface.co/onnx-community/"
 var PackageModels = []Model{
 	{
 		ID: "dfine-s-obj365", Name: "Packages", Detail: "D-FINE-S (Objects365)", Input: 640, MsCPU: 150, MsGPU: 8,
+		Arch: "detr", Labels: LabelsObjects365, License: "Apache-2.0 code; trained on Objects365, whose terms may limit commercial use",
 		Artifact: Artifact{Name: "dfine-s-obj365", Kind: "file",
 			URL:    hfBase + "dfine_s_obj365-ONNX/resolve/a61e4cdfe4f9d3188a305d91e37dbf38688ffbb8/onnx/model.onnx",
 			SHA256: "372feaa33ac6ba67d7df8589628f6abc395b3c6981c4edc70dfcfe2949751120", Size: 42123225},

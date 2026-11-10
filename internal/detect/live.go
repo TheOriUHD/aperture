@@ -298,6 +298,13 @@ func (l *Live) detect(ctx context.Context, id string, frame []byte, w, h int, at
 	res, err := l.ai.Detect(dctx, frame, w, h)
 	cancel()
 	cfg := l.e.LoadConfig()
+	// With an all-in-one model, parcels are found on every frame: boxed live
+	// on the cameras watching for them, and fed to their package watch.
+	livePk := err == nil && l.e.pkgs != nil && l.e.pkgs.watching(id) && l.ai.PackagesLive()
+	var pkCands []LiveObject
+	if livePk {
+		pkCands = l.e.pkgs.liveCandidates(id, res.Boxes, cfg.Sensitivity)
+	}
 
 	l.mu.Lock()
 	l.inUse--
@@ -313,7 +320,7 @@ func (l *Live) detect(ctx context.Context, id string, frame []byte, w, h int, at
 		return
 	}
 	motionMap := unionCells(c.cells, time.Now())
-	cands := candidates(res.Boxes, cfg)
+	cands := append(candidates(res.Boxes, cfg), pkCands...)
 	l.trackLocked(c, cands, at)
 	objs := acceptLocked(c, cands, motionMap, cfg, at)
 	parked := parkedLocked(c, objs, at)
@@ -329,8 +336,11 @@ func (l *Live) detect(ctx context.Context, id string, frame []byte, w, h int, at
 	l.mu.Unlock()
 	l.poke()
 
-	if l.e.pkgs != nil {
-		// Delivered parcels are drawn too, while they stand there.
+	if livePk {
+		l.e.pkgs.observe(id, res.Boxes, frame, w, h)
+	} else if l.e.pkgs != nil {
+		// Delivered parcels found by the separate check are drawn too, while
+		// they stand there.
 		if pk := l.e.pkgs.liveObjects(id); len(pk) > 0 {
 			objs = append(objs, pk...)
 			publish = true
@@ -598,11 +608,14 @@ func acceptLocked(c *liveCam, cands []LiveObject, moved []bool, cfg Config, at t
 		}
 		recentlyMoved := t != nil && !t.movedAt.IsZero() && at.Sub(t.movedAt) < stickyFor
 		stillPerson := person && o.Score >= personStill(cfg)
+		// Parcels stand still by nature; liveCandidates already left out
+		// those held by someone and the ones that belong to the scene.
+		parcel := o.Label == "package"
 		// Once boxed, a person stays boxed while still recognised at the normal
 		// threshold: no blinking when their score wobbles. (Anything else keeps
 		// its box for a minute after it last moved, then lets go.)
 		wasShown := person && t != nil && !t.shownAt.IsZero() && at.Sub(t.shownAt) < stickyFor
-		if recentlyMoved || stillPerson || wasShown {
+		if recentlyMoved || stillPerson || wasShown || parcel {
 			if t != nil {
 				t.shownAt = at
 			}
