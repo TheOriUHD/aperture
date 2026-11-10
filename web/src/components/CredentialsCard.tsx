@@ -1,36 +1,39 @@
 import { useState } from "react";
-import { Download, Printer, Copy, Check } from "lucide-react";
+import { AlertTriangle, Download, Printer, Copy, Check } from "lucide-react";
 import { Modal } from "./ui/Modal";
 
 // cardSvg renders the credentials card as a self-contained SVG string, used for
-// both on-screen preview and PNG/print export (one source of truth).
+// both on-screen preview and PNG/print export (one source of truth). Its colours
+// are literal because the SVG leaves the app (PNG, print), but they mirror the
+// theme: ink-800 card, line-strong hairlines, brand accent, fg / fg-muted text.
 function cardSvg(loginUrl: string, email: string, password: string): string {
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="760" height="460" viewBox="0 0 760 460" font-family="Inter, system-ui, sans-serif">
-  <rect x="1" y="1" width="758" height="458" rx="18" fill="#14171c" stroke="#262b33" stroke-width="1.5"/>
-  <rect x="1" y="1" width="758" height="6" rx="3" fill="#1b9df0"/>
+  <defs><clipPath id="aperture-cred-card"><rect x="1" y="1" width="758" height="458" rx="12"/></clipPath></defs>
+  <rect x="1" y="1" width="758" height="458" rx="12" fill="#1b1e21" stroke="#2f3236" stroke-width="1.5"/>
+  <rect x="1" y="1" width="758" height="6" fill="#006fff" clip-path="url(#aperture-cred-card)"/>
   <g transform="translate(48,56)">
-    <circle cx="13" cy="13" r="13" fill="#1b9df0"/>
-    <circle cx="13" cy="13" r="5" fill="#14171c"/>
-    <text x="40" y="11" fill="#eef0f2" font-size="17" font-weight="600" letter-spacing="2">APERTURE NVR</text>
-    <text x="40" y="30" fill="#6c727a" font-size="12.5" letter-spacing="0.5">Account access card</text>
+    <circle cx="13" cy="13" r="13" fill="#006fff"/>
+    <circle cx="13" cy="13" r="5" fill="#1b1e21"/>
+    <text x="40" y="11" fill="#f2f4f5" font-size="17" font-weight="600" letter-spacing="2">APERTURE NVR</text>
+    <text x="40" y="30" fill="#a5a8ac" font-size="12.5" letter-spacing="0.5">Account access card</text>
   </g>
-  <line x1="48" y1="112" x2="712" y2="112" stroke="#20242b" stroke-width="1"/>
+  <line x1="48" y1="112" x2="712" y2="112" stroke="#2f3236" stroke-width="1"/>
   <g transform="translate(48,150)">
-    <text x="0" y="0" fill="#6c727a" font-size="12" letter-spacing="1.5">SIGN-IN ADDRESS</text>
-    <text x="0" y="26" fill="#eef0f2" font-size="19">${esc(loginUrl)}</text>
+    <text x="0" y="0" fill="#a5a8ac" font-size="12" letter-spacing="1.5">SIGN-IN ADDRESS</text>
+    <text x="0" y="26" fill="#f2f4f5" font-size="19">${esc(loginUrl)}</text>
   </g>
   <g transform="translate(48,222)">
-    <text x="0" y="0" fill="#6c727a" font-size="12" letter-spacing="1.5">EMAIL</text>
-    <text x="0" y="26" fill="#eef0f2" font-size="19">${esc(email)}</text>
+    <text x="0" y="0" fill="#a5a8ac" font-size="12" letter-spacing="1.5">EMAIL</text>
+    <text x="0" y="26" fill="#f2f4f5" font-size="19">${esc(email)}</text>
   </g>
   <g transform="translate(48,290)">
-    <text x="0" y="0" fill="#6c727a" font-size="12" letter-spacing="1.5">TEMPORARY PASSWORD</text>
-    <rect x="0" y="14" width="664" height="52" rx="10" fill="#1e2228" stroke="#262b33"/>
-    <text x="22" y="48" fill="#1b9df0" font-size="26" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="2">${esc(password)}</text>
+    <text x="0" y="0" fill="#a5a8ac" font-size="12" letter-spacing="1.5">TEMPORARY PASSWORD</text>
+    <rect x="0" y="14" width="664" height="52" rx="8" fill="#111314" stroke="#2f3236"/>
+    <text x="22" y="48" fill="#4797ff" font-size="26" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" letter-spacing="2">${esc(password)}</text>
   </g>
-  <text x="48" y="416" fill="#6c727a" font-size="12.5">You'll be asked to choose your own password the first time you sign in.</text>
+  <text x="48" y="416" fill="#a5a8ac" font-size="12.5">You'll be asked to choose your own password the first time you sign in.</text>
 </svg>`;
 }
 
@@ -78,7 +81,7 @@ export function CredentialsCard({
     const w = window.open("", "_blank", "width=820,height=560");
     if (!w) return;
     w.document.write(
-      `<html><head><title>Aperture credentials</title></head><body style="margin:0;display:grid;place-items:center;height:100vh;background:#0d0f13">${svg}</body></html>`,
+      `<html><head><title>Aperture credentials</title></head><body style="margin:0;display:grid;place-items:center;height:100vh;background:#111314">${svg}</body></html>`,
     );
     w.document.close();
     w.focus();
@@ -100,9 +103,11 @@ export function CredentialsCard({
       open={open}
       onClose={onClose}
       title="Account created"
+      size="lg"
       footer={
-        <div className="flex items-center justify-between w-full">
-          <p className="text-xs text-amber max-w-[18rem]">
+        <div className="flex w-full items-center justify-between gap-4">
+          <p className="flex max-w-[20rem] items-start gap-1.5 text-xs text-warn">
+            <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
             This password is shown only once — hand the card to the user.
           </p>
           <button className="btn-primary" onClick={onClose}>
@@ -113,17 +118,17 @@ export function CredentialsCard({
     >
       <div className="space-y-4">
         <div
-          className="w-full overflow-hidden rounded-lg [&>svg]:w-full [&>svg]:h-auto"
+          className="w-full overflow-hidden rounded-lg [&>svg]:h-auto [&>svg]:w-full"
           dangerouslySetInnerHTML={{ __html: svg }}
         />
         <div className="flex flex-wrap gap-2">
-          <button className="btn-secondary" onClick={downloadPng}>
+          <button className="btn-ghost" onClick={downloadPng}>
             <Download className="h-4 w-4" /> Download card
           </button>
-          <button className="btn-secondary" onClick={print}>
+          <button className="btn-ghost" onClick={print}>
             <Printer className="h-4 w-4" /> Print
           </button>
-          <button className="btn-secondary" onClick={copy}>
+          <button className="btn-ghost" onClick={copy}>
             {copied ? <Check className="h-4 w-4 text-online" /> : <Copy className="h-4 w-4" />}
             {copied ? "Copied" : "Copy password"}
           </button>

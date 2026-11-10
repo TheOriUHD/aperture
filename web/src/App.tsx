@@ -13,6 +13,10 @@ import { Cameras } from "./screens/Cameras";
 import { Alarms } from "./screens/Alarms";
 import { Settings } from "./screens/Settings";
 import { ExtensionsPage } from "./ext/ExtensionsPage";
+import { Logs } from "./screens/Logs";
+import { Users } from "./screens/Users";
+import { Integrations } from "./screens/Integrations";
+import { AutomationsPage } from "./screens/AutomationsPage";
 import { Spinner } from "./components/ui/Spinner";
 
 // Playback pulls in hls.js; load it only when visited.
@@ -35,6 +39,7 @@ export default function App() {
   if (needsSetup) return <Setup />;
   if (!user) return <Login />;
   if (user.mustChangePassword) return <FirstRun />;
+  const isAdmin = user.role === "admin";
 
   return (
     <AppShell>
@@ -56,6 +61,10 @@ export default function App() {
           <Route path="/recordings" element={<Navigate to="/playback" replace />} />
           <Route path="/alarms" element={<Alarms />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/logs" element={isAdmin ? <Logs /> : <Navigate to="/dashboard" replace />} />
+          <Route path="/users" element={isAdmin ? <Users /> : <Navigate to="/dashboard" replace />} />
+          <Route path="/integrations" element={isAdmin ? <Integrations /> : <Navigate to="/dashboard" replace />} />
+          <Route path="/automations" element={isAdmin ? <AutomationsPage /> : <Navigate to="/dashboard" replace />} />
           <Route path="/extensions" element={<ExtensionsPage />} />
           <Route path="/extensions/:id" element={<ExtensionsPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

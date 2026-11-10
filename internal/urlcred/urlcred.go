@@ -1,9 +1,10 @@
-// Package urlcred keeps the login embedded in a camera link
-// (rtsp://user:pass@host/…) on the server. Links leave the server with the login
-// replaced by a fixed placeholder (Redact). A link that comes back still carrying
-// the placeholder means "keep the stored login" and is filled in again (Merge), but
-// only from a login stored for the same host, so a saved password can never be
-// redirected to another machine by editing the address.
+// Package urlcred keeps the secret in a camera link on the server: the login of
+// rtsp://user:pass@host/…, or the stream key of a link with no login whose path
+// is the secret, like UniFi Protect's rtsps://console:7441/<key>. Links leave the
+// server with the secret replaced by a fixed placeholder (Redact). A link that
+// comes back still carrying the placeholder means "keep the stored secret" and is
+// filled in again (Merge), but only from a secret stored for the same host, so it
+// can never be redirected to another machine by editing the address.
 //
 // Parsing mirrors net/url, which go2rtc uses to read these links (the authority
 // ends at the first "/", "?" or "#", and the login at its last "@"), but it works on
@@ -37,7 +38,15 @@ var (
 	ErrEditedMask = errors.New("replace all of the dots with the new username or password, or leave them untouched to keep the saved one")
 	// ErrMaskOutsideLogin: placeholder dots somewhere other than the login.
 	ErrMaskOutsideLogin = errors.New("the link has placeholder dots outside the username and password")
+	// ErrKeyNewAddress and ErrNoKeyStored are ErrNewAddress and ErrNothingStored
+	// for a stream key.
+	ErrKeyNewAddress = errors.New("the stream's address changed, so paste its full link again. The saved stream key is only ever used for the address it was saved for")
+	ErrNoKeyStored   = errors.New("there is no saved stream key for this link. Paste the full link")
 )
+
+// keyPath is a path that is itself the secret: one long alphanumeric segment, the
+// shape of a UniFi Protect stream key. Anyone holding it can watch the stream.
+var keyPath = regexp.MustCompile(`^/[A-Za-z0-9]{16,}$`)
 
 // link is a URL split around its login, by byte offsets into the original text.
 type link struct {
@@ -71,12 +80,37 @@ func (l link) String() string {
 	return l.prefix + l.login + "@" + l.rest
 }
 
+// split cuts rest into the authority (host[:port]), the path, and what follows.
+func (l link) split() (authority, path, tail string) {
+	i := strings.IndexAny(l.rest, "/?#")
+	if i < 0 {
+		return l.rest, "", ""
+	}
+	authority, after := l.rest[:i], l.rest[i:]
+	if j := strings.IndexAny(after, "?#"); j >= 0 {
+		return authority, after[:j], after[j:]
+	}
+	return authority, after, ""
+}
+
+// key is the link's stream key, or "" when its path isn't one.
+func (l link) key() string {
+	if _, path, _ := l.split(); keyPath.MatchString(path) {
+		return path[1:]
+	}
+	return ""
+}
+
+// withPath returns the link with its path replaced.
+func (l link) withPath(path string) link {
+	authority, _, tail := l.split()
+	l.rest = authority + path + tail
+	return l
+}
+
 // host is the link's host name, lower-cased, without port or IPv6 brackets.
 func (l link) host() string {
-	hp := l.rest
-	if j := strings.IndexAny(hp, "/?#"); j >= 0 {
-		hp = hp[:j]
-	}
+	hp, _, _ := l.split()
 	if strings.HasPrefix(hp, "[") {
 		if k := strings.Index(hp, "]"); k > 0 {
 			return strings.ToLower(hp[1:k])
@@ -95,15 +129,20 @@ func maskLogin(login string) string {
 	return Mask
 }
 
-// Redact returns raw with its login replaced by the placeholder: "•••••" for a
-// bare username, "•••••:•••••" when a password is present. Anything that is not a
-// link with a login is returned unchanged.
+// Redact returns raw with its secrets replaced by the placeholder: the login
+// becomes "•••••" for a bare username or "•••••:•••••" with a password, and a
+// stream key becomes "/•••••". Anything else is returned unchanged.
 func Redact(raw string) string {
 	l, ok := parse(raw)
-	if !ok || l.login == "" {
+	if !ok {
 		return raw
 	}
-	l.login = maskLogin(l.login)
+	if l.login != "" {
+		l.login = maskLogin(l.login)
+	}
+	if l.key() != "" {
+		l = l.withPath("/" + Mask)
+	}
 	return l.String()
 }
 
@@ -116,13 +155,36 @@ func HasMask(s string) bool { return strings.Contains(s, maskRune) }
 // login for the same host: normally the field's own saved value, else its sibling
 // (a sub link pasted from the main one). The saved login is never refilled for a
 // host it was not saved for.
+//
+// A stream key works the same way: a path that is exactly "/•••••" is refilled
+// from the first stored link with a key for the same host.
 func Merge(submitted string, stored ...string) (string, error) {
 	if !HasMask(submitted) {
 		return submitted, nil
 	}
 	in, ok := parse(submitted)
-	if !ok || HasMask(in.prefix+in.rest) {
+	if !ok {
 		return "", ErrMaskOutsideLogin
+	}
+	authority, path, tail := in.split()
+	if HasMask(in.prefix + authority + tail) {
+		return "", ErrMaskOutsideLogin
+	}
+	if HasMask(path) {
+		switch {
+		case path != "/"+Mask && strings.Count(path, "/") == 1:
+			return "", ErrEditedMask
+		case path != "/"+Mask:
+			return "", ErrMaskOutsideLogin
+		}
+		key, err := storedKey(in.host(), stored)
+		if err != nil {
+			return "", err
+		}
+		in = in.withPath("/" + key)
+	}
+	if !HasMask(in.login) {
+		return in.String(), nil
 	}
 	var src *link
 	sawLogin := false
@@ -166,6 +228,25 @@ func Merge(submitted string, stored ...string) (string, error) {
 	return in.String(), nil
 }
 
+// storedKey finds the stream key saved for host, the field's own link first.
+func storedKey(host string, stored []string) (string, error) {
+	sawKey := false
+	for _, s := range stored {
+		st, ok := parse(s)
+		if !ok || st.key() == "" {
+			continue
+		}
+		sawKey = true
+		if st.host() == host {
+			return st.key(), nil
+		}
+	}
+	if sawKey {
+		return "", ErrKeyNewAddress
+	}
+	return "", ErrNoKeyStored
+}
+
 // Follow carries a login change from the main link over to the sub link when the
 // two shared the old login, so changing a camera's password in the main link does
 // not silently break its sub stream. A sub link with its own, different login is
@@ -193,11 +274,16 @@ func SameLogin(a, b string) bool {
 // to the last "@" before the host; it cannot cross whitespace or a path.
 var loginInText = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)([^\s/?#"'<>]+)@`)
 
-// Scrub masks the login of every link inside free text, such as an error message
-// or a log line, so a failure report can never echo a password back.
+// keyInText finds a stream key: one long alphanumeric path segment straight after
+// a link's authority, ending the link or followed by ?, # or a delimiter.
+var keyInText = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://[^\s/?#"'<>]+/)[A-Za-z0-9]{16,}([\s?#"'<>]|$)`)
+
+// Scrub masks the login and stream key of every link inside free text, such as an
+// error message or a log line, so a failure report can never echo a secret back.
 func Scrub(text string) string {
-	return loginInText.ReplaceAllStringFunc(text, func(m string) string {
+	text = loginInText.ReplaceAllStringFunc(text, func(m string) string {
 		g := loginInText.FindStringSubmatch(m)
 		return g[1] + maskLogin(g[2]) + "@"
 	})
+	return keyInText.ReplaceAllString(text, "${1}"+Mask+"${2}")
 }

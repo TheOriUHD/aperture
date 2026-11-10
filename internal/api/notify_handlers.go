@@ -41,6 +41,8 @@ func (s *Server) handleNotifyStream(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-s.streams.done(): // server shutting down: the client reconnects to the next instance
+			return
 		case <-ka.C:
 			fmt.Fprint(w, ": keepalive\n\n")
 			flusher.Flush()

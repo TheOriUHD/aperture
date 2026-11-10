@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { KeyRound, Plus, Trash2 } from "lucide-react";
+import { KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { Switch } from "../components/ui/Switch";
 import { ApiError } from "../lib/api";
 import { useCameras } from "../hooks/useCameras";
@@ -24,12 +24,14 @@ export function ExtSettingsForm({ ext }: { ext: ExtItem }) {
   const q = useExtSettings(ext.id, true);
   if (q.isLoading) {
     return (
-      <div className="rounded-lg border border-line bg-ink-900/40 px-3 py-3 text-xs text-fg-muted">Loading settings…</div>
+      <div className="flex items-center gap-2 text-xs text-fg-muted">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-brand" /> Loading settings…
+      </div>
     );
   }
   if (q.isError || !q.data) {
     return (
-      <div className="rounded-lg border border-rec/30 bg-rec/10 px-3 py-2.5 text-sm text-fg">Could not load settings.</div>
+      <div className="rounded-md border border-danger/30 bg-danger/[0.08] px-3 py-2.5 text-sm text-fg">Could not load settings.</div>
     );
   }
   // Re-mount on a data change (e.g. after a save flips a secret to "set") so the form
@@ -95,13 +97,13 @@ function SettingsBody({ ext, view }: { ext: ExtItem; view: SettingsView }) {
   const err = save.error instanceof ApiError ? save.error.message : save.isError ? "Could not save settings." : "";
 
   return (
-    <div className="rounded-lg border border-line bg-ink-900/40 p-3">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-sm text-fg">Settings</p>
-        {ext.hasBackend && <span className="text-[11px] text-fg-faint">Saving restarts the extension so it picks them up.</span>}
+    <div>
+      <div className="mb-1">
+        <p className="text-[13px] font-semibold text-fg">Settings</p>
+        {ext.hasBackend && <p className="mt-0.5 text-xs text-fg-faint">Saving restarts the extension so it picks them up.</p>}
       </div>
 
-      <div className="space-y-3">
+      <div className="divide-y divide-line">
         {view.schema.map((f) =>
           f.type === "group" ? (
             <GroupField
@@ -124,11 +126,11 @@ function SettingsBody({ ext, view }: { ext: ExtItem; view: SettingsView }) {
         )}
       </div>
 
-      {err && <p className="mt-3 text-sm text-rec">{err}</p>}
-      {save.isSuccess && !dirty && <p className="mt-3 text-xs text-online">Saved.</p>}
+      {err && <p className="mt-3 text-sm text-danger">{err}</p>}
 
-      <div className="mt-3 flex justify-end">
-        <button className="btn-subtle h-8" disabled={!canSave} onClick={submit}>
+      <div className="mt-3 flex items-center justify-end gap-3">
+        {save.isSuccess && !dirty && <p className="text-xs text-online">Saved.</p>}
+        <button className="btn-subtle" disabled={!canSave} onClick={submit}>
           {save.isPending ? "Saving…" : "Save settings"}
         </button>
       </div>
@@ -208,17 +210,20 @@ function ScalarField({
     }
   };
 
+  if (compact) return control();
+
+  // A settings row: label on the left, control (and its help) on the right.
   return (
-    <div>
-      {!compact && (
-        <label className="label flex items-center gap-1.5">
-          {field.type === "secret" && <KeyRound className="h-3 w-3 text-fg-faint" />}
-          {field.label}
-          {field.required && <span className="text-rec"> *</span>}
-        </label>
-      )}
-      {control()}
-      {!compact && field.help && <p className="mt-1 text-[11px] leading-relaxed text-fg-faint">{field.help}</p>}
+    <div className="grid gap-x-6 gap-y-1.5 py-3 md:grid-cols-[minmax(140px,200px)_1fr] md:items-start">
+      <label className="text-sm text-fg-muted md:pt-1.5">
+        {field.type === "secret" && <KeyRound className="mr-1.5 inline-block h-3.5 w-3.5 align-[-2px] text-fg-faint" />}
+        {field.label}
+        {field.required && <span className="text-danger"> *</span>}
+      </label>
+      <div className="min-w-0 max-w-md">
+        {control()}
+        {field.help && <p className="mt-1.5 text-xs leading-relaxed text-fg-faint">{field.help}</p>}
+      </div>
     </div>
   );
 }
@@ -243,38 +248,55 @@ function GroupField({
     onChange(rows.map((r, j) => (j === i ? { ...r, [key]: v } : r)));
 
   return (
-    <div>
-      <label className="label flex items-center gap-1.5">
-        {field.label}
-        {field.required && <span className="text-rec"> *</span>}
-      </label>
-      {field.help && <p className="mb-1.5 text-[11px] leading-relaxed text-fg-faint">{field.help}</p>}
-
-      <div className="space-y-1.5">
-        {rows.length === 0 && <p className="text-[11px] text-fg-faint">None yet.</p>}
-        {rows.map((row, i) => (
-          <div key={i} className="flex items-end gap-2 rounded-lg border border-line bg-ink-850 p-2">
-            {subs.map((sub) => (
-              <div key={sub.key} className="min-w-0 flex-1">
-                <p className="mb-1 text-[10px] uppercase tracking-wide text-fg-faint">{sub.label}</p>
-                <ScalarField field={sub} value={row[sub.key] ?? ""} cameras={cameras} onChange={(v) => setCell(i, sub.key, v)} compact />
-              </div>
-            ))}
-            <button
-              type="button"
-              className="btn-icon mb-0.5 shrink-0 !text-fg-faint hover:!text-rec"
-              aria-label="Remove"
-              onClick={() => removeRow(i)}
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
+    <div className="grid gap-x-6 gap-y-1.5 py-3 md:grid-cols-[minmax(140px,200px)_1fr] md:items-start">
+      <div className="md:pt-1.5">
+        <label className="text-sm text-fg-muted">
+          {field.label}
+          {field.required && <span className="text-danger"> *</span>}
+        </label>
+        {field.help && <p className="mt-1 text-xs leading-relaxed text-fg-faint">{field.help}</p>}
       </div>
 
-      <button type="button" className="btn-ghost mt-1.5 h-8" onClick={addRow}>
-        <Plus className="h-4 w-4" /> Add
-      </button>
+      <div className="min-w-0">
+        {rows.length === 0 ? (
+          <p className="py-1.5 text-xs text-fg-faint">None yet.</p>
+        ) : (
+          <div className="overflow-hidden rounded-md border border-line">
+            {/* Column labels, then one line per row. */}
+            <div className="flex gap-2 border-b border-line bg-white/[0.02] px-2.5 py-1.5">
+              {subs.map((sub) => (
+                <p key={sub.key} className="min-w-0 flex-1 truncate text-[11px] font-medium text-fg-muted">
+                  {sub.label}
+                </p>
+              ))}
+              <span className="w-8 shrink-0" />
+            </div>
+            <div className="divide-y divide-line">
+              {rows.map((row, i) => (
+                <div key={i} className="flex items-center gap-2 px-2.5 py-2">
+                  {subs.map((sub) => (
+                    <div key={sub.key} className="min-w-0 flex-1">
+                      <ScalarField field={sub} value={row[sub.key] ?? ""} cameras={cameras} onChange={(v) => setCell(i, sub.key, v)} compact />
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn-icon shrink-0 text-fg-faint hover:text-danger"
+                    aria-label="Remove"
+                    onClick={() => removeRow(i)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button type="button" className="btn-ghost mt-2" onClick={addRow}>
+          <Plus className="h-4 w-4" /> Add
+        </button>
+      </div>
     </div>
   );
 }

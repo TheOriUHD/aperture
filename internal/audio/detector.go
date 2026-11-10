@@ -56,6 +56,7 @@ type Detector struct {
 	mu      sync.Mutex
 	active  map[string]context.CancelFunc
 	sigs    map[string]string // cameraID -> threshold signature (restart-on-change)
+	cams    sync.WaitGroup    // per-camera detectors; Run waits for them (and their ffmpeg) on shutdown
 
 	evMu    sync.Mutex
 	events  map[string]*activeEvent
@@ -93,6 +94,11 @@ func (d *Detector) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Taking the lock first: a Reconcile in flight has either added its
+			// detector to d.cams already or will see ctx done and start none.
+			d.mu.Lock()
+			d.mu.Unlock()
+			d.cams.Wait() // each detector's ffmpeg is killed and reaped
 			return
 		case <-recon.C:
 			d.Reconcile()
@@ -123,6 +129,9 @@ func (d *Detector) Reconcile() {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.baseCtx.Err() != nil {
+		return // shutting down: Run is waiting on d.cams
+	}
 	for id, cancel := range d.active {
 		if _, ok := want[id]; !ok {
 			cancel()
@@ -143,7 +152,11 @@ func (d *Detector) Reconcile() {
 		d.active[id] = cancel
 		d.sigs[id] = sig
 		c := *cam
-		go d.detectCamera(cctx, c)
+		d.cams.Add(1)
+		go func() {
+			defer d.cams.Done()
+			d.detectCamera(cctx, c)
+		}()
 		d.log.Info("audio detection started", "camera", id, "threshold", cam.AudioThreshold)
 	}
 }

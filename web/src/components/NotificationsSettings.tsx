@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
-import { Bell, BellRing, Plus, Send, Trash2, Pencil, Smartphone } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { BellRing, Plus, Send, Trash2, Pencil, type LucideIcon } from "lucide-react";
 import { Switch } from "./ui/Switch";
+import { SettingsHeading, SettingsRow, StatusDot } from "./ui/Layout";
+import { Skeleton } from "./ui/Skeleton";
 import { ChannelModal } from "./ChannelModal";
 import { RuleModal } from "./RuleModal";
 import {
@@ -23,8 +25,8 @@ import {
 } from "../lib/deviceNotify";
 
 export function NotificationsSettings() {
-  const { data: channels } = useChannels();
-  const { data: rules } = useRules();
+  const { data: channels, isLoading: channelsLoading } = useChannels();
+  const { data: rules, isLoading: rulesLoading } = useRules();
   const updateCh = useUpdateChannel();
   const delCh = useDeleteChannel();
   const testCh = useTestChannel();
@@ -93,137 +95,262 @@ export function NotificationsSettings() {
     }
   }
 
+  const flush = "[&_td:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th:first-child]:pl-0 [&_th:last-child]:pr-0";
+
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="flex items-center gap-2 text-sm font-medium text-fg">
-          <Bell className="h-4 w-4" />
-          Notifications
-        </h2>
-        {flash && (
-          <span className={`text-xs ${flash.ok ? "text-online" : "text-rec"}`}>{flash.text}</span>
-        )}
-      </div>
+    <>
+      {(deviceNotifySupported() || pushSupported()) && (
+        <>
+          <SettingsHeading>This device</SettingsHeading>
+          <div className="divide-y divide-line">
+            {/* notify on this device (SSE + Notification API — no external push service) */}
+            {deviceNotifySupported() && (
+              <SettingsRow
+                label="Notify on this device"
+                hint="Alerts while Aperture is open in a tab or installed — no Google/Apple push service needed."
+              >
+                <Switch checked={notifyOn} onChange={toggleNotify} label="Notify on this device" />
+              </SettingsRow>
+            )}
 
-      {/* notify on this device (SSE + Notification API — no external push service) */}
-      {deviceNotifySupported() && (
-        <div className="flex items-center justify-between rounded-lg bg-ink-850 px-3 py-2.5 mb-2">
-          <div className="flex items-center gap-2.5">
-            <Smartphone className="h-4 w-4 text-brand" />
-            <div>
-              <div className="text-sm text-fg">Notify on this device</div>
-              <div className="text-xs text-fg-faint">
-                Alerts while Aperture is open in a tab or installed — no Google/Apple push service needed.
-              </div>
-            </div>
+            {/* optional Web Push — also alerts when fully closed (needs the browser's push service) */}
+            {pushSupported() && (
+              <SettingsRow
+                label="Also alert when closed (Web Push)"
+                hint={
+                  <>
+                    Lock-screen alerts even when Aperture isn’t open. Needs your browser’s push service (Brave: enable
+                    “Use Google services for push messaging”).
+                  </>
+                }
+              >
+                <Switch checked={pushOn} onChange={togglePush} label="Web Push" />
+              </SettingsRow>
+            )}
           </div>
-          <Switch checked={notifyOn} onChange={toggleNotify} label="Notify on this device" />
-        </div>
-      )}
-
-      {/* optional Web Push — also alerts when fully closed (needs the browser's push service) */}
-      {pushSupported() && (
-        <div className="flex items-center justify-between rounded-lg bg-ink-850 px-3 py-2.5 mb-4">
-          <div className="flex items-center gap-2.5">
-            <BellRing className="h-4 w-4 text-fg-muted" />
-            <div>
-              <div className="text-sm text-fg">Also alert when closed (Web Push)</div>
-              <div className="text-xs text-fg-faint">
-                Lock-screen alerts even when Aperture isn’t open. Needs your browser’s push service (Brave: enable
-                “Use Google services for push messaging”).
-              </div>
-            </div>
-          </div>
-          <Switch checked={pushOn} onChange={togglePush} label="Web Push" />
-        </div>
+        </>
       )}
 
       {/* channels */}
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-medium text-fg-muted">Channels</p>
-          <button className="btn-subtle h-7 text-xs" onClick={() => setChannelOpen(true)}>
-            <Plus className="h-3.5 w-3.5" /> Add channel
+      <ListHeader
+        title="Channels"
+        description="Where alerts are delivered: Web Push, ntfy, Telegram, email…"
+        action={
+          <button className="btn-outline" onClick={() => setChannelOpen(true)}>
+            <Plus className="h-4 w-4" /> Add channel
           </button>
+        }
+      />
+      {channelsLoading ? (
+        <ListSkeleton />
+      ) : !channels || channels.length === 0 ? (
+        <EmptyRow icon={Send} text="No channels yet — add Web Push, ntfy, Telegram, email…" />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className={`tbl table-fixed ${flush}`}>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th className="w-28 sm:w-44">Type</th>
+                <th className="w-[72px]">Enabled</th>
+                <th className="w-[72px]" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {channels.map((ch) => (
+                <tr key={ch.id} className="hover:bg-white/[0.02]">
+                  <td>
+                    <span className={`block truncate ${ch.enabled ? "text-fg" : "text-fg-muted"}`}>{ch.name}</span>
+                  </td>
+                  <td>
+                    <span className="pill-gray">{ch.type}</span>
+                  </td>
+                  <td>
+                    <Switch
+                      checked={ch.enabled}
+                      onChange={(v) => updateCh.mutate({ id: ch.id, name: ch.name, enabled: v, etag: ch.etag })}
+                      label="Enabled"
+                    />
+                  </td>
+                  <td>
+                    <div className="flex justify-end">
+                      <button
+                        className="btn-icon"
+                        onClick={() => test(() => testCh.mutateAsync(ch.id))}
+                        aria-label="Test"
+                        title="Send a test notification"
+                      >
+                        <Send className="h-4 w-4" />
+                      </button>
+                      <button
+                        className="btn-icon hover:text-danger"
+                        onClick={() => delCh.mutate(ch.id)}
+                        aria-label="Delete"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        {!channels || channels.length === 0 ? (
-          <p className="text-xs text-fg-faint">No channels yet — add Web Push, ntfy, Telegram, email…</p>
-        ) : (
-          <div className="space-y-1.5">
-            {channels.map((ch) => (
-              <div key={ch.id} className="flex items-center gap-2 rounded-lg bg-ink-850 px-3 py-2 text-xs">
-                <span className="rounded bg-ink-700 px-1.5 py-0.5 font-mono text-fg-muted">{ch.type}</span>
-                <span className="flex-1 truncate text-fg">{ch.name}</span>
-                <Switch
-                  checked={ch.enabled}
-                  onChange={(v) => updateCh.mutate({ id: ch.id, name: ch.name, enabled: v, etag: ch.etag })}
-                  label="Enabled"
-                />
-                <button className="btn-icon h-7 w-7" onClick={() => test(() => testCh.mutateAsync(ch.id))} aria-label="Test">
-                  <Send className="h-3.5 w-3.5" />
-                </button>
-                <button className="btn-icon h-7 w-7" onClick={() => delCh.mutate(ch.id)} aria-label="Delete">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
 
       {/* rules */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-medium text-fg-muted">Rules</p>
+      <ListHeader
+        title="Rules"
+        description="Which cameras notify which channels, and when."
+        action={
           <button
-            className="btn-subtle h-7 text-xs"
+            className="btn-outline"
             onClick={() => setRuleEdit(null)}
             disabled={!channels || channels.length === 0}
           >
-            <Plus className="h-3.5 w-3.5" /> Add rule
+            <Plus className="h-4 w-4" /> Add rule
           </button>
-        </div>
-        {!rules || rules.length === 0 ? (
-          <p className="text-xs text-fg-faint">
-            No rules — add one to choose which cameras notify which channels.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {rules.map((r) => (
-              <div key={r.id} className="flex items-center gap-2 rounded-lg bg-ink-850 px-3 py-2 text-xs">
-                <BellRing className={`h-3.5 w-3.5 ${r.enabled ? "text-brand" : "text-fg-faint"}`} />
-                <div className="flex-1 min-w-0">
-                  <div className="truncate text-fg">{r.name}</div>
-                  <div className="text-fg-faint">
-                    {r.cameras.length === 0 ? "all cameras" : `${r.cameras.length} cameras`} ·{" "}
+        }
+      />
+      {rulesLoading ? (
+        <ListSkeleton />
+      ) : !rules || rules.length === 0 ? (
+        <EmptyRow icon={BellRing} text="No rules — add one to choose which cameras notify which channels." />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className={`tbl table-fixed ${flush}`}>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th className="hidden w-32 sm:table-cell">Cameras</th>
+                <th className="hidden w-32 sm:table-cell">Channels</th>
+                <th className="hidden w-32 md:table-cell">Quiet hours</th>
+                <th className="w-[72px]">Enabled</th>
+                <th className="w-[104px]" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {rules.map((r) => (
+                <tr key={r.id} className="hover:bg-white/[0.02]">
+                  <td>
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <BellRing className={`h-4 w-4 shrink-0 ${r.enabled ? "text-brand" : "text-fg-faint"}`} />
+                      <div className="min-w-0">
+                        <div className={`truncate ${r.enabled ? "text-fg" : "text-fg-muted"}`}>{r.name}</div>
+                        {/* Compact summary where the detail columns are hidden. */}
+                        <div className="truncate text-xs text-fg-faint sm:hidden">
+                          {r.cameras.length === 0 ? "all cameras" : `${r.cameras.length} camera${r.cameras.length === 1 ? "" : "s"}`} ·{" "}
+                          {r.channels.length} channel{r.channels.length === 1 ? "" : "s"}
+                          {r.quietStart >= 0 ? " · quiet hours" : ""}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="hidden whitespace-nowrap sm:table-cell">
+                    {r.cameras.length === 0 ? "All cameras" : `${r.cameras.length} camera${r.cameras.length === 1 ? "" : "s"}`}
+                  </td>
+                  <td className="hidden whitespace-nowrap sm:table-cell">
                     {r.channels.length} channel{r.channels.length === 1 ? "" : "s"}
-                    {r.quietStart >= 0 ? " · quiet hours" : ""}
-                  </div>
-                </div>
-                <Switch
-                  checked={r.enabled}
-                  onChange={(v) => saveRule.mutate({ ...r, enabled: v })}
-                  label="Enabled"
-                />
-                <button className="btn-icon h-7 w-7" onClick={() => test(() => testRule.mutateAsync(r.id))} aria-label="Test">
-                  <Send className="h-3.5 w-3.5" />
-                </button>
-                <button className="btn-icon h-7 w-7" onClick={() => setRuleEdit(r)} aria-label="Edit">
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-                <button className="btn-icon h-7 w-7" onClick={() => delRule.mutate(r.id)} aria-label="Delete">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                  </td>
+                  <td className="hidden whitespace-nowrap md:table-cell">
+                    {r.quietStart >= 0 ? (
+                      <span className="tabular-nums">
+                        {hhmm(r.quietStart)}–{hhmm(r.quietEnd)}
+                      </span>
+                    ) : (
+                      <span className="text-fg-faint">—</span>
+                    )}
+                  </td>
+                  <td>
+                    <Switch
+                      checked={r.enabled}
+                      onChange={(v) => saveRule.mutate({ ...r, enabled: v })}
+                      label="Enabled"
+                    />
+                  </td>
+                  <td>
+                    <div className="flex justify-end">
+                      <button
+                        className="btn-icon"
+                        onClick={() => test(() => testRule.mutateAsync(r.id))}
+                        aria-label="Test"
+                        title="Send a test notification"
+                      >
+                        <Send className="h-4 w-4" />
+                      </button>
+                      <button className="btn-icon" onClick={() => setRuleEdit(r)} aria-label="Edit" title="Edit">
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        className="btn-icon hover:text-danger"
+                        onClick={() => delRule.mutate(r.id)}
+                        aria-label="Delete"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {channelOpen && <ChannelModal onClose={() => setChannelOpen(false)} />}
       {ruleEdit !== undefined && (
         <RuleModal rule={ruleEdit} channels={channels ?? []} onClose={() => setRuleEdit(undefined)} />
       )}
+
+      {/* Result of the last toggle/test: a small toast, so it is seen wherever the
+          button that triggered it sits on the page. */}
+      {flash && (
+        <div
+          role="status"
+          className="card fixed bottom-24 left-1/2 z-50 flex max-w-[90vw] -translate-x-1/2 animate-fade-in items-center gap-2.5 px-4 py-2.5 text-sm text-fg shadow-pop lg:bottom-6"
+        >
+          <StatusDot tone={flash.ok ? "ok" : "bad"} />
+          {flash.text}
+        </div>
+      )}
+    </>
+  );
+}
+
+// Minutes after midnight → "23:00", for the quiet-hours column.
+function hhmm(m: number): string {
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
+// A list's heading with its create action on the right.
+function ListHeader({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 pt-6 first:pt-0">
+      <div className="min-w-0">
+        <h3 className="text-sm font-semibold text-fg">{title}</h3>
+        {description && <p className="mt-1 text-xs leading-relaxed text-fg-faint">{description}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function ListSkeleton() {
+  return (
+    <div className="space-y-2">
+      <Skeleton className="h-9" />
+      <Skeleton className="h-9" />
+    </div>
+  );
+}
+
+function EmptyRow({ icon: Icon, text }: { icon: LucideIcon; text: string }) {
+  return (
+    <div className="flex items-center gap-3 border-y border-line py-4 text-sm text-fg-faint">
+      <Icon className="h-4 w-4 shrink-0" />
+      {text}
     </div>
   );
 }

@@ -11,7 +11,8 @@ export function recordingDisplay(state: RecordingState): { level: Level; label: 
     case "notScheduled":
       return { level: "idle", label: "idle", title: "Not scheduled to record right now" };
     case "off":
-      return { level: "warn", label: "off", title: "Recording is off for this camera" };
+      // Off by choice, such as a live-view-only camera: nothing to warn about.
+      return { level: "idle", label: "off", title: "Not set to record: live view only" };
     case "failed":
       return { level: "down", label: "rec", title: "Should be recording, but no footage is arriving" };
   }

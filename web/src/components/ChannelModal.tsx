@@ -63,7 +63,7 @@ export function ChannelModal({ onClose }: { onClose: () => void }) {
       title="Add notification channel"
       footer={
         <>
-          <button className="btn-subtle" onClick={onClose}>
+          <button className="btn-ghost" onClick={onClose}>
             Cancel
           </button>
           <button
@@ -106,7 +106,7 @@ export function ChannelModal({ onClose }: { onClose: () => void }) {
               </option>
             ))}
           </select>
-          <p className="text-xs text-fg-faint mt-1.5">{def.blurb}</p>
+          <p className="hint mt-1.5">{def.blurb}</p>
         </div>
 
         <div>
@@ -123,7 +123,7 @@ export function ChannelModal({ onClose }: { onClose: () => void }) {
           <div key={f.key}>
             <label className="label">
               {f.label}
-              {f.optional && <span className="text-fg-faint"> (optional)</span>}
+              {f.optional && <span className="font-normal text-fg-faint"> (optional)</span>}
             </label>
             <input
               className="input font-mono text-xs"
@@ -135,12 +135,12 @@ export function ChannelModal({ onClose }: { onClose: () => void }) {
         ))}
 
         {type === "webpush" && (
-          <p className="text-xs text-fg-faint leading-relaxed">
+          <p className="rounded-md border border-line px-3 py-2.5 text-xs leading-relaxed text-fg-faint">
             After adding this, turn on <span className="text-fg-muted">“Push on this device”</span> at
             the top of Notifications on each device you want alerts on.
           </p>
         )}
-        {err && <p className="text-xs text-rec">{err}</p>}
+        {err && <p className="text-xs text-danger">{err}</p>}
       </div>
     </Modal>
   );

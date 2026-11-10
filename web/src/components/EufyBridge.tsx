@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Loader2, Video } from "lucide-react";
+import { AlertTriangle, Check, Copy, KeyRound, Loader2, Video } from "lucide-react";
 import { api } from "../lib/api";
+import { SettingsHeading, SettingsRow } from "./ui/Layout";
+import { Callout, IntegrationHeader, SectionTitle, StatusPill as Pill } from "./IntegrationParts";
 
 // The Eufy bridge's setup surface.
 //
@@ -102,203 +104,236 @@ export function EufyBridge() {
             : "signin";
 
   return (
-    <div className="panel">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-fg mb-1">
-        <Video className="h-4 w-4" />
-        Eufy
-        <StatusPill st={st} />
-      </h2>
-      <p className="text-xs text-fg-faint mb-4 leading-relaxed">
+    <div>
+      <IntegrationHeader icon={Video} title="Eufy" status={<StatusPill st={st} />}>
         Eufy has no local API, so pan/tilt and device control go through a bridge that signs in to
         your Eufy account. Your password is stored encrypted here and passed only to that bridge.
-      </p>
+      </IntegrationHeader>
 
       {state === "captcha" && (
-        <div className="space-y-3">
-          <p className="text-xs text-fg-muted">Eufy is asking for a captcha to finish signing in.</p>
-          {st?.captchaImage && (
-            <img
-              src={st.captchaImage}
-              alt="Captcha challenge"
-              className="rounded-md border border-line bg-white p-1"
-            />
-          )}
-          <div className="flex gap-2">
-            <input
-              className="input flex-1"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="What the image says"
-              autoFocus
-            />
-            <button
-              className="btn-primary"
-              disabled={!code.trim() || busy !== ""}
-              onClick={() =>
-                run("captcha", () =>
-                  api.post(`${ENDPOINT}/captcha`, { captchaId: st?.captchaId ?? "", code: code.trim() }),
-                )
-              }
-            >
-              {busy === "captcha" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit"}
-            </button>
+        <>
+          <SettingsHeading description="Eufy is asking for a captcha to finish signing in.">Captcha</SettingsHeading>
+          <div className="divide-y divide-line">
+            {st?.captchaImage && (
+              <SettingsRow label="Challenge">
+                <img
+                  src={st.captchaImage}
+                  alt="Captcha challenge"
+                  className="rounded-md border border-line bg-white p-1"
+                />
+              </SettingsRow>
+            )}
+            <SettingsRow label="Answer">
+              <div className="flex max-w-md gap-2">
+                <input
+                  className="input flex-1"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="What the image says"
+                  autoFocus
+                />
+                <button
+                  className="btn-primary"
+                  disabled={!code.trim() || busy !== ""}
+                  onClick={() =>
+                    run("captcha", () =>
+                      api.post(`${ENDPOINT}/captcha`, { captchaId: st?.captchaId ?? "", code: code.trim() }),
+                    )
+                  }
+                >
+                  {busy === "captcha" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit"}
+                </button>
+              </div>
+            </SettingsRow>
           </div>
-        </div>
+        </>
       )}
 
       {state === "verify" && (
-        <div className="space-y-3">
-          <p className="text-xs text-fg-muted">
-            Eufy emailed a verification code to <span className="text-fg">{st?.username}</span>.
-          </p>
-          <div className="flex gap-2">
-            <input
-              className="input flex-1 font-mono tracking-widest"
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
-              placeholder="123456"
-              inputMode="numeric"
-              autoFocus
-            />
-            <button
-              className="btn-primary"
-              disabled={!code.trim() || busy !== ""}
-              onClick={() => run("verify", () => api.post(`${ENDPOINT}/verify-code`, { code: code.trim() }))}
-            >
-              {busy === "verify" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
-            </button>
+        <>
+          <SettingsHeading
+            description={
+              <>
+                Eufy emailed a verification code to <span className="text-fg">{st?.username}</span>.
+              </>
+            }
+          >
+            Verification code
+          </SettingsHeading>
+          <div className="divide-y divide-line">
+            <SettingsRow label="Code">
+              <div className="flex max-w-md gap-2">
+                <input
+                  className="input flex-1 font-mono tracking-widest"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                  placeholder="123456"
+                  inputMode="numeric"
+                  autoFocus
+                />
+                <button
+                  className="btn-primary"
+                  disabled={!code.trim() || busy !== ""}
+                  onClick={() => run("verify", () => api.post(`${ENDPOINT}/verify-code`, { code: code.trim() }))}
+                >
+                  {busy === "verify" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                </button>
+              </div>
+            </SettingsRow>
           </div>
-        </div>
+        </>
       )}
 
       {state === "down" && (
-        <div className="rounded-md border border-rec/30 bg-rec/10 px-3 py-2 text-xs text-fg-muted">
+        <Callout tone="danger" icon={AlertTriangle} className="mb-2 mt-2">
           The bridge is not responding. It may still be starting, or it may have rejected the
           account.
           {st?.lastError && <span className="mt-1 block font-mono text-fg-faint">{st.lastError}</span>}
-        </div>
+        </Callout>
       )}
 
       {(state === "signin" || state === "down") && (
-        <div className="space-y-3">
-          <div>
-            <label className="label">Eufy account email</label>
-            <input
-              className="input"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="off"
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2">
-              <label className="label">Password</label>
+        <>
+          <SettingsHeading>Account</SettingsHeading>
+          <div className="divide-y divide-line">
+            <SettingsRow label="Eufy account email">
               <input
-                className="input"
+                className="input max-w-md"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="you@example.com"
+                autoComplete="off"
+              />
+            </SettingsRow>
+            <SettingsRow label="Password">
+              <input
+                className="input max-w-md"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={st?.configured ? "unchanged" : ""}
                 autoComplete="new-password"
               />
-            </div>
-            <div>
-              <label className="label">Country</label>
+            </SettingsRow>
+            <SettingsRow label="Country">
               <input
-                className="input uppercase"
+                className="input w-20 uppercase"
                 value={country}
                 onChange={(e) => setCountry(e.target.value.toUpperCase().slice(0, 2))}
                 maxLength={2}
               />
-            </div>
+            </SettingsRow>
+            <SettingsRow label="">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <button
+                  className="btn-primary"
+                  disabled={!username.trim() || (!password && !st?.configured) || busy !== ""}
+                  onClick={() =>
+                    run("save", () =>
+                      api.put(ENDPOINT, { username: username.trim(), password, country: country.trim() }),
+                    )
+                  }
+                >
+                  {busy === "save" ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Restarting bridge…
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound className="h-4 w-4" /> {st?.configured ? "Update account" : "Sign in"}
+                    </>
+                  )}
+                </button>
+                <p className="max-w-sm text-xs leading-relaxed text-fg-faint">
+                  Saving restarts the bridge — it only reads the account at startup. Expect a
+                  verification code by email straight after.
+                </p>
+              </div>
+            </SettingsRow>
           </div>
-          <p className="text-xs text-fg-faint">
-            Saving restarts the bridge — it only reads the account at startup. Expect a
-            verification code by email straight after.
-          </p>
-          <div className="flex justify-end">
-            <button
-              className="btn-primary"
-              disabled={!username.trim() || (!password && !st?.configured) || busy !== ""}
-              onClick={() =>
-                run("save", () =>
-                  api.put(ENDPOINT, { username: username.trim(), password, country: country.trim() }),
-                )
-              }
-            >
-              {busy === "save" ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Restarting bridge…
-                </>
-              ) : (
-                <>
-                  <KeyRound className="h-4 w-4" /> {st?.configured ? "Update account" : "Sign in"}
-                </>
-              )}
-            </button>
-          </div>
-        </div>
+        </>
       )}
 
       {state === "connected" && (
-        <div className="space-y-3">
+        <>
+          <SectionTitle
+            description={
+              st!.devices.length === 0
+                ? undefined
+                : "Use a serial number in the Eufy Control extension to attach its controls to a camera."
+            }
+            action={<span className="text-xs text-fg-faint">Signed in as {st?.username}</span>}
+          >
+            Devices
+          </SectionTitle>
           {st!.devices.length === 0 ? (
-            <p className="text-xs text-fg-faint">
+            <p className="border-y border-line py-3 text-sm text-fg-faint">
               Signed in, but this account reports no devices yet. Eufy can take a minute after a
               fresh sign-in.
             </p>
           ) : (
-            <>
-              <p className="text-xs text-fg-faint">
-                Use a serial number in the Eufy Control extension to attach its controls to a camera.
-              </p>
-              <div className="divide-y divide-line rounded-md border border-line">
-                {st!.devices.map((d) => (
-                  <div key={d.serialNumber} className="flex items-center gap-3 px-3 py-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm text-fg">{d.name || d.serialNumber}</div>
-                      <div className="text-[11px] text-fg-faint">
-                        {d.model ? `${d.model} · ` : ""}
-                        {d.panTilt ? "pan & tilt" : "no pan/tilt"}
-                      </div>
-                    </div>
-                    <button
-                      className="btn-ghost h-8 gap-1.5 text-[11px]"
-                      onClick={() => copy(d.serialNumber)}
-                      title="Copy serial number"
-                    >
-                      {copied === d.serialNumber ? (
-                        <Check className="h-3.5 w-3.5 text-online" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                      <span className="font-mono">{d.serialNumber}</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </>
+            <div className="overflow-x-auto">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th className="hidden sm:table-cell">Model</th>
+                    <th className="hidden sm:table-cell">Pan &amp; tilt</th>
+                    <th>Serial number</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {st!.devices.map((d) => (
+                    <tr key={d.serialNumber}>
+                      <td>
+                        <span className="block text-fg">{d.name || d.serialNumber}</span>
+                        <span className="block text-[11px] text-fg-faint sm:hidden">
+                          {d.model ? `${d.model} · ` : ""}
+                          {d.panTilt ? "pan & tilt" : "no pan/tilt"}
+                        </span>
+                      </td>
+                      <td className="hidden sm:table-cell">{d.model || "–"}</td>
+                      <td className="hidden sm:table-cell">{d.panTilt ? "Yes" : "No"}</td>
+                      <td className="w-px whitespace-nowrap">
+                        <button
+                          className="btn-ghost h-7 gap-1.5 px-2.5 text-xs"
+                          onClick={() => copy(d.serialNumber)}
+                          title="Copy serial number"
+                        >
+                          {copied === d.serialNumber ? (
+                            <Check className="h-3.5 w-3.5 text-online" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                          <span className="font-mono">{d.serialNumber}</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-          <p className="text-right text-[11px] text-fg-faint">Signed in as {st?.username}</p>
-        </div>
+        </>
       )}
 
-      {err && <p className="mt-3 text-xs text-rec">{err}</p>}
+      {err && <p className="mt-3 text-sm text-danger">{err}</p>}
     </div>
   );
 }
 
 function StatusPill({ st }: { st?: EufyStatus }) {
   if (!st) return null;
-  const [text, tone] = !st.configured
-    ? ["not set up", "text-fg-faint"]
-    : st.connected
-      ? ["connected", "text-online"]
-      : st.needsCaptcha || st.needsVerifyCode
-        ? ["needs you", "text-[#e6b45a]"]
-        : st.bridgeRunning
-          ? ["signing in…", "text-fg-muted"]
-          : ["offline", "text-rec"];
-  return <span className={`ml-auto text-[11px] font-normal ${tone}`}>{text}</span>;
+  const [text, tone] = (
+    !st.configured
+      ? ["Not set up", "off"]
+      : st.connected
+        ? ["Connected", "ok"]
+        : st.needsCaptcha || st.needsVerifyCode
+          ? ["Needs you", "warn"]
+          : st.bridgeRunning
+            ? ["Signing in…", "off"]
+            : ["Offline", "bad"]
+  ) as [string, "off" | "ok" | "warn" | "bad"];
+  return <Pill tone={tone}>{text}</Pill>;
 }

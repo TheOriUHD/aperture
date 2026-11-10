@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Scissors, Download, Trash2, Share2, Loader2, AlertCircle, Link2, Lock } from "lucide-react";
+import { Scissors, Download, Trash2, Share2, Loader2, AlertCircle, Link2, Lock, Check } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Switch } from "./ui/Switch";
 import { ShareModal } from "./ShareModal";
@@ -95,25 +95,30 @@ export function ExportCenter({
   return (
     <>
       <Modal open={open} onClose={onClose} title="Export & download clips">
-        <div className="space-y-4">
+        <div className="space-y-5">
           {/* create form */}
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div>
               <label className="label">Cameras</label>
               <div className="flex flex-wrap gap-1.5">
-                {cameras.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => toggleCam(c.id)}
-                    className={`rounded-full px-2.5 py-1 text-xs border transition-colors ${
-                      selectedCams.includes(c.id)
-                        ? "border-brand bg-brand/15 text-fg"
-                        : "border-line text-fg-muted hover:text-fg"
-                    }`}
-                  >
-                    {c.name}
-                  </button>
-                ))}
+                {cameras.map((c) => {
+                  const on = selectedCams.includes(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => toggleCam(c.id)}
+                      aria-pressed={on}
+                      className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors ${
+                        on
+                          ? "border-brand/60 bg-brand/10 font-medium text-brand"
+                          : "border-line-strong text-fg-muted hover:border-fg-faint hover:text-fg"
+                      }`}
+                    >
+                      {on && <Check className="h-3 w-3" strokeWidth={3} />}
+                      {c.name}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -141,27 +146,25 @@ export function ExportCenter({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-fg-faint mr-0.5">Last:</span>
-              {PRESETS.map((p) => (
-                <button
-                  key={p.ms}
-                  onClick={() => setFrom(to - p.ms)}
-                  className={`btn h-7 px-2.5 text-xs ${
-                    durMs === p.ms
-                      ? "bg-brand/15 text-brand border border-brand/40"
-                      : "bg-ink-800 text-fg-muted border border-line-strong hover:bg-ink-700"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
+              <span className="text-xs text-fg-muted">Last</span>
+              <div className="seg h-7 text-xs">
+                {PRESETS.map((p) => (
+                  <button
+                    key={p.ms}
+                    onClick={() => setFrom(to - p.ms)}
+                    className={`seg-item px-2.5 ${durMs === p.ms ? "seg-item-active font-medium" : ""}`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {multi && (
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div>
                   <span className="text-sm text-fg">Combine into one multi-view</span>
-                  <p className="text-xs text-fg-faint">
+                  <p className="hint">
                     {composite
                       ? "Grid montage — transcoded, no audio, up to 4 cameras"
                       : "Off = a .zip with one clip per camera"}
@@ -173,34 +176,30 @@ export function ExportCenter({
 
             {!composite && (
               <>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-4">
                   <div>
                     <span className="text-sm text-fg">Burn in timestamp</span>
-                    <p className="text-xs text-fg-faint">Overlays camera name + time onto each clip.</p>
+                    <p className="hint">Overlays camera name + time onto each clip.</p>
                   </div>
                   <Switch checked={burnIn} onChange={setBurnIn} label="Burn in timestamp" />
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-4">
                   <span className="text-sm text-fg">Include audio</span>
                   <Switch checked={audio} onChange={setAudio} label="Include audio" disabled={speed > 1} />
                 </div>
                 <div>
-                  <div className="mb-1.5 flex items-baseline justify-between">
+                  <div className="mb-2 flex items-baseline justify-between">
                     <span className="text-sm text-fg">Timelapse</span>
-                    <span className="text-xs text-fg-faint">
+                    <span className="text-xs tabular-nums text-fg-faint">
                       {speed > 1 ? `${fmtDuration(durMs)} → ~${fmtDuration(Math.round(durMs / speed))}` : "off"}
                     </span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="seg flex h-7 w-full text-xs">
                     {SPEEDS.map((s) => (
                       <button
                         key={s.v}
                         onClick={() => setSpeed(s.v)}
-                        className={`btn h-7 px-2.5 text-xs ${
-                          speed === s.v
-                            ? "bg-brand/15 text-brand border border-brand/40"
-                            : "bg-ink-800 text-fg-muted border border-line-strong hover:bg-ink-700"
-                        }`}
+                        className={`seg-item flex-1 px-2 ${speed === s.v ? "seg-item-active font-medium" : ""}`}
                       >
                         {s.label}
                       </button>
@@ -220,27 +219,27 @@ export function ExportCenter({
                 ? `Export ${fmtDuration(durMs)} ${multi && !composite ? "clips" : "clip"}`
                 : "Export"}
               {!invalid && mode === "single" && !burnIn && speed === 1 && (
-                <span className="text-[11px] text-ink-900/70"> · instant copy</span>
+                <span className="text-[11px] font-normal text-white/70"> · instant copy</span>
               )}
               {!invalid && speed > 1 && (
-                <span className="text-[11px] text-ink-900/70"> · {speed}× timelapse</span>
+                <span className="text-[11px] font-normal text-white/70"> · {speed}× timelapse</span>
               )}
               {!invalid && mode === "zip" && (
-                <span className="text-[11px] text-ink-900/70"> · {selectedCams.length} clips · .zip</span>
+                <span className="text-[11px] font-normal text-white/70"> · {selectedCams.length} clips · .zip</span>
               )}
               {!invalid && mode === "composite" && (
-                <span className="text-[11px] text-ink-900/70"> · multi-view</span>
+                <span className="text-[11px] font-normal text-white/70"> · multi-view</span>
               )}
             </button>
             {durMs > 4 * 3600_000 && (
-              <p className="text-xs text-rec">Range too long — 4 hours max per export.</p>
+              <p className="text-xs text-danger">Range too long — 4 hours max per export.</p>
             )}
             {composite && selectedCams.length > 4 && (
-              <p className="text-xs text-rec">Multi-view supports up to 4 cameras.</p>
+              <p className="text-xs text-danger">Multi-view supports up to 4 cameras.</p>
             )}
             {create.isPending && <p className="text-xs text-fg-faint">Starting export…</p>}
             {create.isError && (
-              <p className="text-xs text-rec">Couldn’t start the export — please try again.</p>
+              <p className="text-xs text-danger">Couldn’t start the export — please try again.</p>
             )}
             {create.isSuccess && !create.isPending && (
               <p className="text-xs text-online">Export started — see “Recent clips” below.</p>
@@ -248,16 +247,16 @@ export function ExportCenter({
           </div>
 
           {/* jobs list — always shown so there's a stable place clips appear */}
-          <div className="border-t border-line pt-3">
-            <p className="text-xs font-medium text-fg-muted mb-2">Recent clips</p>
+          <div className="border-t border-line pt-4">
+            <p className="mb-2 text-[13px] font-semibold text-fg">Recent clips</p>
             {!jobs || jobs.length === 0 ? (
-              <p className="text-xs text-fg-faint">Your exported clips will appear here.</p>
+              <p className="hint">Your exported clips will appear here.</p>
             ) : (
-              <div className="space-y-1.5 max-h-64 overflow-auto">
+              <div className="max-h-64 divide-y divide-line overflow-auto rounded-md border border-line">
                 {jobs.map((j) => (
                   <div
                     key={j.id}
-                    className="flex items-center gap-2 rounded-lg bg-ink-850 px-2.5 py-2 text-xs"
+                    className="flex items-center gap-2 px-3 py-2 text-xs"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="truncate text-fg">
@@ -309,17 +308,17 @@ export function ExportCenter({
 
           {/* shared links */}
           {shares && shares.filter((sh) => !sh.revoked).length > 0 && (
-            <div className="border-t border-line pt-3">
-              <p className="text-xs font-medium text-fg-muted mb-2 flex items-center gap-1.5">
-                <Link2 className="h-3.5 w-3.5" /> Shared links
+            <div className="border-t border-line pt-4">
+              <p className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-fg">
+                <Link2 className="h-3.5 w-3.5 text-fg-muted" /> Shared links
               </p>
-              <div className="space-y-1.5 max-h-40 overflow-auto">
+              <div className="max-h-40 divide-y divide-line overflow-auto rounded-md border border-line">
                 {shares
                   .filter((sh) => !sh.revoked)
                   .map((sh) => (
                     <div
                       key={sh.id}
-                      className="flex items-center gap-2 rounded-lg bg-ink-850 px-2.5 py-2 text-xs"
+                      className="flex items-center gap-2 px-3 py-2 text-xs"
                     >
                       <div className="flex-1 min-w-0">
                         <div className="truncate text-fg flex items-center gap-1.5">
@@ -358,7 +357,7 @@ function JobStatus({ job }: { job: ExportJob }) {
   }
   if (job.status === "error") {
     return (
-      <span className="flex items-center gap-1 text-rec">
+      <span className="flex items-center gap-1 text-danger">
         <AlertCircle className="h-3 w-3" /> {job.error || "Failed"}
       </span>
     );

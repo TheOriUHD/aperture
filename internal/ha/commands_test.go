@@ -295,3 +295,35 @@ func TestForgottenCameraLeavesNothingRetained(t *testing.T) {
 		t.Error("kept publish state for a camera that no longer exists")
 	}
 }
+
+// A camera switched out of Home Assistant gets no entities at all, while the
+// others carry on as before. UniFi cameras start that way, since Home Assistant
+// usually has them through its own Protect integration.
+func TestHiddenCameraStaysOutOfHomeAssistant(t *testing.T) {
+	p, st, fc, _ := newTestPublisher(t)
+	for _, c := range []*store.Camera{
+		{ID: "shown", Name: "shown", Enabled: true, RecordMode: store.ModeContinuous, RetentionDays: 7},
+		{ID: "hidden", Name: "hidden", Enabled: true, RecordMode: store.ModeNever, RetentionDays: 7, HAHidden: true},
+	} {
+		if err := st.CreateCamera(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p.publishDiscovery()
+	p.publishMotionRecording()
+	p.publishControlState()
+
+	shown := 0
+	for topic := range fc.published {
+		if strings.Contains(topic, "hidden") {
+			t.Errorf("published %s for a camera kept out of Home Assistant", topic)
+		}
+		if strings.Contains(topic, "shown") {
+			shown++
+		}
+	}
+	if shown < 4 {
+		t.Errorf("the published camera got %d topics; hiding one must not hide the rest", shown)
+	}
+}

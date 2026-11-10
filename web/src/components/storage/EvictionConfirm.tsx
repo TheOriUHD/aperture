@@ -22,10 +22,24 @@ export function EvictionConfirm({
   if (!preview) return null;
   const day = (ts: number) => (ts > 0 ? new Date(ts).toLocaleString() : "—");
   return (
-    <Modal open onClose={onCancel} title="Delete footage to shrink this destination?">
+    <Modal
+      open
+      onClose={onCancel}
+      title="Delete footage to shrink this destination?"
+      footer={
+        <>
+          <button className="btn-ghost" onClick={onCancel} disabled={busy}>
+            Keep my footage
+          </button>
+          <button className="btn-danger" onClick={onConfirm} disabled={busy}>
+            {busy ? "Deleting…" : `Delete ${formatBytes(preview.evictBytes)}`}
+          </button>
+        </>
+      }
+    >
       <div className="space-y-4">
-        <div className="flex items-start gap-2.5 rounded-lg border border-rec/40 bg-rec/10 p-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rec" />
+        <div className="flex items-start gap-2.5 rounded-lg border border-danger/40 bg-danger/10 p-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
           <div className="text-xs leading-relaxed text-fg">
             Lowering this limit deletes the oldest recordings straight away to fit.
             <strong className="text-fg"> This cannot be undone.</strong>
@@ -33,13 +47,13 @@ export function EvictionConfirm({
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-lg border border-line bg-ink-850 p-3">
-            <p className="text-[11px] uppercase tracking-wide text-fg-faint">Will be deleted</p>
-            <p className="mt-0.5 text-lg font-semibold tabular-nums text-rec">{formatBytes(preview.evictBytes)}</p>
+          <div className="rounded-lg border border-line-strong p-3">
+            <p className="text-xs text-fg-muted">Will be deleted</p>
+            <p className="mt-0.5 text-lg font-semibold tabular-nums text-danger">{formatBytes(preview.evictBytes)}</p>
             <p className="text-[11px] text-fg-faint">{preview.evictSegments.toLocaleString()} recordings</p>
           </div>
-          <div className="rounded-lg border border-line bg-ink-850 p-3">
-            <p className="text-[11px] uppercase tracking-wide text-fg-faint">New limit</p>
+          <div className="rounded-lg border border-line-strong p-3">
+            <p className="text-xs text-fg-muted">New limit</p>
             <p className="mt-0.5 text-lg font-semibold tabular-nums text-fg">
               {formatBytes(preview.proposedAllocationBytes)}
             </p>
@@ -49,24 +63,15 @@ export function EvictionConfirm({
 
         <div>
           <p className="label mb-1.5">Footage from {day(preview.oldestTs)} up to {day(preview.newestTs)} goes</p>
-          <div className="space-y-1">
+          <div className="divide-y divide-line-strong border-y border-line-strong">
             {preview.cameras.map((c) => (
-              <div key={c.cameraId} className="flex items-center gap-2 text-xs">
-                <span className="w-32 truncate text-fg">{c.name}</span>
+              <div key={c.cameraId} className="flex h-9 items-center gap-3 text-sm">
+                <span className="w-36 truncate text-fg">{c.name}</span>
                 <span className="flex-1 text-fg-faint">{c.segments.toLocaleString()} recordings</span>
                 <span className="tabular-nums text-fg-muted">{formatBytes(c.bytes)}</span>
               </div>
             ))}
           </div>
-        </div>
-
-        <div className="flex justify-end gap-2 pt-1">
-          <button className="btn-ghost" onClick={onCancel} disabled={busy}>
-            Keep my footage
-          </button>
-          <button className="btn-danger" onClick={onConfirm} disabled={busy}>
-            {busy ? "Deleting…" : `Delete ${formatBytes(preview.evictBytes)}`}
-          </button>
         </div>
       </div>
     </Modal>

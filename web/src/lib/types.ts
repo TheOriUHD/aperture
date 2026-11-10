@@ -67,6 +67,7 @@ export interface Camera {
   recordFps: number;
   recordKbps: number;
   recordingNow?: boolean; // meant to be recording right now; a schedule makes this flip
+  haPublish?: boolean; // shown in Home Assistant and HomeKit
 }
 
 export interface StreamToken {

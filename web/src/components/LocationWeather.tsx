@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { MapPin, Search, Sunrise, Sunset, Sparkles, Loader2 } from "lucide-react";
+import { Search, Sunrise, Sunset, Sparkles, Loader2 } from "lucide-react";
+import { SettingsHeading, SettingsRow } from "./ui/Layout";
 import { Switch } from "./ui/Switch";
 import { MapPicker } from "./MapPicker";
 import {
@@ -143,15 +144,22 @@ export function LocationWeather() {
   const CurIcon = wmoIcon(cur?.conditionCode, true);
 
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="flex items-center gap-2 text-sm font-medium text-fg">
-          <MapPin className="h-4 w-4" />
-          Location &amp; weather
-        </h2>
+    <>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0 max-w-2xl">
+          <h3 className="text-sm font-semibold text-fg">Location &amp; weather</h3>
+          <p className="mt-1 text-xs leading-relaxed text-fg-faint">
+            Sets where this NVR lives, so playback can reconstruct the weather, sun, and moon at any past
+            moment. Weather comes from Open-Meteo — free, no API key.
+          </p>
+        </div>
         {site?.configured && wxEnabled && status && (
-          <span className={`pill ${status.connected ? "pill-online" : "bg-ink-700 text-fg-faint"}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${status.connected ? "bg-online" : "bg-fg-faint"}`} />
+          <span className={status.connected ? "pill-green" : status.lastError ? "pill-red" : "pill-gray"}>
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                status.connected ? "bg-online" : status.lastError ? "bg-danger" : "bg-fg-faint"
+              }`}
+            />
             {status.connected
               ? `Updated ${fmtTime(status.lastUpdated * 1000)}`
               : status.lastError
@@ -161,156 +169,164 @@ export function LocationWeather() {
         )}
       </div>
 
-      <p className="text-xs text-fg-faint mb-4 leading-relaxed">
-        Sets where this NVR lives, so playback can reconstruct the weather, sun, and moon at any past
-        moment. Weather comes from Open-Meteo — free, no API key.
-      </p>
-
-      {/* Type-ahead search with suggestions */}
-      <label className="label">Search address or place</label>
-      <div className="relative">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-faint">
-          {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-        </span>
-        <input
-          className="input pl-9"
-          placeholder="Start typing a town or address…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        {results.length > 0 && (
-          <div className="absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-md border border-line bg-ink-850 p-1 shadow-pop">
-            {results.map((r, i) => (
-              <button
-                key={i}
-                className="w-full text-left rounded px-2.5 py-1.5 hover:bg-ink-700"
-                onClick={() => pick(r)}
-              >
-                <span className="text-sm text-fg">{r.label}</span>
-                <span className="block text-[11px] text-fg-faint">
-                  {r.lat.toFixed(3)}, {r.lon.toFixed(3)} · {r.timezone}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Map with draggable pin */}
-      <div className="mt-3">
-        <MapPicker lat={Number(lat) || 0} lon={Number(lon) || 0} onChange={onMapChange} />
-        <p className="text-[11px] text-fg-faint mt-1.5">
-          Drag the pin or click the map to fine-tune. {addressLabel && <span className="text-fg-muted">{addressLabel}</span>}
-        </p>
-      </div>
-
-      {/* Resolved coordinates (editable for the offline path) */}
-      <div className="grid grid-cols-3 gap-3 mt-3">
-        <Field label="Latitude">
-          <input className="input" value={lat} onChange={(e) => setLat(e.target.value)} />
-        </Field>
-        <Field label="Longitude">
-          <input className="input" value={lon} onChange={(e) => setLon(e.target.value)} />
-        </Field>
-        <Field label="Elevation (m)">
-          <input className="input" value={elevationM} onChange={(e) => setElevationM(e.target.value)} />
-        </Field>
-      </div>
-      <div className="mt-3">
-        <Field label="Timezone">
-          <input
-            className="input"
-            value={timezone}
-            onChange={(e) => setTimezone(e.target.value)}
-            placeholder="Europe/Berlin"
-          />
-        </Field>
-      </div>
-
-      {/* Units (the 12/24-hour clock is the app-wide preference, set in Preferences) */}
-      <div className="grid grid-cols-3 gap-3 mt-3">
-        <Field label="Temperature">
-          <UnitSelect value={units.temp} opts={TEMP_UNITS} onChange={(v) => setUnits({ ...units, temp: v })} />
-        </Field>
-        <Field label="Wind">
-          <UnitSelect value={units.wind} opts={WIND_UNITS} onChange={(v) => setUnits({ ...units, wind: v })} />
-        </Field>
-        <Field label="Pressure">
-          <UnitSelect value={units.pressure} opts={PRESSURE_UNITS} onChange={(v) => setUnits({ ...units, pressure: v })} />
-        </Field>
-      </div>
-
-      {/* Weather polling */}
-      <div className="flex items-center justify-between mt-4">
-        <div>
-          <span className="text-sm text-fg">Record weather history</span>
-          <p className="text-xs text-fg-faint">Polls conditions into a time-series for playback</p>
-        </div>
-        <Switch checked={wxEnabled} onChange={setWxEnabled} label="Record weather" />
-      </div>
-      {wxEnabled && (
-        <Field label="Poll interval" className="mt-3 max-w-[12rem]">
-          <UnitSelect
-            value={String(intervalMin)}
-            opts={[
-              ["5", "Every 5 min"],
-              ["10", "Every 10 min"],
-              ["15", "Every 15 min"],
-              ["30", "Every 30 min"],
-              ["60", "Hourly"],
-            ]}
-            onChange={(v) => setIntervalMin(Number(v))}
-          />
-        </Field>
-      )}
-
-      <div className="flex items-center gap-3 mt-4">
-        <button className="btn-primary" disabled={!canSave || setSite.isPending} onClick={save}>
-          {setSite.isPending ? "Saving…" : "Save"}
-        </button>
-        {saved && <span className="text-xs text-online">Saved.</span>}
-        {setSite.isError && <span className="text-xs text-rec">Couldn’t save — check coordinates.</span>}
-      </div>
-
       {/* Live preview: current conditions + today's sun/moon */}
       {site?.configured && (cur || astro?.configured) && (
-        <div className="border-t border-line mt-5 pt-4 grid grid-cols-2 gap-4">
+        <div className="panel flex flex-col gap-5 sm:flex-row sm:items-center sm:gap-10">
           {cur && (
-            <div className="flex items-center gap-3">
-              <CurIcon className="h-8 w-8 text-fg-muted shrink-0" />
+            <div className="flex min-w-0 items-center gap-3.5">
+              <CurIcon className="h-9 w-9 shrink-0 text-fg-muted" strokeWidth={1.5} />
               <div className="min-w-0">
-                <p className="text-lg font-medium text-fg leading-tight">{formatTemp(cur.tempC, units)}</p>
-                <p className="text-xs text-fg-muted truncate">{wmoText(cur.conditionCode)}</p>
-                <p className="text-xs text-fg-faint truncate">
-                  {cur.humidityPct != null && <>{Math.round(cur.humidityPct)}% RH · </>}
-                  {formatWind(cur.windSpeedMs, units)} {compass(cur.windDirDeg)}
-                </p>
+                <p className="text-xl font-semibold leading-tight text-fg tabular-nums">{formatTemp(cur.tempC, units)}</p>
+                <p className="truncate text-xs text-fg-muted">{wmoText(cur.conditionCode)}</p>
               </div>
+              <p className="ml-2 truncate border-l border-line pl-4 text-xs text-fg-faint">
+                {cur.humidityPct != null && <>{Math.round(cur.humidityPct)}% RH · </>}
+                {formatWind(cur.windSpeedMs, units)} {compass(cur.windDirDeg)}
+              </p>
             </div>
           )}
           {astro?.configured && astro.sun && (
-            <div className="text-xs text-fg-muted space-y-1">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-fg-muted sm:ml-auto">
+              <span className="flex items-center gap-1.5">
                 <Sunrise className="h-3.5 w-3.5 text-fg-faint" />
-                <span>Sunrise {fmtTime(astro.sun.sunrise * 1000, timezone)}</span>
-              </div>
-              <div className="flex items-center gap-2">
+                Sunrise {fmtTime(astro.sun.sunrise * 1000, timezone)}
+              </span>
+              <span className="flex items-center gap-1.5">
                 <Sunset className="h-3.5 w-3.5 text-fg-faint" />
-                <span>Sunset {fmtTime(astro.sun.sunset * 1000, timezone)}</span>
-              </div>
+                Sunset {fmtTime(astro.sun.sunset * 1000, timezone)}
+              </span>
               {astro.moon && (
-                <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 capitalize">
                   <Sparkles className="h-3.5 w-3.5 text-fg-faint" />
-                  <span className="capitalize">
-                    {astro.moon.name} · {Math.round(astro.moon.fraction * 100)}% lit
-                  </span>
-                </div>
+                  {astro.moon.name} · {Math.round(astro.moon.fraction * 100)}% lit
+                </span>
               )}
             </div>
           )}
         </div>
       )}
-    </div>
+
+      <SettingsHeading>Location</SettingsHeading>
+      <div className="divide-y divide-line">
+        {/* Type-ahead search with suggestions */}
+        <SettingsRow label="Search address or place">
+          <div className="relative max-w-lg">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-faint">
+              {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            </span>
+            <input
+              className="input pl-9"
+              placeholder="Start typing a town or address…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search address or place"
+            />
+            {results.length > 0 && (
+              <div className="card absolute z-20 mt-1 max-h-64 w-full overflow-auto p-1 shadow-pop">
+                {results.map((r, i) => (
+                  <button
+                    key={i}
+                    className="w-full rounded-md px-2.5 py-1.5 text-left hover:bg-ink-700"
+                    onClick={() => pick(r)}
+                  >
+                    <span className="text-sm text-fg">{r.label}</span>
+                    <span className="block text-[11px] text-fg-faint">
+                      {r.lat.toFixed(3)}, {r.lon.toFixed(3)} · {r.timezone}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </SettingsRow>
+
+        {/* Map with draggable pin */}
+        <SettingsRow
+          label="Map"
+          align="start"
+          hint={
+            <>
+              Drag the pin or click the map to fine-tune.
+              {addressLabel && <span className="mt-1 block text-fg-muted">{addressLabel}</span>}
+            </>
+          }
+        >
+          <div className="max-w-2xl">
+            <MapPicker lat={Number(lat) || 0} lon={Number(lon) || 0} onChange={onMapChange} />
+          </div>
+        </SettingsRow>
+
+        {/* Resolved coordinates (editable for the offline path) */}
+        <SettingsRow label="Coordinates" align="start">
+          <div className="grid max-w-2xl grid-cols-3 gap-3">
+            <Field label="Latitude">
+              <input className="input tabular-nums" value={lat} onChange={(e) => setLat(e.target.value)} />
+            </Field>
+            <Field label="Longitude">
+              <input className="input tabular-nums" value={lon} onChange={(e) => setLon(e.target.value)} />
+            </Field>
+            <Field label="Elevation (m)">
+              <input className="input tabular-nums" value={elevationM} onChange={(e) => setElevationM(e.target.value)} />
+            </Field>
+          </div>
+        </SettingsRow>
+        <SettingsRow label="Timezone">
+          <input
+            className="input max-w-[280px]"
+            value={timezone}
+            onChange={(e) => setTimezone(e.target.value)}
+            placeholder="Europe/Berlin"
+            aria-label="Timezone"
+          />
+        </SettingsRow>
+      </div>
+
+      {/* Units (the 12/24-hour clock is the app-wide preference, set in Preferences) */}
+      <SettingsHeading>Units</SettingsHeading>
+      <div className="divide-y divide-line">
+        <SettingsRow label="Temperature">
+          <UnitSelect value={units.temp} opts={TEMP_UNITS} onChange={(v) => setUnits({ ...units, temp: v })} />
+        </SettingsRow>
+        <SettingsRow label="Wind">
+          <UnitSelect value={units.wind} opts={WIND_UNITS} onChange={(v) => setUnits({ ...units, wind: v })} />
+        </SettingsRow>
+        <SettingsRow label="Pressure">
+          <UnitSelect value={units.pressure} opts={PRESSURE_UNITS} onChange={(v) => setUnits({ ...units, pressure: v })} />
+        </SettingsRow>
+      </div>
+
+      {/* Weather polling */}
+      <SettingsHeading>Weather</SettingsHeading>
+      <div className="divide-y divide-line">
+        <SettingsRow label="Record weather history" hint="Polls conditions into a time-series for playback">
+          <Switch checked={wxEnabled} onChange={setWxEnabled} label="Record weather" />
+        </SettingsRow>
+        {wxEnabled && (
+          <SettingsRow label="Poll interval">
+            <UnitSelect
+              value={String(intervalMin)}
+              opts={[
+                ["5", "Every 5 min"],
+                ["10", "Every 10 min"],
+                ["15", "Every 15 min"],
+                ["30", "Every 30 min"],
+                ["60", "Hourly"],
+              ]}
+              onChange={(v) => setIntervalMin(Number(v))}
+            />
+          </SettingsRow>
+        )}
+        <SettingsRow label="">
+          <div className="flex flex-wrap items-center gap-3">
+            <button className="btn-primary" disabled={!canSave || setSite.isPending} onClick={save}>
+              {setSite.isPending ? "Saving…" : "Save"}
+            </button>
+            {saved && <span className="text-xs text-online">Saved.</span>}
+            {setSite.isError && <span className="text-xs text-danger">Couldn’t save — check coordinates.</span>}
+          </div>
+        </SettingsRow>
+      </div>
+    </>
   );
 }
 
@@ -341,7 +357,7 @@ function UnitSelect({
   onChange: (v: string) => void;
 }) {
   return (
-    <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+    <select className="input max-w-[240px]" value={value} onChange={(e) => onChange(e.target.value)}>
       {opts.map(([v, label]) => (
         <option key={v} value={v}>
           {label}

@@ -6,7 +6,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { ErrorBoundary } from "../components/ui/ErrorBoundary";
 import { Skeleton } from "../components/ui/Skeleton";
-import { ExtRow } from "./ExtRow";
+import { ExtRow, EXT_COLS } from "./ExtRow";
 import { Marketplace } from "./Marketplace";
 import { ConsentModal } from "./ConsentModal";
 import { useExtensions, useExtActions, stageUpload, stageUrl, stageStore, confirmInstall, checkUpdate } from "./useExtensions";
@@ -159,59 +159,72 @@ export function ExtensionsManager() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-medium text-fg">Extensions</h2>
-          <p className="mt-0.5 text-xs text-fg-muted">
+    <div>
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          {/* On a phone Settings already titles the section. */}
+          <h3 className="mb-1 hidden text-sm font-semibold text-fg lg:block">Extensions</h3>
+          <p className="text-xs leading-relaxed text-fg-faint">
             Panels and background automations, each sandboxed to the permissions you approve.
           </p>
         </div>
-        <button className="btn-primary h-8 shrink-0" onClick={() => setMarket(true)}>
-          <Plus className="h-4 w-4" /> Add
+        <button className="btn-outline shrink-0" onClick={() => setMarket(true)}>
+          <Plus className="h-4 w-4" /> Add extension
         </button>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <RowSkeleton key={i} />
-          ))}
-        </div>
-      ) : isError ? (
-        <p className="rounded-lg border border-rec/30 bg-rec/10 px-3 py-2.5 text-sm text-fg">
-          Couldn't load extensions: {errMsg(error)}
-        </p>
-      ) : !exts?.length ? (
-        <div className="rounded-xl border border-line bg-ink-850/50 py-4">
-          <EmptyState
-            icon={Puzzle}
-            title="No extensions yet"
-            hint="Add panels and background automations to Aperture. Browse the store or install your own."
-            action={
-              <button className="btn-primary h-9" onClick={() => setMarket(true)}>
-                <Plus className="h-4 w-4" /> Add your first extension
-              </button>
-            }
-          />
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {exts.map((ext) => (
-            <ErrorBoundary key={ext.id} fallback={() => <ExtRowError ext={ext} />}>
-              <ExtRow
-                ext={ext}
-                actions={actions}
-                update={updates[ext.id]}
-                updating={staging || confirmBusy}
-                onUpdate={onUpdate}
-                onEdit={setEditing}
-                onUninstall={setUninstall}
-              />
-            </ErrorBoundary>
-          ))}
-        </div>
-      )}
+      <div className="mt-3">
+        {isLoading ? (
+          <div>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <RowSkeleton key={i} />
+            ))}
+          </div>
+        ) : isError ? (
+          <p className="flex items-start gap-2.5 rounded-md border border-danger/30 bg-danger/[0.08] px-3 py-2.5 text-sm text-fg">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
+            Couldn't load extensions: {errMsg(error)}
+          </p>
+        ) : !exts?.length ? (
+          <div className="border-y border-line">
+            <EmptyState
+              icon={Puzzle}
+              title="No extensions yet"
+              hint="Add panels and background automations to Aperture. Browse the store or install your own."
+              action={
+                <button className="btn-primary" onClick={() => setMarket(true)}>
+                  <Plus className="h-4 w-4" /> Add your first extension
+                </button>
+              }
+            />
+          </div>
+        ) : (
+          <div>
+            {/* Column header: the rows below share these widths (EXT_COLS). */}
+            <div className="flex h-9 items-center gap-3 border-b border-line text-[13px] font-semibold text-fg">
+              <span className="w-8 shrink-0" />
+              <span className="min-w-0 flex-1">Name</span>
+              <span className={EXT_COLS.version}>Version</span>
+              <span className={EXT_COLS.status}>Status</span>
+              <span className={EXT_COLS.enabled}><span className="hidden sm:inline">Enabled</span></span>
+              <span className={EXT_COLS.expand} />
+            </div>
+            {exts.map((ext) => (
+              <ErrorBoundary key={ext.id} fallback={() => <ExtRowError ext={ext} />}>
+                <ExtRow
+                  ext={ext}
+                  actions={actions}
+                  update={updates[ext.id]}
+                  updating={staging || confirmBusy}
+                  onUpdate={onUpdate}
+                  onEdit={setEditing}
+                  onUninstall={setUninstall}
+                />
+              </ErrorBoundary>
+            ))}
+          </div>
+        )}
+      </div>
 
       <Marketplace
         open={market}
@@ -269,8 +282,8 @@ export function ExtensionsManager() {
 // an inline card instead of taking down the whole manager.
 function ExtRowError({ ext }: { ext: ExtItem }) {
   return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-rec/30 bg-rec/10 px-3.5 py-3 text-sm">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rec" />
+    <div className="flex items-start gap-2.5 border-b border-line py-3 text-sm">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
       <div className="min-w-0">
         <p className="text-fg">“{ext.name || ext.id}” couldn't be displayed.</p>
         <p className="mt-0.5 text-xs text-fg-muted">Its data looks malformed. Other extensions are unaffected.</p>
@@ -281,13 +294,13 @@ function ExtRowError({ ext }: { ext: ExtItem }) {
 
 function RowSkeleton() {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-line bg-ink-850 p-3.5">
-      <Skeleton className="h-10 w-10 rounded-lg" />
+    <div className="flex min-h-14 items-center gap-3 border-b border-line py-2">
+      <Skeleton className="h-8 w-8 rounded-md" />
       <div className="flex-1 space-y-2">
         <Skeleton className="h-3.5 w-40" />
         <Skeleton className="h-3 w-28" />
       </div>
-      <Skeleton className="h-6 w-11 rounded-full" />
+      <Skeleton className="h-5 w-9 rounded-full" />
     </div>
   );
 }

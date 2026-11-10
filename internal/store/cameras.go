@@ -40,13 +40,13 @@ func (s *Store) CreateCamera(c *Camera) error {
           storage_quota_bytes, motion_threshold, motion_zones_json, motion_detection, audio_detection,
           audio_threshold, location_id, detect_method,
           temp_sensor, vendor, fps, sort_order, preroll_ms, postroll_ms, cooldown_ms, min_duration_ms,
-          record_height, record_fps, record_kbps, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          record_height, record_fps, record_kbps, ha_hidden, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ID, c.Name, c.RTSPMainURL, c.RTSPSubURL, boolInt(c.Enabled), c.RecordMode, c.RetentionDays,
 		c.StorageQuotaBytes, c.MotionThreshold, c.MotionZonesJSON, boolInt(c.MotionDetection), boolInt(c.AudioDetection),
 		c.AudioThreshold, c.LocationID, c.DetectMethod,
 		c.TempSensor, c.Vendor, c.FPS, c.SortOrder, c.PrerollMs, c.PostrollMs, c.CooldownMs, c.MinDurationMs,
-		c.RecordHeight, c.RecordFPS, c.RecordKbps, c.CreatedAt, c.UpdatedAt,
+		c.RecordHeight, c.RecordFPS, c.RecordKbps, boolInt(c.HAHidden), c.CreatedAt, c.UpdatedAt,
 	)
 	return err
 }
@@ -98,13 +98,13 @@ func (s *Store) UpdateCamera(c *Camera) error {
             retention_days = ?, storage_quota_bytes = ?, motion_threshold = ?, motion_zones_json = ?,
             motion_detection = ?, audio_detection = ?, audio_threshold = ?, location_id = ?, detect_method = ?, temp_sensor = ?, vendor = ?,
             fps = ?, sort_order = ?, preroll_ms = ?, postroll_ms = ?, cooldown_ms = ?,
-            min_duration_ms = ?, record_height = ?, record_fps = ?, record_kbps = ?, updated_at = ?
+            min_duration_ms = ?, record_height = ?, record_fps = ?, record_kbps = ?, ha_hidden = ?, updated_at = ?
          WHERE id = ?`,
 		c.Name, c.RTSPMainURL, c.RTSPSubURL, boolInt(c.Enabled), c.RecordMode,
 		c.RetentionDays, c.StorageQuotaBytes, c.MotionThreshold, c.MotionZonesJSON,
 		boolInt(c.MotionDetection), boolInt(c.AudioDetection), c.AudioThreshold, c.LocationID, c.DetectMethod, c.TempSensor, c.Vendor,
 		c.FPS, c.SortOrder, c.PrerollMs, c.PostrollMs, c.CooldownMs, c.MinDurationMs,
-		c.RecordHeight, c.RecordFPS, c.RecordKbps,
+		c.RecordHeight, c.RecordFPS, c.RecordKbps, boolInt(c.HAHidden),
 		c.UpdatedAt, c.ID,
 	)
 	return affected(res, err)
@@ -118,15 +118,15 @@ func (s *Store) DeleteCamera(id string) error {
 const cameraSelect = `SELECT id, name, rtsp_main_url, rtsp_sub_url, enabled, record_mode,
     retention_days, storage_quota_bytes, motion_threshold, motion_zones_json, motion_detection,
     audio_detection, audio_threshold, location_id, detect_method, temp_sensor, vendor, fps, sort_order, preroll_ms, postroll_ms,
-    cooldown_ms, min_duration_ms, record_height, record_fps, record_kbps, created_at, updated_at FROM cameras`
+    cooldown_ms, min_duration_ms, record_height, record_fps, record_kbps, ha_hidden, created_at, updated_at FROM cameras`
 
 func (s *Store) scanCamera(row rowScanner) (*Camera, error) {
 	var c Camera
-	var enabled, motionDet, audioDet int
+	var enabled, motionDet, audioDet, haHidden int
 	err := row.Scan(&c.ID, &c.Name, &c.RTSPMainURL, &c.RTSPSubURL, &enabled, &c.RecordMode,
 		&c.RetentionDays, &c.StorageQuotaBytes, &c.MotionThreshold, &c.MotionZonesJSON, &motionDet,
 		&audioDet, &c.AudioThreshold, &c.LocationID, &c.DetectMethod, &c.TempSensor, &c.Vendor, &c.FPS, &c.SortOrder, &c.PrerollMs, &c.PostrollMs, &c.CooldownMs, &c.MinDurationMs,
-		&c.RecordHeight, &c.RecordFPS, &c.RecordKbps, &c.CreatedAt, &c.UpdatedAt)
+		&c.RecordHeight, &c.RecordFPS, &c.RecordKbps, &haHidden, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -136,5 +136,6 @@ func (s *Store) scanCamera(row rowScanner) (*Camera, error) {
 	c.Enabled = enabled != 0
 	c.MotionDetection = motionDet != 0
 	c.AudioDetection = audioDet != 0
+	c.HAHidden = haHidden != 0
 	return &c, nil
 }

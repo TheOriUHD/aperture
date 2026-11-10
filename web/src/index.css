@@ -9,8 +9,8 @@ input.vrange {
   appearance: slider-vertical;
 }
 
-/* UniFi-style timeline zoom slider: thin filled track + round thumb. The filled
-   portion is set inline as a background gradient from the current value. */
+/* Timeline zoom slider: thin filled track + round thumb. The filled portion is
+   set inline as a background gradient from the current value. */
 input.tl-zoom {
   -webkit-appearance: none;
   appearance: none;
@@ -20,19 +20,19 @@ input.tl-zoom {
 }
 input.tl-zoom::-webkit-slider-thumb {
   -webkit-appearance: none;
-  height: 14px;
-  width: 14px;
+  height: 12px;
+  width: 22px;
   border-radius: 9999px;
-  background: #1b9df0;
-  border: 2px solid #0d0f13;
+  background: #4797ff;
+  border: 2px solid #1b1e21;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 input.tl-zoom::-moz-range-thumb {
-  height: 14px;
-  width: 14px;
+  height: 12px;
+  width: 22px;
   border-radius: 9999px;
-  background: #1b9df0;
-  border: 2px solid #0d0f13;
+  background: #4797ff;
+  border: 2px solid #1b1e21;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 input.tl-zoom::-moz-range-track {
@@ -85,6 +85,17 @@ input.tl-zoom::-moz-range-track {
   * {
     border-color: theme("colors.line.DEFAULT");
   }
+  /* Native checkboxes, radios and sliders take the accent blue everywhere. */
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  progress {
+    accent-color: theme("colors.brand.DEFAULT");
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    @apply h-4 w-4 cursor-pointer;
+  }
   /* While a modal is open, freeze the per-screen scroll containers so the
      background can't scroll under it (the modal's own card uses overflow-y-auto,
      which is intentionally not frozen). Driven by hooks/useScrollLock. */
@@ -96,79 +107,180 @@ input.tl-zoom::-moz-range-track {
     width: 10px;
     height: 10px;
   }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
   ::-webkit-scrollbar-thumb {
-    background: #2a3038;
+    background: #2c2f33;
     border-radius: 8px;
-    border: 2px solid theme("colors.ink.900");
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #353c45;
+    background: #3a3e43;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
   ::selection {
-    background: rgba(27, 157, 240, 0.32);
+    background: rgba(71, 151, 255, 0.32);
   }
 }
 
 @layer components {
   /* Buttons -------------------------------------------------------------- */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 h-9 text-sm font-medium
-      transition-colors duration-150 select-none disabled:opacity-50 disabled:pointer-events-none
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 h-8 text-sm font-medium
+      whitespace-nowrap transition-colors duration-150 select-none disabled:opacity-45 disabled:pointer-events-none
       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60;
   }
+  /* Filled accent: the one action a view is for (Save, Add camera). */
   .btn-primary {
-    @apply btn bg-brand text-white hover:bg-[#2aa6f5] active:bg-[#1789d6];
+    @apply btn bg-brand-solid text-white hover:bg-brand-hover active:bg-[#0062e0];
   }
+  /* Accent outline: a section's create action ("Add person", "Create alarm"). */
+  .btn-outline {
+    @apply btn bg-transparent text-brand border border-brand/60 hover:bg-brand/10 hover:border-brand;
+  }
+  /* Neutral outline: secondary actions next to a primary one. */
   .btn-ghost {
-    @apply btn bg-transparent text-fg-muted border border-line-strong hover:bg-ink-700 hover:text-fg;
+    @apply btn bg-transparent text-fg border border-line-strong hover:bg-white/[0.04] hover:border-[#3a3e43];
   }
   .btn-subtle {
     @apply btn bg-ink-700 text-fg hover:bg-ink-650;
   }
   .btn-secondary {
-    @apply btn bg-ink-700 text-fg border border-line hover:bg-ink-650 hover:border-line-strong;
+    @apply btn bg-ink-700 text-fg border border-line-strong hover:bg-ink-650;
   }
   .btn-danger {
-    @apply btn bg-rec/90 text-white hover:bg-rec;
+    @apply btn bg-rec text-white hover:bg-[#f2626a];
+  }
+  /* Text-only action in the accent colour, as links are drawn throughout. */
+  .btn-link {
+    @apply inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-hover
+      disabled:opacity-45 disabled:pointer-events-none transition-colors;
   }
   .btn-icon {
-    @apply inline-flex items-center justify-center h-9 w-9 rounded-md text-fg-muted
-      hover:bg-ink-700 hover:text-fg transition-colors duration-150;
+    @apply inline-flex items-center justify-center h-8 w-8 rounded-md text-fg-muted
+      hover:bg-white/[0.06] hover:text-fg transition-colors duration-150;
+  }
+  .link {
+    @apply text-brand hover:text-brand-hover transition-colors;
   }
 
   /* Surfaces ------------------------------------------------------------- */
+  /* Filled surface: popovers, modals, cards inside a filled panel. */
   .card {
     @apply bg-ink-800 border border-line rounded-lg;
   }
+  /* Outlined section on the page: settings groups, dashboard widgets. */
   .panel {
-    @apply bg-ink-800 border border-line rounded-lg p-4;
+    @apply border border-line rounded-lg p-5;
+  }
+  /* A page-level "frame": the filled rounded containers that tile a view
+     (playback's camera list, timeline, player and event strip). */
+  .frame {
+    @apply bg-ink-800 rounded-lg;
+  }
+  .divider {
+    @apply border-t border-line;
   }
 
   /* Pills / badges ------------------------------------------------------- */
   .pill {
-    @apply inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none;
+    @apply inline-flex items-center gap-1 rounded px-1.5 py-[3px] text-[11px] font-medium leading-none whitespace-nowrap;
+  }
+  .pill-gray {
+    @apply pill bg-ink-700 text-fg-muted;
+  }
+  .pill-blue {
+    @apply pill bg-[#093b7a] text-brand;
+  }
+  .pill-green {
+    @apply pill bg-[#123e1f] text-[#4ecb78];
+  }
+  .pill-orange {
+    @apply pill bg-[#3a2810] text-[#f0a33a];
+  }
+  .pill-red {
+    @apply pill bg-[#4a1a1c] text-[#ff7b80];
   }
   .pill-rec {
-    @apply pill bg-black/55 text-[#ffd6d7];
+    @apply pill rounded-md bg-black/55 text-[#ffd6d7];
   }
   .pill-motion {
     @apply pill bg-motion text-[#06243d];
   }
   .pill-online {
-    @apply pill bg-online/15 text-online;
+    @apply pill-green;
   }
   .pill-offline {
-    @apply pill bg-ink-700 text-fg-faint;
+    @apply pill-gray;
   }
 
   /* Inputs --------------------------------------------------------------- */
+  /* Translucent so a field reads the same on the page and inside a panel. */
   .input {
-    @apply h-9 w-full rounded-md bg-ink-850 border border-line-strong px-3 text-sm text-fg
-      placeholder:text-fg-faint focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30
-      transition-colors;
+    @apply h-8 w-full rounded-md bg-white/[0.045] border border-white/[0.07] px-3 text-sm text-fg
+      placeholder:text-fg-faint hover:border-white/[0.12] focus:border-brand focus:bg-white/[0.06]
+      focus:outline-none transition-colors disabled:opacity-50;
+  }
+  textarea.input {
+    @apply h-auto py-2;
+  }
+  select.input {
+    @apply pr-8 cursor-pointer;
   }
   .label {
     @apply block text-xs font-medium text-fg-muted mb-1.5;
+  }
+  /* Sign-in fields (AuthField): bare text on an underline. */
+  .auth-input {
+    @apply h-10 w-full min-w-0 bg-transparent text-[15px] text-fg placeholder:text-fg-faint focus:outline-none;
+  }
+  /* Keep the browser's autofill from painting a light box on the dark panel. */
+  .auth-input:-webkit-autofill,
+  .auth-input:-webkit-autofill:hover,
+  .auth-input:-webkit-autofill:focus {
+    -webkit-text-fill-color: theme("colors.fg.DEFAULT");
+    caret-color: theme("colors.fg.DEFAULT");
+    transition: background-color 600000s 0s, color 600000s 0s;
+  }
+  .hint {
+    @apply text-xs leading-relaxed text-fg-faint;
+  }
+
+  /* Segmented control (All | Active | Closed, 1h | 1D | 1W) --------------- */
+  .seg {
+    @apply inline-flex h-8 items-stretch overflow-hidden rounded-md border border-line-strong text-sm;
+  }
+  .seg-item {
+    @apply flex items-center justify-center px-3 text-fg-muted hover:text-fg transition-colors
+      [&+&]:border-l [&+&]:border-line-strong;
+  }
+  .seg-item-active {
+    @apply bg-brand/10 text-brand hover:text-brand;
+  }
+
+  /* Tables ----------------------------------------------------------------- */
+  .tbl {
+    @apply w-full border-collapse text-sm;
+  }
+  .tbl th {
+    @apply h-9 px-3 text-left align-middle text-[13px] font-semibold text-fg border-b border-line whitespace-nowrap;
+  }
+  .tbl td {
+    @apply h-10 px-3 align-middle text-fg/80 border-b border-line;
+  }
+  .tbl tbody tr {
+    @apply transition-colors;
+  }
+  .tbl-hover tbody tr {
+    @apply cursor-pointer hover:bg-white/[0.03];
+  }
+  .tbl tbody tr.is-selected {
+    @apply bg-brand-ink hover:bg-brand-ink;
   }
 
   /* Connecting dots ------------------------------------------------------ */
@@ -179,11 +291,19 @@ input.tl-zoom::-moz-range-track {
 
   /* Nav rail item -------------------------------------------------------- */
   .nav-item {
-    @apply relative flex items-center justify-center h-10 w-10 rounded-lg text-fg-muted
-      hover:text-fg hover:bg-ink-700 transition-colors duration-150;
+    @apply relative flex items-center justify-center h-9 w-9 rounded-md border border-transparent text-fg/75
+      hover:text-fg hover:bg-white/[0.06] transition-colors duration-150;
   }
   .nav-item-active {
-    @apply text-white bg-brand/15 hover:bg-brand/20;
+    @apply text-brand bg-brand-ink border-brand/35 hover:bg-brand-ink hover:text-brand;
+  }
+
+  /* Side-nav item (settings, filter sidebars) ----------------------------- */
+  .side-item {
+    @apply flex w-full items-center gap-3 rounded-md px-3 h-9 text-sm text-fg/90 hover:bg-white/[0.04] transition-colors;
+  }
+  .side-item-active {
+    @apply bg-ink-700 text-brand hover:bg-ink-700;
   }
 
   /* On-screen display surfaces ------------------------------------------- */
@@ -194,28 +314,33 @@ input.tl-zoom::-moz-range-track {
      picture, and an extension author picking a tenth would not have been
      doing anything wrong. */
   .osd-surface {
-    background: rgba(0, 0, 0, var(--osd-alpha, 0.55));
+    background: rgba(18, 19, 21, var(--osd-alpha, 0.55));
     @apply backdrop-blur-sm;
   }
   /* Chrome that must stay legible against a bright frame — panel bodies and
      menus — sits a step more opaque than a passive badge, but still tracks the
      same user preference rather than a hardcoded constant. */
   .osd-panel {
-    background: rgba(0, 0, 0, min(0.92, calc(var(--osd-alpha, 0.55) + 0.25)));
+    background: rgba(24, 26, 29, min(0.94, calc(var(--osd-alpha, 0.55) + 0.3)));
     @apply backdrop-blur-md border border-white/10 rounded-lg shadow-pop;
   }
   /* The 32px square icon button used in a player's control cluster. Extracted
      from Playback's private VidBtn so extension toolbar entries render
      identically to first-party ones instead of approximating them. */
   .osd-btn {
-    @apply grid h-8 w-8 place-items-center rounded-md text-white/85
+    @apply grid h-8 w-8 place-items-center rounded-md text-white/90
       transition-colors backdrop-blur-sm;
-    background: rgba(0, 0, 0, min(0.9, calc(var(--osd-alpha, 0.55) + 0.1)));
+    background: rgba(24, 26, 29, min(0.9, calc(var(--osd-alpha, 0.55) + 0.2)));
   }
   .osd-btn:hover {
-    background: rgba(0, 0, 0, min(0.95, calc(var(--osd-alpha, 0.55) + 0.35)));
+    background: rgba(40, 42, 46, min(0.96, calc(var(--osd-alpha, 0.55) + 0.4)));
   }
   .osd-btn-active {
-    @apply bg-brand text-white hover:bg-[#2aa6f5];
+    @apply bg-brand-solid text-white hover:bg-brand-hover;
+  }
+  /* Rectangular chip floating over video: a camera name, a "Talk" button. */
+  .osd-chip {
+    @apply inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium text-white/95 backdrop-blur-sm;
+    background: rgba(24, 26, 29, min(0.92, calc(var(--osd-alpha, 0.55) + 0.25)));
   }
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link2, Copy, Check } from "lucide-react";
+import clsx from "clsx";
 import { Modal } from "./ui/Modal";
 import { Switch } from "./ui/Switch";
 import { useCreateShare, type ExportJob, type CreatedShare } from "../hooks/useExports";
@@ -44,7 +45,7 @@ export function ShareModal({ job, onClose }: { job: ExportJob; onClose: () => vo
           </button>
         ) : (
           <>
-            <button className="btn-subtle" onClick={onClose}>
+            <button className="btn-ghost" onClick={onClose}>
               Cancel
             </button>
             <button
@@ -72,35 +73,34 @@ export function ShareModal({ job, onClose }: { job: ExportJob; onClose: () => vo
             Anyone with this link can view the clip
             {result.expiresAt ? "" : ""} — no account needed.
           </p>
-          <div className="flex items-center gap-2">
-            <input className="input font-mono text-xs flex-1" readOnly value={result.url} />
-            <button className="btn-icon h-9 w-9" onClick={copy} aria-label="Copy link">
+          <div className="flex items-center gap-1">
+            <input className="input flex-1 font-mono text-xs" readOnly value={result.url} />
+            <button className="btn-icon" onClick={copy} aria-label="Copy link" title="Copy link">
               {copied ? <Check className="h-4 w-4 text-online" /> : <Copy className="h-4 w-4" />}
             </button>
           </div>
-          <p className="text-xs text-fg-faint">
-            Manage or revoke shared links from your account at any time.
-          </p>
+          <p className="hint">Manage or revoke shared links from your account at any time.</p>
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 text-sm text-fg-muted">
-            <Link2 className="h-4 w-4 text-brand" />
-            {job.cameraName}
+        <div className="-my-5 divide-y divide-line">
+          <div className="flex items-center gap-2.5 py-4 text-sm text-fg">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand/10">
+              <Link2 className="h-4 w-4 text-brand" />
+            </span>
+            <span className="truncate font-medium">{job.cameraName}</span>
           </div>
 
-          <div>
+          <div className="py-4">
             <label className="label">Link expires</label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="seg flex w-full" role="radiogroup" aria-label="Link expires">
               {EXPIRY.map((e) => (
                 <button
                   key={e.hours}
+                  type="button"
+                  role="radio"
+                  aria-checked={expiresHours === e.hours}
                   onClick={() => setExpiresHours(e.hours)}
-                  className={`btn h-9 text-xs ${
-                    expiresHours === e.hours
-                      ? "bg-brand/15 text-brand border border-brand/40"
-                      : "bg-ink-800 text-fg-muted border border-line-strong hover:bg-ink-700"
-                  }`}
+                  className={clsx("seg-item flex-1 px-2 text-xs sm:text-sm", expiresHours === e.hours && "seg-item-active")}
                 >
                   {e.label}
                 </button>
@@ -108,33 +108,37 @@ export function ShareModal({ job, onClose }: { job: ExportJob; onClose: () => vo
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-fg">Require a password</span>
-            <Switch checked={usePassword} onChange={setUsePassword} label="Require password" />
+          <div className="space-y-3 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-fg">Require a password</span>
+              <Switch checked={usePassword} onChange={setUsePassword} label="Require password" />
+            </div>
+            {usePassword && (
+              <input
+                className="input"
+                type="text"
+                placeholder="Password to view"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            )}
           </div>
-          {usePassword && (
-            <input
-              className="input"
-              type="text"
-              placeholder="Password to view"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          )}
 
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-fg">Limit number of views</span>
-            <Switch checked={limitViews} onChange={setLimitViews} label="Limit views" />
+          <div className="space-y-3 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-fg">Limit number of views</span>
+              <Switch checked={limitViews} onChange={setLimitViews} label="Limit views" />
+            </div>
+            {limitViews && (
+              <input
+                className="input w-28"
+                type="number"
+                min={1}
+                value={maxViews}
+                onChange={(e) => setMaxViews(Math.max(1, Number(e.target.value)))}
+              />
+            )}
           </div>
-          {limitViews && (
-            <input
-              className="input w-28"
-              type="number"
-              min={1}
-              value={maxViews}
-              onChange={(e) => setMaxViews(Math.max(1, Number(e.target.value)))}
-            />
-          )}
         </div>
       )}
     </Modal>

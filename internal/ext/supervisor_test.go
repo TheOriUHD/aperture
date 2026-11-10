@@ -100,6 +100,33 @@ func TestSupervisorStopAllDrains(t *testing.T) {
 	waitState(t, s, "d", StateStopped, 3*time.Second)
 }
 
+// Wait is what shutdown blocks on after StopAll: it must not return while a
+// child is still inside its SIGTERM → SIGKILL window, and must give up at ctx.
+func TestSupervisorWaitBlocksUntilChildrenExit(t *testing.T) {
+	s := newTestSupervisor()
+	s.stopGrace = 300 * time.Millisecond
+	// Ignores SIGTERM, so it lives until the SIGKILL at stopGrace.
+	s.Start(Spec{ID: "w", Entry: "trap '' TERM; while :; do sleep 0.02; done"})
+	waitState(t, s, "w", StateRunning, 3*time.Second)
+
+	s.StopAll()
+	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if s.Wait(short) {
+		t.Fatal("Wait returned true while the child was still in its stop window")
+	}
+	start := time.Now()
+	if !s.Wait(context.Background()) {
+		t.Fatal("Wait gave up without a deadline")
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Fatalf("child took %s to be reaped, stopGrace is %s", took, s.stopGrace)
+	}
+	if st, _ := s.Status("w"); st != StateStopped {
+		t.Fatalf("state after Wait = %s, want stopped", st)
+	}
+}
+
 // TestSupervisorRestartDuringStopWindow pins the restart race that left an
 // extension permanently stopped after an update.
 //

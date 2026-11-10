@@ -70,7 +70,9 @@ func TestMerge(t *testing.T) {
 		{"new address refuses the saved login", "rtsp://•••••:•••••@10.6.6.6/x", []string{reolink}, "", ErrNewAddress},
 		{"half-kept login on a new address too", "rtsp://•••••:newpw@10.6.6.6/x", []string{reolink}, "", ErrNewAddress},
 		{"partly overtyped dots", "rtsp://••x••:•••••@10.0.0.5/x", []string{reolink}, "", ErrEditedMask},
-		{"dots outside the login", "rtsp://10.0.0.5/•••••", []string{reolink}, "", ErrMaskOutsideLogin},
+		{"dots outside the login", "rtsp://10.0.0.5/live/•••••", []string{reolink}, "", ErrMaskOutsideLogin},
+		// A path that is only the placeholder stands in for a stream key (TestStreamKey).
+		{"dots as the whole path, no key saved", "rtsp://10.0.0.5/•••••", []string{reolink}, "", ErrNoKeyStored},
 		{"nothing saved", "rtsp://•••••:•••••@10.0.0.5/x", []string{"rtsp://10.0.0.5/x"}, "", ErrNothingStored},
 		{"nothing saved at all", "rtsp://•••••:•••••@10.0.0.5/x", []string{""}, "", ErrNothingStored},
 		{"no saved password", "rtsp://•••••:•••••@10.0.0.5/x", []string{"rtsp://user@10.0.0.5/x"}, "", ErrNothingStored},
@@ -124,5 +126,65 @@ func TestScrub(t *testing.T) {
 	}
 	if strings.Contains(Scrub(rawAt), "ss:w0rd") {
 		t.Error("the part of a password after a raw @ leaked")
+	}
+}
+
+// UniFi Protect links have no login: the path is the stream key, and anyone who
+// has it can watch the camera. It gets the same treatment as a password.
+func TestStreamKey(t *testing.T) {
+	const key = "AbCdEfGhIjKlMnOp"
+	main := "rtspx://192.168.10.1:7441/" + key
+	sub := "rtspx://192.168.10.1:7441/QrStUvWxYz012345"
+
+	if got, want := Redact(main), "rtspx://192.168.10.1:7441/"+Mask; got != want {
+		t.Errorf("Redact = %q, want %q", got, want)
+	}
+	if got, want := Redact(main+"?enableSrtp"), "rtspx://192.168.10.1:7441/"+Mask+"?enableSrtp"; got != want {
+		t.Errorf("Redact with a query = %q, want %q", got, want)
+	}
+	for _, plain := range []string{
+		"rtsp://u:p@10.0.0.5:554/Preview_01_main",
+		"rtsp://10.0.0.5:554/stream1",
+		"rtsp://10.0.0.5:554/Streaming/Channels/101",
+		"rtsp://10.0.0.5/cam/realmonitor?channel=1&subtype=0",
+	} {
+		if got := Redact(plain); HasMask(got) && !strings.Contains(plain, "@") {
+			t.Errorf("Redact(%q) masked a path that isn't a key: %q", plain, got)
+		}
+	}
+
+	for _, c := range []struct {
+		name, submitted string
+		stored          []string
+		want            string
+		err             error
+	}{
+		{"keeps the field's own key", Redact(main), []string{main, sub}, main, nil},
+		{"sub keeps its own key", Redact(sub), []string{sub, main}, sub, nil},
+		{"a new key is taken as typed", "rtspx://192.168.10.1:7441/ZZZZZZZZZZZZZZZZ", []string{main}, "rtspx://192.168.10.1:7441/ZZZZZZZZZZZZZZZZ", nil},
+		{"never to another host", "rtspx://192.168.66.6:7441/" + Mask, []string{main}, "", ErrKeyNewAddress},
+		{"nothing saved", "rtspx://192.168.10.1:7441/" + Mask, []string{"rtsp://u:p@10.0.0.5/stream1"}, "", ErrNoKeyStored},
+		{"half overtyped", "rtspx://192.168.10.1:7441/••x••", []string{main}, "", ErrEditedMask},
+		{"dots in another segment", "rtspx://192.168.10.1:7441/a/" + Mask, []string{main}, "", ErrMaskOutsideLogin},
+		{"dots in the host", "rtspx://192.168.10.•:7441/" + Mask, []string{main}, "", ErrMaskOutsideLogin},
+	} {
+		got, err := Merge(c.submitted, c.stored...)
+		if !errors.Is(err, c.err) || got != c.want {
+			t.Errorf("%s: Merge = %q, %v; want %q, %v", c.name, got, err, c.want, c.err)
+		}
+	}
+
+	// A login and a key on one link are both kept.
+	both := "rtsps://admin:pw@10.0.0.9:7441/" + key
+	if got, err := Merge(Redact(both), both); err != nil || got != both {
+		t.Errorf("login and key: Merge = %q, %v", got, err)
+	}
+
+	msg := `streams: dial "rtspx://192.168.10.1:7441/` + key + `": i/o timeout`
+	if got := Scrub(msg); strings.Contains(got, key) {
+		t.Errorf("Scrub left the stream key in %q", got)
+	}
+	if got := Scrub("rtspx://192.168.10.1:7441/" + key); strings.Contains(got, key) {
+		t.Errorf("Scrub left a key at the end of the text: %q", got)
 	}
 }

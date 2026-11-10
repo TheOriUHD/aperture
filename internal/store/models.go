@@ -73,6 +73,7 @@ type Camera struct {
 	RecordHeight      int     `json:"recordHeight"` // record at most this tall (px); 0 = as sent
 	RecordFPS         int     `json:"recordFps"`    // record at most this framerate; 0 = as sent
 	RecordKbps        int     `json:"recordKbps"`   // record at this video bitrate; 0 = automatic
+	HAHidden          bool    `json:"haHidden"`     // kept out of Home Assistant and HomeKit
 	CreatedAt         int64   `json:"createdAt"`
 	UpdatedAt         int64   `json:"updatedAt"`
 }

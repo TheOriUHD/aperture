@@ -12,6 +12,11 @@ const de = {
     playback: "Wiedergabe",
     alarms: "Alarme",
     settings: "Einstellungen",
+    devices: "Geräte",
+    logs: "Aktivitätsprotokoll",
+    automations: "Automationen",
+    integrations: "Integrationen",
+    users: "Benutzer",
   },
   common: {
     save: "Speichern",
@@ -36,6 +41,10 @@ const de = {
     ssoFailed: "Einmalanmeldung fehlgeschlagen. Versuchen Sie es erneut oder nutzen Sie Ihr Passwort.",
     trustDevice: "Diesem Gerät vertrauen",
     trustDeviceHint: "Bei der nächsten Anmeldung in diesem Browser nicht nach einem Code fragen.",
+    missing: "Geben Sie Ihre E-Mail und Ihr Passwort ein.",
+    showPassword: "Passwort anzeigen",
+    hidePassword: "Passwort verbergen",
+    forgot: "Passwort vergessen? Ein Administrator kann Ihnen unter Benutzer ein neues festlegen.",
   },
   settings: {
     title: "Einstellungen",

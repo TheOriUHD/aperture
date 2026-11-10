@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { applyFeed, resetLive } from "../lib/liveState";
 
 // ChangeFeedListener subscribes to the v1 change feed (SSE, T2.5) and refreshes
 // the affected react-query caches on each message. Verified in a browser to drive
@@ -22,13 +23,20 @@ export function ChangeFeedListener() {
     const es = new EventSource("/api/v1/feed", { withCredentials: true });
     const inval = (...keys: string[]) =>
       keys.forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    // While disconnected nothing says when motion stops; the server resends
+    // the current state when the feed reconnects.
+    es.onerror = () => resetLive();
     es.onmessage = (m) => {
-      let type = "";
+      let msg: { type?: string; camera?: string; ts?: number; data?: unknown };
       try {
-        type = (JSON.parse(m.data) as { type?: string }).type ?? "";
+        msg = JSON.parse(m.data);
       } catch {
         return;
       }
+      // Live motion outlines and recognised objects: several a second, kept out
+      // of React Query.
+      if (applyFeed(msg)) return;
+      const type = msg.type ?? "";
       if (type.startsWith("event.") || type.startsWith("detection.")) {
         inval("events", "events-today", "events-all", "events-recent-dash");
       } else if (type === "camera.state") {
@@ -36,7 +44,7 @@ export function ChangeFeedListener() {
       } else if (type === "storage.updated") {
         inval("storage", "storage-locations");
       } else if (type === "config.updated") {
-        inval("settings", "site", "site-name", "schedule");
+        inval("settings", "site", "site-name", "schedule", "hardware", "detection", "ai");
       } else if (type === "automation.updated") {
         inval("rules", "automations", "channels", "webhooks");
       } else if (type === "alarm.state") {

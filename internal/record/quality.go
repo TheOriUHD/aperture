@@ -27,6 +27,13 @@ const (
 	// timing jitter does not drop an extra frame: without it a 10 fps cap on a 20 fps
 	// camera lands near 8 fps.
 	framerateSlack = 0.85
+	// reencodeThreads caps the decoder and the encoder separately. Left to ffmpeg,
+	// both size their thread pools to the core count, and every decoder thread holds
+	// whole frames: a 7680x2160 HEVC camera re-encoded to 1080p took 1.3 GB, which
+	// with a second camera pushed the service past its memory limit into swap and
+	// made the web app crawl. Four of each measured 724 MB at the same CPU and still
+	// kept up in real time (two decoder threads: 656 MB, with less room to catch up).
+	reencodeThreads = "4"
 )
 
 // wantsReencode reports whether a camera records something other than the stream.
@@ -57,7 +64,7 @@ func videoArgs(c store.Camera, reencode bool) []string {
 	}
 	args = append(args,
 		"-fps_mode", "vfr", // keep the frames that survive, without padding back to a rate
-		"-c:v", "libx264", "-preset", reencodePreset,
+		"-c:v", "libx264", "-preset", reencodePreset, "-threads", reencodeThreads,
 		"-pix_fmt", "yuv420p", // cameras often send 10-bit HEVC; browsers need 8-bit H.264
 		"-force_key_frames", reencodeKeyframes,
 	)

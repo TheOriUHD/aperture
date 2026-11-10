@@ -124,14 +124,15 @@ function Tile({
           }}
         />
       )}
-      <span className="absolute left-2 top-2 rounded bg-black/45 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-sm">
-        {camera.name}
+      <span className="osd-chip pointer-events-none absolute left-2 top-2 h-7 max-w-[70%] px-2.5 text-xs">
+        <span className="truncate">{camera.name}</span>
       </span>
       {onRemove && (
         <button
           onClick={onRemove}
-          className="absolute right-2 top-2 hidden h-6 w-6 place-items-center rounded bg-black/50 text-white/90 group-hover:grid hover:bg-black/80"
+          className="osd-btn invisible absolute right-2 top-2 h-7 w-7 group-hover:visible"
           title="Remove from view"
+          aria-label={`Remove ${camera.name} from view`}
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -166,7 +167,7 @@ export function MultiCamGrid({
   const n = cameras.length;
   const { style: gridStyle, cellStyle } = gridLayout(n);
   return (
-    <div className="absolute inset-0 grid gap-0.5 bg-ink-900" style={gridStyle}>
+    <div className="absolute inset-0 grid gap-0.5 bg-ink-800" style={gridStyle}>
       {cameras.map((c, i) => (
         <Tile
           key={c.id}

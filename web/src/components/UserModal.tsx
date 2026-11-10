@@ -4,6 +4,7 @@ import { Modal } from "./ui/Modal";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { CredentialsCard } from "./CredentialsCard";
 import { Switch } from "./ui/Switch";
+import { Avatar } from "./ui/Layout";
 import { useCameras } from "../hooks/useCameras";
 import { useCreateUser, useUpdateUser, useDeleteUser, type ManagedUser } from "../hooks/useUsers";
 import type { Role } from "../lib/types";
@@ -104,6 +105,8 @@ export function UserModal({
     }
   }
 
+  const camList = cameras ?? [];
+
   return (
     <>
       <Modal
@@ -115,7 +118,7 @@ export function UserModal({
             <div>
               {isEdit && !isSelf && (
                 <button
-                  className="btn-ghost !text-rec !border-rec/30 hover:!bg-rec/10"
+                  className="btn-ghost border-danger/40 text-danger hover:border-danger/70 hover:bg-danger/10"
                   onClick={() => setConfirmDel(true)}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -134,76 +137,94 @@ export function UserModal({
           </div>
         }
       >
-        <div className="space-y-4">
-          <div>
-            <label className="label">Email</label>
-            <input
-              className="input"
-              type="email"
-              value={email}
-              disabled={isEdit}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="label">Name</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className={isEdit ? "" : "col-span-2"}>
-              <label className="label">Role</label>
-              <select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-                <option value="viewer">Viewer</option>
-                <option value="admin">Administrator</option>
-              </select>
+        <div className="-my-5 divide-y divide-line">
+          {/* Identity */}
+          <div className="flex items-center gap-3 py-5">
+            <Avatar name={name || email || "?"} className="!h-10 !w-10 rounded-md !text-sm" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-fg">{name || (isEdit ? email : "New user")}</p>
+              <p className="truncate text-xs text-fg-muted">{isEdit ? email : "Someone who can sign in to this NVR"}</p>
             </div>
-            {isEdit && (
-              <div>
-                <label className="label">New password</label>
-                <input
-                  className="input"
-                  type="password"
-                  placeholder="Leave blank to keep"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
+          </div>
+
+          <div className="space-y-4 py-5">
+            <div>
+              <label className="label">Email</label>
+              <input
+                className="input"
+                type="email"
+                value={email}
+                disabled={isEdit}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">Name</label>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className={isEdit ? "" : "sm:col-span-2"}>
+                <label className="label">Role</label>
+                <select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+                  <option value="viewer">Viewer</option>
+                  <option value="admin">Administrator</option>
+                </select>
               </div>
+              {isEdit && (
+                <div>
+                  <label className="label">New password</label>
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder="Leave blank to keep"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+            {!isEdit && (
+              <p className="hint">
+                A temporary password is generated and shown on a printable card. The user chooses their
+                own password the first time they sign in, and can add an authenticator app.
+              </p>
             )}
           </div>
-          {!isEdit && (
-            <p className="text-xs text-fg-faint -mt-1">
-              A temporary password is generated and shown on a printable card. The user chooses their
-              own password the first time they sign in, and can add an authenticator app.
-            </p>
-          )}
 
           {role === "viewer" && (
-            <div>
-              <label className="label">Camera access</label>
-              <div className="rounded-md border border-line-strong divide-y divide-line max-h-44 overflow-auto">
-                {(cameras ?? []).map((c) => (
+            <div className="py-5">
+              <div className="mb-1.5 flex items-baseline justify-between gap-3">
+                <label className="label mb-0">Camera access</label>
+                {camList.length > 0 && (
+                  <span className="text-xs tabular-nums text-fg-faint">
+                    {camIds.filter((id) => camList.some((c) => c.id === id)).length} of {camList.length}
+                  </span>
+                )}
+              </div>
+              <div className="max-h-52 divide-y divide-line overflow-auto rounded-md border border-line">
+                {camList.map((c) => (
                   <label
                     key={c.id}
-                    className="flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-ink-700"
+                    className="flex h-9 cursor-pointer items-center gap-2.5 px-3 text-sm text-fg/90 hover:bg-white/[0.03]"
                   >
                     <input
                       type="checkbox"
-                      className="accent-brand"
                       checked={camIds.includes(c.id)}
                       onChange={() => toggleCam(c.id)}
                     />
-                    <span className="text-fg">{c.name}</span>
+                    <span className="truncate">{c.name}</span>
                   </label>
                 ))}
-                {(cameras ?? []).length === 0 && (
-                  <p className="px-3 py-2 text-xs text-fg-faint">No cameras to assign.</p>
+                {camList.length === 0 && (
+                  <p className="px-3 py-2.5 text-xs text-fg-faint">No cameras to assign.</p>
                 )}
               </div>
+              <p className="hint mt-1.5">Viewers see live video and recordings of these cameras only.</p>
             </div>
           )}
 
           {isEdit && !isSelf && (
-            <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center justify-between gap-4 py-5">
               <div>
                 <span className="text-sm text-fg">Disabled</span>
                 <p className="text-xs text-fg-faint">Prevent this account from signing in</p>
@@ -212,7 +233,11 @@ export function UserModal({
             </div>
           )}
 
-          {error && <p className="text-sm text-rec">{error}</p>}
+          {error && (
+            <div className="py-4">
+              <p className="text-sm text-danger">{error}</p>
+            </div>
+          )}
         </div>
       </Modal>
 

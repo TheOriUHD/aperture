@@ -188,3 +188,24 @@ func (s *Server) handleEventThumb(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeFile(w, r, e.ThumbPath)
 }
+
+// handleCameraTracks returns where recognised objects were between ?from and ?to
+// (unix ms), so playback can draw boxes that follow them. The window is capped
+// at an hour and the result at 20,000 points.
+func (s *Server) handleCameraTracks(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	from, to := parseRange(r)
+	if to <= from {
+		writeJSON(w, http.StatusOK, []store.TrackPoint{})
+		return
+	}
+	if to-from > 3600_000 {
+		from = to - 3600_000
+	}
+	pts, err := s.st.TrackPoints(id, from, to, 20000)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, pts)
+}

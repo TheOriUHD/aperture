@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Copy, Check, KeyRound } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { Switch } from "./ui/Switch";
+import { SettingsHeading, SettingsRow } from "./ui/Layout";
+import { CodeValue, CopyIconButton, IntegrationHeader, SectionTitle, StatusPill, ToggleRow } from "./IntegrationParts";
 import { useOIDC, useSetOIDC } from "../hooks/useSystem";
 
 export function OidcSettings() {
@@ -39,133 +41,111 @@ export function OidcSettings() {
   }
 
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="flex items-center gap-2 text-sm font-medium text-fg">
-          <KeyRound className="h-4 w-4" />
-          Single sign-on (OIDC)
-        </h2>
-        {oidc?.enabled && (
-          <span className="pill pill-online">
-            <span className="h-1.5 w-1.5 rounded-full bg-online" />
-            Enabled
-          </span>
-        )}
-      </div>
-
-      <p className="text-xs text-fg-faint mb-4 leading-relaxed">
+    <div>
+      <IntegrationHeader
+        icon={KeyRound}
+        title="Single sign-on (OIDC)"
+        status={oidc?.enabled && <StatusPill tone="ok">Enabled</StatusPill>}
+      >
         Let users sign in with an OpenID Connect provider (Authentik, Authelia, Keycloak, Google,
         Entra ID…). Existing accounts are matched by email; new sign-ins can be auto-provisioned as
         viewers. Local accounts keep working alongside SSO.
-      </p>
+      </IntegrationHeader>
 
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="text-sm text-fg">Enable SSO login</span>
-            <p className="text-xs text-fg-faint">Shows a sign-in button on the login page</p>
-          </div>
+      <SettingsHeading>Provider</SettingsHeading>
+      <div className="divide-y divide-line">
+        <ToggleRow label="Enable SSO login" hint="Shows a sign-in button on the login page">
           <Switch checked={enabled} onChange={setEnabled} label="Enable SSO" />
-        </div>
-
-        <div>
-          <label className="label">Button label</label>
+        </ToggleRow>
+        <SettingsRow label="Button label">
           <input
-            className="input"
+            className="input max-w-md"
             placeholder="Single sign-on"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-        </div>
-
-        <div>
-          <label className="label">Issuer URL</label>
+        </SettingsRow>
+        <SettingsRow
+          label="Issuer URL"
+          hint={
+            <>
+              The provider&apos;s base URL — its <code className="text-fg-muted">.well-known/openid-configuration</code> must be reachable from Aperture.
+            </>
+          }
+        >
           <input
-            className="input font-mono text-xs"
+            className="input max-w-md font-mono text-xs"
             placeholder="https://auth.example.com/application/o/aperture/"
             value={issuer}
             onChange={(e) => setIssuer(e.target.value)}
           />
-          <p className="text-xs text-fg-faint mt-1.5">
-            The provider&apos;s base URL — its <code className="text-fg-muted">.well-known/openid-configuration</code> must be reachable from Aperture.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Client ID</label>
-            <input className="input" value={clientId} onChange={(e) => setClientId(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Client secret</label>
-            <input
-              className="input"
-              type="password"
-              placeholder={oidc?.hasSecret ? "Leave blank to keep" : ""}
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="label">Restrict to email domain (optional)</label>
+        </SettingsRow>
+        <SettingsRow label="Client ID">
+          <input className="input max-w-md" value={clientId} onChange={(e) => setClientId(e.target.value)} />
+        </SettingsRow>
+        <SettingsRow label="Client secret">
           <input
-            className="input"
+            className="input max-w-md"
+            type="password"
+            placeholder={oidc?.hasSecret ? "Leave blank to keep" : ""}
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+          />
+        </SettingsRow>
+        <SettingsRow label="Restrict to email domain (optional)">
+          <input
+            className="input max-w-md"
             placeholder="example.com"
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
           />
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="text-sm text-fg">Auto-create accounts</span>
-            <p className="text-xs text-fg-faint">First-time SSO users become viewers automatically</p>
-          </div>
+        </SettingsRow>
+        <ToggleRow label="Auto-create accounts" hint="First-time SSO users become viewers automatically">
           <Switch checked={autoCreate} onChange={setAutoCreate} label="Auto-create accounts" />
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            className="btn-primary"
-            disabled={setOIDC.isPending}
-            onClick={async () => {
-              await setOIDC.mutateAsync({
-                enabled,
-                issuer,
-                clientId,
-                clientSecret: clientSecret || undefined,
-                domain,
-                autoCreate,
-                name,
-              });
-              setClientSecret("");
-              setSaved(true);
-              setTimeout(() => setSaved(false), 1500);
-            }}
-          >
-            {setOIDC.isPending ? "Saving…" : "Save"}
-          </button>
-          {saved && <span className="text-xs text-online">Saved.</span>}
-        </div>
+        </ToggleRow>
+        <SettingsRow label="">
+          <div className="flex items-center gap-3">
+            <button
+              className="btn-primary"
+              disabled={setOIDC.isPending}
+              onClick={async () => {
+                await setOIDC.mutateAsync({
+                  enabled,
+                  issuer,
+                  clientId,
+                  clientSecret: clientSecret || undefined,
+                  domain,
+                  autoCreate,
+                  name,
+                });
+                setClientSecret("");
+                setSaved(true);
+                setTimeout(() => setSaved(false), 1500);
+              }}
+            >
+              {setOIDC.isPending ? "Saving…" : "Save"}
+            </button>
+            {saved && <span className="text-xs text-online">Saved.</span>}
+          </div>
+        </SettingsRow>
       </div>
 
       {oidc?.redirectUrl && (
-        <div className="border-t border-line mt-5 pt-4">
-          <p className="text-xs font-medium text-fg-muted mb-1">Redirect URI</p>
-          <p className="text-xs text-fg-faint mb-2.5">
-            Register this callback URL in your provider (set <code className="text-fg-muted">APERTURE_PUBLIC_URL</code> so it matches your real address):
-          </p>
-          <div className="flex items-center gap-2 text-xs">
-            <code className="flex-1 truncate rounded bg-ink-850 px-2 py-1 font-mono text-fg-muted">
-              {oidc.redirectUrl}
-            </code>
-            <button className="btn-icon h-7 w-7" onClick={copyRedirect} aria-label="Copy redirect URL">
-              {copied ? <Check className="h-3.5 w-3.5 text-online" /> : <Copy className="h-3.5 w-3.5" />}
-            </button>
+        <>
+          <SectionTitle
+            description={
+              <>
+                Register this callback URL in your provider (set <code className="text-fg-muted">APERTURE_PUBLIC_URL</code> so it matches your real address):
+              </>
+            }
+          >
+            Redirect URI
+          </SectionTitle>
+          <div className="flex max-w-2xl items-center gap-1">
+            <CodeValue className="flex-1">{oidc.redirectUrl}</CodeValue>
+            <CopyIconButton copied={copied} onClick={copyRedirect} label="Copy redirect URL" />
           </div>
-        </div>
+        </>
       )}
     </div>
   );

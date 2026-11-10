@@ -55,14 +55,34 @@ func TestWrittenDuration(t *testing.T) {
 // Without this a reconnect moved a camera's timestamps by hours: 2-second segments
 // on one camera, a single 1.3 GB file on the other.
 func TestRecordingTimestampsComeFromTheClock(t *testing.T) {
-	args := inputArgs("rtsp://restream/cam")
-	flag := slices.Index(args, "-use_wallclock_as_timestamps")
-	if flag < 0 || args[flag+1] != "1" {
-		t.Fatalf("recording trusts the stream's timestamps: %v", args)
+	for _, reencode := range []bool{false, true} {
+		args := inputArgs("rtsp://restream/cam", reencode)
+		flag := slices.Index(args, "-use_wallclock_as_timestamps")
+		if flag < 0 || args[flag+1] != "1" {
+			t.Fatalf("recording trusts the stream's timestamps: %v", args)
+		}
+		// An ffmpeg input option only applies to the -i after it.
+		if input := slices.Index(args, "-i"); flag > input {
+			t.Errorf("the flag comes after -i, where it does nothing: %v", args)
+		}
 	}
-	// An ffmpeg input option only applies to the -i after it.
-	if input := slices.Index(args, "-i"); flag > input {
-		t.Errorf("the flag comes after -i, where it does nothing: %v", args)
+}
+
+// Uncapped, a re-encoder's decoder and encoder each size their thread pools to the
+// host and held 1.3 GB for one 4K camera. Stream copy decodes nothing, so it takes
+// no cap.
+func TestReencodeCapsThreads(t *testing.T) {
+	in := inputArgs("rtsp://restream/cam", true)
+	th, input := slices.Index(in, "-threads"), slices.Index(in, "-i")
+	if th < 0 || th > input || in[th+1] != reencodeThreads {
+		t.Errorf("decoder threads not capped before -i: %v", in)
+	}
+	if slices.Contains(inputArgs("rtsp://restream/cam", false), "-threads") {
+		t.Error("stream copy should not set decoder threads")
+	}
+	out := videoArgs(store.Camera{RecordHeight: 1080}, true)
+	if th := slices.Index(out, "-threads"); th < 0 || out[th+1] != reencodeThreads {
+		t.Errorf("encoder threads not capped: %v", out)
 	}
 }
 
@@ -120,7 +140,7 @@ func TestUploaderRestartsACameraThatStoppedRotating(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			r.active[cam.ID] = cancel
+			r.active[cam.ID] = &camProc{stop: cancel, done: make(chan struct{})}
 			r.uploadOnce()
 			if restarted := ctx.Err() != nil; restarted != c.restart {
 				t.Errorf("restarted = %v, want %v", restarted, c.restart)

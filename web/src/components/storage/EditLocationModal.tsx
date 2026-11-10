@@ -163,19 +163,19 @@ export function EditLocationModal({
       onClose={onClose}
       title={isDefault ? "Edit primary storage" : `Edit ${loc.name}`}
       footer={
-        <div className="flex items-center justify-end gap-2">
-          {err && <span className="mr-auto text-xs text-rec">{err}</span>}
-          <button className="btn-ghost h-9" onClick={onClose} disabled={busy}>
+        <div className="flex w-full items-center justify-end gap-2">
+          {err && <span className="mr-auto text-xs text-danger">{err}</span>}
+          <button className="btn-ghost" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button className="btn-primary h-9" onClick={save} disabled={busy}>
+          <button className="btn-primary" onClick={save} disabled={busy}>
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             Save changes
           </button>
         </div>
       }
     >
-      <div className="space-y-4">
+      <div className="space-y-5">
         {!isDefault && (
           <div>
             <label className="label">Name</label>
@@ -184,10 +184,10 @@ export function EditLocationModal({
         )}
 
         {/* Allocation */}
-        <div className="rounded-lg border border-line bg-ink-850 p-3">
-          <div className="flex items-end justify-between mb-2">
+        <div className="rounded-lg border border-line-strong p-4">
+          <div className="mb-2 flex items-end justify-between">
             <label className="label mb-0">{isDefault ? "Reserved for Aperture" : isNetwork ? "Allocation (soft cap)" : "Allocation"}</label>
-            <span className="text-lg font-semibold text-fg tabular-nums">{formatBytes(alloc)}</span>
+            <span className="text-lg font-semibold tabular-nums text-fg">{formatBytes(alloc)}</span>
           </div>
           <input
             type="range"
@@ -196,9 +196,10 @@ export function EditLocationModal({
             step={GiB / 2}
             value={clamp(alloc, 0, maxAlloc)}
             onChange={(e) => setAlloc(clamp(Number(e.target.value), 0, maxAlloc))}
-            className="w-full accent-brand"
+            className="w-full"
+            aria-label="Allocation"
           />
-          <div className="flex justify-between text-[11px] text-fg-faint mt-1">
+          <div className="mt-1 flex justify-between text-[11px] text-fg-faint">
             <span>Off</span>
             <span>
               {isDefault && disk
@@ -208,7 +209,7 @@ export function EditLocationModal({
                   : "Capacity unknown"}
             </span>
           </div>
-          <p className="mt-2 text-[11px] text-fg-faint">
+          <p className="hint mt-2">
             {isDefault
               ? "Space is hard-reserved on the local disk; oldest footage is trimmed at the limit. 0 = unlimited (safety net only)."
               : isNetwork
@@ -222,12 +223,14 @@ export function EditLocationModal({
             recorded to both at once, each keeping its own retention. */}
         <div>
           <label className="label">Cameras recording here</label>
-          <div className="space-y-1 rounded-lg border border-line bg-ink-850 p-2.5">
+          <div className="grid grid-cols-1 gap-x-4 rounded-lg border border-line-strong px-2 py-1.5 sm:grid-cols-2">
             {(allCameras ?? []).map((c) => (
-              <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-0.5 py-1 text-sm text-fg">
+              <label
+                key={c.id}
+                className="flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-1.5 text-sm text-fg hover:bg-white/[0.03]"
+              >
                 <input
                   type="checkbox"
-                  className="accent-brand"
                   checked={ticked.has(c.id)}
                   onChange={() =>
                     setTicked((t) => {
@@ -240,9 +243,9 @@ export function EditLocationModal({
                 <span className="truncate">{c.name}</span>
               </label>
             ))}
-            {(allCameras ?? []).length === 0 && <p className="text-xs text-fg-faint">No cameras yet.</p>}
+            {(allCameras ?? []).length === 0 && <p className="px-1.5 py-1.5 text-xs text-fg-faint">No cameras yet.</p>}
           </div>
-          <p className="mt-1 text-[11px] text-fg-faint">
+          <p className="hint mt-1.5">
             A camera can be ticked on several destinations — it records to all of them at the
             same time. New footage only; existing recordings stay where they are.
           </p>
@@ -252,30 +255,30 @@ export function EditLocationModal({
             wizard so every change is PROBED before it is saved — an untested
             config can no longer be written from here. */}
         {isNetwork && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between rounded-lg border border-line bg-ink-850 px-3 py-2">
-              <div>
+          <div className="divide-y divide-line-strong rounded-lg border border-line-strong">
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
                 <p className="text-sm text-fg">Connection &amp; credentials</p>
-                <p className="text-[11px] text-fg-faint">
+                <p className="hint">
                   {String(loc.config?.host ?? "")} — changes are tested before they apply.
                 </p>
               </div>
-              <button className="btn-subtle h-8" onClick={onReconfigure}>
+              <button className="btn-ghost shrink-0" onClick={onReconfigure}>
                 Reconfigure…
               </button>
             </div>
-            <div className="flex items-center justify-between rounded-lg border border-line bg-ink-850 px-3 py-2">
-              <div>
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
                 <p className="text-sm text-fg">Enabled</p>
-                <p className="text-[11px] text-fg-faint">Turn off to pause recording to this destination.</p>
+                <p className="hint">Turn off to pause recording to this destination.</p>
               </div>
-              <Switch checked={enabled} onChange={setEnabled} />
+              <Switch checked={enabled} onChange={setEnabled} label="Enabled" />
             </div>
           </div>
         )}
 
         {isDefault && (
-          <p className="text-[11px] text-fg-faint">
+          <p className="hint">
             The app and database always live with the install and aren’t affected by this limit.
           </p>
         )}

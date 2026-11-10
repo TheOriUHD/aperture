@@ -82,6 +82,10 @@ func (s *Server) handleStreamWS(w http.ResponseWriter, r *http.Request) {
 			name = stream.SubStreamName(id)
 		}
 	}
+	// While someone watches, object recognition keeps looking even when nothing
+	// moves, so a person standing still in view is boxed too.
+	done := s.detect.Watch(id)
+	defer done()
 	s.sm.ProxyWS(w, r, name)
 }
 

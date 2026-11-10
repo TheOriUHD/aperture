@@ -39,6 +39,7 @@ export interface CameraInput {
   recordHeight?: number;
   recordFps?: number;
   recordKbps?: number;
+  haPublish?: boolean;
 }
 
 export function useCreateCamera() {

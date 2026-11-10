@@ -143,8 +143,8 @@ func (m *Manager) Restart(ctx context.Context, cam *store.Camera) error {
 // stream is always cleaned up.
 func (m *Manager) TestStream(ctx context.Context, rtspURL string) ([]byte, error) {
 	rtspURL = strings.TrimSpace(rtspURL)
-	if !strings.HasPrefix(rtspURL, "rtsp://") {
-		return nil, fmt.Errorf("must be an rtsp:// URL")
+	if !playable(rtspURL) {
+		return nil, fmt.Errorf("must be an rtsp://, rtsps:// or rtspx:// URL")
 	}
 	name := "test_" + store.NewID()
 	if err := m.putStream(ctx, name, []string{rtspURL}); err != nil {
@@ -328,6 +328,26 @@ func (m *Manager) Snapshot(ctx context.Context, cameraID string) ([]byte, error)
 	m.snaps[cameraID] = cachedSnap{data: data, ts: time.Now()}
 	m.snapMu.Unlock()
 	return data, nil
+}
+
+// SnapshotSub grabs a frame from the camera's sub stream (go2rtc decodes it
+// into a JPEG). Some main streams, such as dual-lens cameras with two video
+// tracks, can't be turned into a single picture; their sub stream can.
+func (m *Manager) SnapshotSub(ctx context.Context, cameraID string) ([]byte, error) {
+	u := m.apiBase + "/api/frame.jpeg?src=" + url.QueryEscape(SubStreamName(cameraID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := m.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("go2rtc frame.jpeg (sub stream): %s", resp.Status)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // SnapshotCached returns a recent cached frame instantly when available, only

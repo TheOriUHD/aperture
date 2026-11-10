@@ -4,11 +4,11 @@ import { useSystemStatus, useRestoreBackup, type SystemStatus } from "../hooks/u
 import { downloadFile } from "../lib/api";
 import { formatBytes, fmtRelative, fmtDuration } from "../lib/format";
 import { recordingDisplay, type Level } from "../lib/recordingState";
+import { SettingsHeading, SettingsRow, StatusDot } from "./ui/Layout";
+import { Skeleton } from "./ui/Skeleton";
 
 function Dot({ level }: { level: Level }) {
-  const color =
-    level === "ok" ? "bg-online" : level === "idle" ? "bg-fg-faint" : level === "warn" ? "bg-[#e0a23a]" : "bg-rec";
-  return <span className={`h-2 w-2 rounded-full ${color} shrink-0`} />;
+  return <StatusDot tone={level === "ok" ? "ok" : level === "idle" ? "off" : level === "warn" ? "warn" : "bad"} />;
 }
 
 function issueCount(s: SystemStatus): number {
@@ -52,13 +52,14 @@ export function SystemHealth() {
 
   if (!s) {
     return (
-      <div className="panel">
-        <h2 className="flex items-center gap-2 text-sm font-medium text-fg mb-3">
-          <Activity className="h-4 w-4" />
-          System health
-        </h2>
-        <p className="text-xs text-fg-faint">Loading…</p>
-      </div>
+      <>
+        <SettingsHeading>System health</SettingsHeading>
+        <div className="space-y-2">
+          <Skeleton className="h-10" />
+          <Skeleton className="h-10" />
+          <Skeleton className="h-10" />
+        </div>
+      </>
     );
   }
 
@@ -69,170 +70,207 @@ export function SystemHealth() {
   const hasAlloc = totalAlloc > 0;
   const usedPct = hasAlloc ? Math.min(100, Math.round((s.storage.usedBytes / totalAlloc) * 100)) : 0;
   const go2rtcLevel: Level = !s.go2rtc.reachable ? "down" : s.go2rtc.streams === 0 ? "warn" : "ok";
+  const flush = "[&_td:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th:first-child]:pl-0 [&_th:last-child]:pr-0";
 
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="flex items-center gap-2 text-sm font-medium text-fg">
-          <Activity className="h-4 w-4" />
-          System health
-        </h2>
-        <span className={`pill ${issues === 0 ? "pill-online" : "bg-rec/15 text-rec"}`}>
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h3 className="text-sm font-semibold text-fg">System health</h3>
+        <span className={issues === 0 ? "pill-green" : "pill-red"}>
           <Dot level={issues === 0 ? "ok" : "down"} />
           {issues === 0 ? "All systems normal" : `${issues} ${issues === 1 ? "issue" : "issues"}`}
         </span>
       </div>
 
-      <Row icon={Server} label="Live streaming (go2rtc)">
-        <Dot level={go2rtcLevel} />
-        <span className="text-xs text-fg-muted">
-          {!s.go2rtc.reachable
-            ? "Unreachable"
-            : `${s.go2rtc.streams} ${s.go2rtc.streams === 1 ? "stream" : "streams"} registered`}
-        </span>
-      </Row>
+      <div className="divide-y divide-line">
+        <SettingsRow label={<RowLabel icon={Server}>Live streaming (go2rtc)</RowLabel>}>
+          <Status level={go2rtcLevel}>
+            {!s.go2rtc.reachable
+              ? "Unreachable"
+              : `${s.go2rtc.streams} ${s.go2rtc.streams === 1 ? "stream" : "streams"} registered`}
+          </Status>
+        </SettingsRow>
 
-      {/* Per-camera: independent live + recording signals + self-heal + coverage */}
-      <div className="mt-2 border-t border-line pt-2 space-y-1.5">
-        {s.cameras.map((c) => {
-          const live: Level = !c.enabled ? "warn" : c.liveOk ? "ok" : "down";
-          const rec = recordingDisplay(c.recordingState);
-          return (
-            <div key={c.cameraId} className="flex items-center gap-3 text-xs">
-              <Cctv className="h-3.5 w-3.5 text-fg-faint shrink-0" />
-              <span className="flex-1 truncate text-fg">
-                {c.name}
-                {(c.restartsToday ?? 0) > 0 && (
-                  <span className="ml-1.5 text-[#e0a23a]" title="Watchdog auto-restarts today">
-                    ↻{c.restartsToday}
-                  </span>
-                )}
-              </span>
-              {c.coveragePercent != null && (
-                <span
-                  className={`w-10 text-right tabular-nums ${c.coveragePercent < 95 ? "text-[#e0a23a]" : "text-fg-faint"}`}
-                  title="Today's recording coverage"
-                >
-                  {c.coveragePercent}%
-                </span>
-              )}
-              <span className="flex items-center gap-1.5" title="Live view">
-                <Dot level={live} />
-                <span className="text-fg-faint w-7">live</span>
-              </span>
-              <span className="flex items-center gap-1.5" title={rec.title}>
-                <Dot level={rec.level} />
-                <span className="text-fg-faint w-8">{rec.label}</span>
-              </span>
-              <span className="text-fg-faint w-16 text-right tabular-nums">
-                {c.lastSegmentTs ? fmtRelative(c.lastSegmentTs) : "—"}
-              </span>
-            </div>
-          );
-        })}
-        {s.cameras.length === 0 && <p className="text-xs text-fg-faint">No cameras configured.</p>}
-      </div>
-
-      {/* Storage — scoped to Aperture's allocation, never the whole disk */}
-      <div className="mt-3 border-t border-line pt-3">
-        <Row icon={HardDrive} label="Storage">
+        {/* Storage — scoped to Aperture's allocation, never the whole disk */}
+        <SettingsRow label={<RowLabel icon={HardDrive}>Storage</RowLabel>}>
           {hasAlloc ? (
-            <>
-              <Dot level="ok" />
-              <span className="text-xs text-fg-muted">
+            <div className="flex max-w-md items-center gap-3">
+              <Status level="ok">
                 {formatBytes(s.storage.usedBytes)} of {formatBytes(totalAlloc)}
-              </span>
-            </>
+              </Status>
+              <div className="h-1.5 min-w-[80px] flex-1 overflow-hidden rounded-full bg-ink-700">
+                <div className="h-full rounded-full bg-brand" style={{ width: `${usedPct}%` }} />
+              </div>
+              <span className="w-9 text-right text-xs tabular-nums text-fg-faint">{usedPct}%</span>
+            </div>
           ) : (
-            <>
-              <Dot level="warn" />
-              <span className="text-xs text-fg-muted">No allocation set</span>
-            </>
+            <Status level="warn">No allocation set</Status>
           )}
-        </Row>
-        {hasAlloc && (
-          <div className="mt-2 h-1.5 w-full rounded-full bg-ink-700 overflow-hidden">
-            <div className="h-full rounded-full bg-brand" style={{ width: `${usedPct}%` }} />
-          </div>
-        )}
-      </div>
+        </SettingsRow>
 
-      {/* Integrations */}
-      <div className="mt-3 border-t border-line pt-2 space-y-1.5">
+        {/* Integrations */}
         {s.homeAssistant.enabled && (
-          <Row icon={Home} label="Home Assistant">
-            <Dot level={s.homeAssistant.connected ? "ok" : "down"} />
-            <span className="text-xs text-fg-muted">{s.homeAssistant.connected ? "Connected" : "Disconnected"}</span>
-          </Row>
+          <SettingsRow label={<RowLabel icon={Home}>Home Assistant</RowLabel>}>
+            <Status level={s.homeAssistant.connected ? "ok" : "down"}>
+              {s.homeAssistant.connected ? "Connected" : "Disconnected"}
+            </Status>
+          </SettingsRow>
         )}
         {s.weather.configured && (
-          <Row icon={CloudSun} label="Weather">
-            <Dot level={!s.weather.enabled ? "warn" : s.weather.connected ? "ok" : "down"} />
-            <span className="text-xs text-fg-muted">
+          <SettingsRow label={<RowLabel icon={CloudSun}>Weather</RowLabel>}>
+            <Status level={!s.weather.enabled ? "warn" : s.weather.connected ? "ok" : "down"}>
               {!s.weather.enabled ? "Disabled" : s.weather.connected ? `${s.weather.source}` : "No data"}
-            </span>
-          </Row>
+            </Status>
+          </SettingsRow>
         )}
+
+        <SettingsRow label={<RowLabel icon={Activity}>Uptime</RowLabel>}>
+          <span className="text-sm tabular-nums text-fg">
+            {fmtDuration(s.uptimeSec * 1000)} <span className="text-fg-faint">· version {s.version}</span>
+          </span>
+        </SettingsRow>
       </div>
+
+      {/* Per-camera: independent live + recording signals + self-heal + coverage */}
+      <SettingsHeading>Cameras</SettingsHeading>
+      {s.cameras.length === 0 ? (
+        <p className="flex items-center gap-3 border-y border-line py-4 text-sm text-fg-faint">
+          <Cctv className="h-4 w-4 shrink-0" />
+          No cameras configured.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className={`tbl table-fixed ${flush}`}>
+            <thead>
+              <tr>
+                <th>Camera</th>
+                <th className="w-20 sm:w-28">Live</th>
+                <th className="w-20 sm:w-28">Recording</th>
+                <th className="hidden w-32 sm:table-cell" title="Today's recording coverage">
+                  Coverage today
+                </th>
+                <th className="hidden w-36 !text-right sm:table-cell">Last segment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {s.cameras.map((c) => {
+                const live: Level = !c.enabled ? "warn" : c.liveOk ? "ok" : "down";
+                const rec = recordingDisplay(c.recordingState);
+                return (
+                  <tr key={c.cameraId} className="hover:bg-white/[0.02]">
+                    <td className="py-1.5">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <Cctv className="h-4 w-4 shrink-0 text-fg-faint" />
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-fg">{c.name}</span>
+                            {(c.restartsToday ?? 0) > 0 && (
+                              <span className="pill-orange shrink-0" title="Watchdog auto-restarts today">
+                                ↻{c.restartsToday}
+                              </span>
+                            )}
+                          </div>
+                          {/* On a phone, coverage and the last segment fold under the name. */}
+                          {(c.coveragePercent != null || !!c.lastSegmentTs) && (
+                            <p className="truncate text-xs tabular-nums text-fg-faint sm:hidden">
+                              {c.coveragePercent != null && (
+                                <span className={c.coveragePercent < 95 ? "text-warn" : ""}>{c.coveragePercent}%</span>
+                              )}
+                              {c.coveragePercent != null && c.lastSegmentTs ? " · " : ""}
+                              {c.lastSegmentTs ? fmtRelative(c.lastSegmentTs) : ""}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td title="Live view">
+                      <span className="inline-flex items-center gap-2">
+                        <Dot level={live} />
+                        <span className="text-fg-muted">live</span>
+                      </span>
+                    </td>
+                    <td title={rec.title}>
+                      <span className="inline-flex items-center gap-2">
+                        <Dot level={rec.level} />
+                        <span className="text-fg-muted">{rec.label}</span>
+                      </span>
+                    </td>
+                    <td className="hidden sm:table-cell" title="Today's recording coverage">
+                      {c.coveragePercent != null ? (
+                        <span className={`tabular-nums ${c.coveragePercent < 95 ? "text-warn" : ""}`}>
+                          {c.coveragePercent}%
+                        </span>
+                      ) : (
+                        <span className="text-fg-faint">—</span>
+                      )}
+                    </td>
+                    <td className="hidden text-right tabular-nums text-fg-muted sm:table-cell">
+                      {c.lastSegmentTs ? fmtRelative(c.lastSegmentTs) : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Maintenance: backup / restore / diagnostics */}
-      <div className="mt-3 border-t border-line pt-3">
-        <p className="text-xs font-medium text-fg-muted mb-2">Maintenance</p>
-        <div className="flex flex-wrap gap-2">
-          <button
-            className="btn-subtle h-8"
-            onClick={() => downloadFile("/api/system/backup", "aperture-backup.json")}
-          >
-            <Download className="h-3.5 w-3.5" />
+      <SettingsHeading>Maintenance</SettingsHeading>
+      <div className="divide-y divide-line">
+        <SettingsRow
+          label="Backup"
+          hint="Cameras, users, rules & settings (not footage). It contains camera credentials and password hashes — store it securely."
+        >
+          <button className="btn-ghost" onClick={() => downloadFile("/api/system/backup", "aperture-backup.json")}>
+            <Download className="h-4 w-4" />
             Download backup
           </button>
+        </SettingsRow>
+        <SettingsRow label="Restore" hint="Restoring replaces all configuration and may sign you out.">
+          <div className="flex flex-wrap items-center gap-3">
+            <button className="btn-ghost" disabled={restore.isPending} onClick={() => fileRef.current?.click()}>
+              <Upload className="h-4 w-4" />
+              {restore.isPending ? "Restoring…" : "Restore…"}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,application/json"
+              className="sr-only"
+              onChange={onRestoreFile}
+            />
+            {restoreMsg && <p className={`text-xs ${restoreErr ? "text-danger" : "text-online"}`}>{restoreMsg}</p>}
+          </div>
+        </SettingsRow>
+        <SettingsRow label="Diagnostics">
           <button
-            className="btn-subtle h-8"
+            className="btn-ghost"
             onClick={() => downloadFile("/api/system/diagnostics", "aperture-diagnostics.tar.gz")}
           >
-            <FileDown className="h-3.5 w-3.5" />
-            Diagnostics
+            <FileDown className="h-4 w-4" />
+            Download diagnostics
           </button>
-          <button className="btn-subtle h-8" disabled={restore.isPending} onClick={() => fileRef.current?.click()}>
-            <Upload className="h-3.5 w-3.5" />
-            {restore.isPending ? "Restoring…" : "Restore…"}
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".json,application/json"
-            className="sr-only"
-            onChange={onRestoreFile}
-          />
-        </div>
-        {restoreMsg && <p className={`text-xs mt-2 ${restoreErr ? "text-rec" : "text-online"}`}>{restoreMsg}</p>}
-        <p className="text-[11px] text-fg-faint mt-1.5 leading-relaxed">
-          Backup includes cameras, users, rules &amp; settings (not footage). It contains camera credentials and
-          password hashes — store it securely. Restoring replaces all configuration and may sign you out.
-        </p>
+        </SettingsRow>
       </div>
-
-      <p className="mt-3 border-t border-line pt-2 text-[11px] text-fg-faint">
-        Uptime {fmtDuration(s.uptimeSec * 1000)} · version {s.version}
-      </p>
-    </div>
+    </>
   );
 }
 
-function Row({
-  icon: Icon,
-  label,
-  children,
-}: {
-  icon: typeof Activity;
-  label: string;
-  children: React.ReactNode;
-}) {
+function RowLabel({ icon: Icon, children }: { icon: typeof Activity; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-3 text-sm">
-      <Icon className="h-4 w-4 text-fg-muted shrink-0" />
-      <span className="flex-1 text-fg-muted">{label}</span>
-      <span className="flex items-center gap-2">{children}</span>
-    </div>
+    <span className="flex items-center gap-2.5">
+      <Icon className="h-4 w-4 shrink-0 text-fg-faint" />
+      {children}
+    </span>
+  );
+}
+
+function Status({ level, children }: { level: Level; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-2 whitespace-nowrap text-sm text-fg">
+      <Dot level={level} />
+      {children}
+    </span>
   );
 }

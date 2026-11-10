@@ -96,6 +96,10 @@ type Server struct {
 	denoPath  string
 	sdkModule string // absolute path to the local backend SDK module (--import-map target)
 	apiBase   string // base URL a backend extension calls (e.g. http://localhost:8080)
+
+	// streams is closed when the HTTP server shuts down, ending the long-lived
+	// event streams so Shutdown is not left waiting on them (shutdown.go).
+	streams closeSignal
 }
 
 // SetStorage wires the storage-backend registry and credential cipher used for
@@ -303,6 +307,7 @@ func (s *Server) routes() http.Handler {
 		g.Post("/cameras/{id}/lease", access{scopes: []string{ScopeMediaRead}, camera: camScopeParam}, s.handleCreateLease) // T2.8
 		g.Delete("/cameras/{id}/lease/{leaseId}", access{scopes: []string{ScopeMediaRead}, camera: camScopeParam}, s.handleReleaseLease)
 		g.Get("/cameras/{id}/events", scopedCam(ScopeEventsRead), s.handleCameraEvents)
+		g.Get("/cameras/{id}/tracks", scopedCam(ScopeEventsRead), s.handleCameraTracks)
 		g.Get("/cameras/{id}/hls", scopedCam(ScopeMediaRead), s.handleHLS)
 		g.Get("/cameras/{id}/seg/{seg}", scopedCam(ScopeMediaRead), s.handleSegmentFile)
 		g.Delete("/cameras/{id}/recordings", scopedCam(ScopeMediaWrite), s.handleDeleteRecordings) // + internal admin check
@@ -344,6 +349,7 @@ func (s *Server) routes() http.Handler {
 		// session/CLI (all roles) and is scoped to site:read for tokens, rather
 		// than admin-gated (which would break the header for non-admin users).
 		g.Get("/system/settings", scoped(ScopeSiteRead), s.handleGetSettings)
+		g.Get("/system/hardware", scoped(ScopeSiteRead), s.handleGetHardware)
 		g.Get("/system/site", scoped(ScopeSiteRead), s.handleGetSite)
 		g.Get("/system/weather/now", scoped(ScopeSiteRead), s.handleWeatherNow)
 		g.Get("/system/weather/at", scoped(ScopeSiteRead), s.handleWeatherAt)
@@ -371,6 +377,7 @@ func (s *Server) routes() http.Handler {
 		g.Put("/cameras/{id}/schedule", adminScoped(ScopeSchedulesWrite), s.handleSetSchedule)
 		g.Put("/cameras/{id}/zones", adminScoped(ScopeZonesWrite), s.handleSetZones)
 		g.Put("/system/settings", adminScoped(ScopeSiteWrite), s.handleSetSettings)
+		g.Put("/system/hardware", adminScoped(ScopeSiteWrite), s.handleSetHardware)
 		g.Put("/system/site", adminScoped(ScopeSiteWrite), s.handleSetSite)
 		g.Get("/system/geocode", adminScoped(ScopeSiteRead), s.handleGeocode)
 		g.Get("/system/geo/resolve", adminScoped(ScopeSiteRead), s.handleResolveGeo)
@@ -429,6 +436,13 @@ func (s *Server) routes() http.Handler {
 		g.Get("/system/detection", adminScoped(ScopeDetectionRead), s.handleGetDetection)
 		g.Put("/system/detection", adminScoped(ScopeDetectionWrite), s.handleSetDetection)
 		g.Post("/system/detection/test", adminScoped(ScopeDetectionWrite), s.handleTestDetection)
+		g.Get("/system/ai", adminScoped(ScopeDetectionRead), s.handleGetAI)
+		g.Get("/system/ai/plan", adminScoped(ScopeDetectionRead), s.handlePlanAI)
+		g.Get("/system/ai/gpu", adminScoped(ScopeDetectionRead), s.handleGPUSetup)
+		g.Post("/system/ai/enable", adminScoped(ScopeDetectionWrite), s.handleEnableAI)
+		g.Post("/system/ai/cancel", adminScoped(ScopeDetectionWrite), s.handleCancelAI)
+		g.Post("/system/ai/disable", adminScoped(ScopeDetectionWrite), s.handleDisableAI)
+		g.Delete("/system/ai/files", adminScoped(ScopeDetectionWrite), s.handleRemoveAIFiles)
 		g.Get("/webhooks", adminScoped(ScopeAutomationRead), s.handleListWebhooks)
 		g.Post("/webhooks", adminScoped(ScopeAutomationWrite), s.handleCreateWebhook)
 		g.Put("/webhooks/{id}", adminScoped(ScopeAutomationWrite), s.handleUpdateWebhook)

@@ -210,22 +210,22 @@ export function StorageSetupWizard({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ zIndex: 60 }}>
-      <div className="absolute inset-0 bg-black/70 animate-fade-in" onClick={onClose} />
-      <div className="relative w-[min(96vw,680px)] card overflow-hidden shadow-pop animate-fade-in">
+      <div className="absolute inset-0 bg-black/60 animate-fade-in" onClick={onClose} />
+      <div className="card relative w-[min(96vw,680px)] overflow-hidden shadow-pop animate-fade-in">
         {/* header */}
-        <div className="flex items-center gap-3 px-5 pt-4 pb-3 border-b border-line">
-          <Database className="h-4 w-4 text-brand" />
-          <span className="text-sm font-medium text-fg">Storage setup</span>
+        <div className="flex h-14 items-center gap-3 border-b border-line px-5">
+          <Database className="h-4 w-4 text-fg-muted" />
+          <h2 className="text-base font-medium text-fg">Storage setup</h2>
           <div className="ml-auto flex items-center gap-1.5">
             {["overview", "type", "details", "testing", "allocate", "done"].map((s, i) => (
               <span
                 key={s}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === stepIndex ? "w-6 bg-brand" : i < stepIndex ? "w-4 bg-brand/50" : "w-4 bg-ink-700"
+                className={`h-1 rounded-full transition-all ${
+                  i === stepIndex ? "w-5 bg-brand" : i < stepIndex ? "w-3 bg-brand/50" : "w-3 bg-ink-600"
                 }`}
               />
             ))}
-            <button onClick={onClose} className="ml-2 btn-icon h-7 w-7" aria-label="Close">
+            <button onClick={onClose} className="btn-icon ml-2" aria-label="Close">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -354,22 +354,20 @@ function OverviewStep({
 
       {/* Fixed app & database */}
       {dataDir && (
-        <div className="mt-4 flex items-center gap-3 rounded-lg border border-line bg-ink-850 p-3">
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-ink-900">
+        <div className="mt-4 flex items-center gap-3 rounded-lg border border-line-strong p-3">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-ink-750">
             <Lock className="h-4 w-4 text-fg-faint" />
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm text-fg">App &amp; database</p>
             <p className="truncate font-mono text-[11px] text-fg-faint">{dataDir}</p>
           </div>
-          <span className="shrink-0 rounded bg-ink-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-fg-faint">
-            Fixed
-          </span>
+          <span className="pill-gray shrink-0">Fixed</span>
         </div>
       )}
 
       {/* Destinations */}
-      <p className="mt-5 mb-2 text-xs font-medium text-fg-muted">Recording destinations</p>
+      <p className="mb-2 mt-5 text-[13px] font-semibold text-fg">Recording destinations</p>
       <div className="space-y-2.5">
         {locations.map((loc) => (
           <DestinationCard
@@ -381,13 +379,13 @@ function OverviewStep({
         ))}
       </div>
 
-      <button className="btn-subtle w-full mt-3 h-10 border-dashed" onClick={onAdd}>
+      <button className="btn-outline mt-3 w-full" onClick={onAdd}>
         <Plus className="h-4 w-4" />
         Add a destination
       </button>
 
-      <div className="flex justify-end mt-5">
-        <button className="btn-primary h-9" onClick={onClose}>
+      <div className="mt-5 flex justify-end">
+        <button className="btn-primary" onClick={onClose}>
           Done
         </button>
       </div>
@@ -431,22 +429,18 @@ function DestinationCard({
   const pct = Math.min(100, Math.round((loc.usedBytes / denom) * 100));
   const isNet = loc.type === "smb" || loc.type === "sftp";
   return (
-    <div className="rounded-lg border border-line bg-ink-850 p-3">
+    <div className="rounded-lg border border-line-strong p-3">
       <div className="flex items-start gap-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand/12">
-          {isNet ? <Server className="h-5 w-5 text-brand" /> : <HardDrive className="h-5 w-5 text-brand" />}
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-ink-750">
+          {isNet ? <Server className="h-[18px] w-[18px] text-fg-muted" /> : <HardDrive className="h-[18px] w-[18px] text-fg-muted" />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium text-fg">{loc.name}</span>
-            {loc.isDefault && (
-              <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand">
-                Primary
-              </span>
-            )}
+            {loc.isDefault && <span className="pill-blue">Primary</span>}
           </div>
           <p className="truncate font-mono text-[11px] text-fg-faint">{path || "—"}</p>
-          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-ink-900">
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-ink-650">
             <div className="h-full rounded-full bg-brand" style={{ width: `${Math.max(pct, loc.usedBytes > 0 ? 2 : 0)}%` }} />
           </div>
           <div className="mt-1 flex justify-between text-[11px] text-fg-faint tabular-nums">
@@ -460,12 +454,12 @@ function DestinationCard({
         </div>
         <div className="shrink-0">
           {loc.isDefault ? (
-            <button className="btn-subtle h-8" onClick={onAdjustPrimary}>
+            <button className="btn-ghost" onClick={onAdjustPrimary}>
               <ShieldCheck className="h-3.5 w-3.5" />
               Reserve
             </button>
           ) : (
-            <button className="btn-icon text-fg-faint hover:text-rec" title="Remove destination" onClick={onDelete}>
+            <button className="btn-icon hover:text-danger" title="Remove destination" aria-label="Remove destination" onClick={onDelete}>
               <Trash2 className="h-4 w-4" />
             </button>
           )}
@@ -508,22 +502,18 @@ function TypeStep({
               disabled={disabled}
               onClick={() => onPick(t.id)}
               className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-                active ? "border-brand bg-brand/10" : "border-line bg-ink-850 hover:bg-ink-800"
+                active ? "border-brand/70 bg-brand/10" : "border-line-strong hover:border-ink-600 hover:bg-white/[0.02]"
               } ${disabled ? "cursor-not-allowed opacity-55" : ""}`}
             >
-              <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${active ? "bg-brand/20" : "bg-ink-900"}`}>
+              <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-md ${active ? "bg-brand/15" : "bg-ink-750"}`}>
                 <t.icon className={`h-5 w-5 ${active ? "text-brand" : "text-fg-muted"}`} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-fg">{t.title}</span>
-                  {t.soon && (
-                    <span className="rounded bg-ink-900 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-faint">
-                      Soon
-                    </span>
-                  )}
+                  {t.soon && <span className="pill-gray">Soon</span>}
                 </div>
-                <p className="text-[12px] text-fg-faint">{t.sub}</p>
+                <p className="text-xs text-fg-faint">{t.sub}</p>
               </div>
               {active && <Check className="h-4 w-4 shrink-0 text-brand" />}
             </button>
@@ -531,12 +521,12 @@ function TypeStep({
         })}
       </div>
 
-      <div className="flex gap-2 mt-5">
-        <button className="btn-ghost h-9" onClick={onBack}>
+      <div className="mt-5 flex gap-2">
+        <button className="btn-ghost" onClick={onBack}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </button>
-        <button className="btn-primary h-9 flex-1" onClick={onNext}>
+        <button className="btn-primary flex-1" onClick={onNext}>
           Continue
           <ChevronRight className="h-4 w-4" />
         </button>
@@ -592,8 +582,8 @@ function DetailsStep({
 
   return (
     <div className="p-5">
-      <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-brand/15">
-        <meta.icon className="h-6 w-6 text-brand" />
+      <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-lg border border-line-strong bg-ink-850">
+        <meta.icon className="h-6 w-6 text-brand" strokeWidth={1.75} />
       </div>
       <h3 className="text-center text-base font-semibold text-fg">{meta.title}</h3>
       <p className="mx-auto mt-1 max-w-md text-center text-sm text-fg-muted">{meta.sub}</p>
@@ -613,13 +603,13 @@ function DetailsStep({
               value={cfg("path")}
               onChange={(e) => setCfg("path", e.target.value)}
             />
-            <p className="mt-1 text-[11px] text-fg-faint">Must be writable by the container — mount the disk or share there.</p>
+            <p className="hint mt-1">Must be writable by the container — mount the disk or share there.</p>
           </div>
         )}
 
         {draft.type === "smb" && (
           <>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
                 <label className="label">Host</label>
                 <input className="input" placeholder="192.168.1.10" value={cfg("host")} onChange={(e) => setCfg("host", e.target.value)} />
@@ -629,7 +619,7 @@ function DetailsStep({
                 <input className="input" type="number" placeholder="445" value={cfg("port")} onChange={(e) => setCfg("port", e.target.value ? Number(e.target.value) : "")} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Share</label>
                 <input className="input" placeholder="recordings" value={cfg("share")} onChange={(e) => setCfg("share", e.target.value)} />
@@ -639,7 +629,7 @@ function DetailsStep({
                 <input className="input" placeholder="aperture (optional)" value={cfg("subfolder")} onChange={(e) => setCfg("subfolder", e.target.value)} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Username</label>
                 <input className="input" value={cfg("user")} onChange={(e) => setCfg("user", e.target.value)} />
@@ -658,7 +648,7 @@ function DetailsStep({
 
         {draft.type === "sftp" && (
           <>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
                 <label className="label">Host</label>
                 <input className="input" placeholder="host.example.com" value={cfg("host")} onChange={(e) => setCfg("host", e.target.value)} />
@@ -668,7 +658,7 @@ function DetailsStep({
                 <input className="input" type="number" placeholder="22" value={cfg("port")} onChange={(e) => setCfg("port", e.target.value ? Number(e.target.value) : "")} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Username</label>
                 <input className="input" value={cfg("user")} onChange={(e) => setCfg("user", e.target.value)} />
@@ -703,12 +693,12 @@ function DetailsStep({
         )}
       </div>
 
-      <div className="flex gap-2 mt-5">
-        <button className="btn-ghost h-9" onClick={onBack}>
+      <div className="mt-5 flex gap-2">
+        <button className="btn-ghost" onClick={onBack}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </button>
-        <button className="btn-primary h-9 flex-1" disabled={!valid} onClick={onNext}>
+        <button className="btn-primary flex-1" disabled={!valid} onClick={onNext}>
           Test connection
           <ChevronRight className="h-4 w-4" />
         </button>
@@ -832,9 +822,9 @@ function TestingStep({
   return (
     <div className="p-5">
       <h3 className="text-base font-semibold text-fg">Testing the connection</h3>
-      <p className="mt-1 text-sm text-fg-muted font-mono text-[12px] truncate">{connectionSummary(draft)}</p>
+      <p className="mt-1 truncate font-mono text-xs text-fg-muted">{connectionSummary(draft)}</p>
 
-      <div className="mt-4 space-y-1.5">
+      <div className="mt-4 divide-y divide-line-strong rounded-lg border border-line-strong">
         {rows.map((s, i) => (
           <ChecklistRow key={`${s.id}-${i}`} step={s} />
         ))}
@@ -843,20 +833,20 @@ function TestingStep({
       {done && (
         <div
           className={`mt-4 flex items-center gap-2 rounded-lg border p-3 text-sm ${
-            ok ? "border-online/30 bg-online/10 text-fg" : "border-rec/30 bg-rec/10 text-fg"
+            ok ? "border-online/30 bg-online/10 text-fg" : "border-danger/30 bg-danger/10 text-fg"
           }`}
         >
-          {ok ? <Check className="h-4 w-4 text-online" /> : <AlertTriangle className="h-4 w-4 text-rec" />}
+          {ok ? <Check className="h-4 w-4 text-online" /> : <AlertTriangle className="h-4 w-4 text-danger" />}
           {ok ? "Connection verified — this destination is ready." : "Couldn’t verify the connection. Adjust and retry."}
         </div>
       )}
 
-      <div className="flex gap-2 mt-5">
-        <button className="btn-ghost h-9" onClick={onBack}>
+      <div className="mt-5 flex gap-2">
+        <button className="btn-ghost" onClick={onBack}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </button>
-        <button className="btn-primary h-9 flex-1" disabled={!done || !ok} onClick={() => onPass(free, total, hostKey)}>
+        <button className="btn-primary flex-1" disabled={!done || !ok} onClick={() => onPass(free, total, hostKey)}>
           Continue
           <ChevronRight className="h-4 w-4" />
         </button>
@@ -872,21 +862,21 @@ function ChecklistRow({ step }: { step: { label: string; status: string; detail?
         <Check className="h-3 w-3 text-online" />
       </div>
     ) : step.status === "fail" ? (
-      <div className="grid h-5 w-5 place-items-center rounded-full bg-rec/20">
-        <X className="h-3 w-3 text-rec" />
+      <div className="grid h-5 w-5 place-items-center rounded-full bg-danger/20">
+        <X className="h-3 w-3 text-danger" />
       </div>
     ) : step.status === "warn" ? (
-      <div className="grid h-5 w-5 place-items-center rounded-full bg-amber/20">
-        <AlertTriangle className="h-3 w-3 text-amber" />
+      <div className="grid h-5 w-5 place-items-center rounded-full bg-warn/20">
+        <AlertTriangle className="h-3 w-3 text-warn" />
       </div>
     ) : step.status === "skip" ? (
-      <div className="h-5 w-5 rounded-full border border-line" />
+      <div className="h-5 w-5 rounded-full border border-line-strong" />
     ) : (
       <Loader2 className="h-5 w-5 animate-spin text-brand" />
     );
   const dim = step.status === "skip" || step.status === "run";
   return (
-    <div className="flex items-center gap-2.5 rounded-lg bg-ink-850 px-3 py-2">
+    <div className="flex h-10 items-center gap-2.5 px-3">
       {icon}
       <span className={`text-sm ${dim ? "text-fg-faint" : "text-fg"}`}>{step.label}</span>
       {step.detail && <span className="ml-auto truncate text-[11px] text-fg-faint">{step.detail}</span>}
@@ -944,10 +934,10 @@ function AllocateStep({
       </p>
 
       {/* Allocation slider */}
-      <div className="mt-4 rounded-lg border border-line bg-ink-850 p-3">
-        <div className="flex items-end justify-between mb-2">
+      <div className="mt-4 rounded-lg border border-line-strong p-4">
+        <div className="mb-2 flex items-end justify-between">
           <label className="label mb-0">{isNetwork ? "Allocation (soft cap)" : "Allocation (hard-reserved)"}</label>
-          <span className="text-lg font-semibold text-fg tabular-nums">{formatBytes(draft.allocationBytes)}</span>
+          <span className="text-lg font-semibold tabular-nums text-fg">{formatBytes(draft.allocationBytes)}</span>
         </div>
         <input
           type="range"
@@ -956,14 +946,15 @@ function AllocateStep({
           step={GiB / 2}
           value={clamp(draft.allocationBytes, GiB, maxAlloc)}
           onChange={(e) => setDraft((d) => ({ ...d, allocationBytes: clamp(Number(e.target.value), GiB, maxAlloc) }))}
-          className="w-full accent-brand"
+          className="w-full"
+          aria-label="Allocation"
         />
-        <div className="flex justify-between text-[11px] text-fg-faint mt-1">
+        <div className="mt-1 flex justify-between text-[11px] text-fg-faint">
           <span>1 GB</span>
           <span>{draft.diskFreeBytes > 0 ? `Up to ${formatBytes(draft.diskFreeBytes)} free` : "Capacity unknown"}</span>
         </div>
-        <div className="mt-2.5 flex items-center gap-2 text-[12px] text-fg-muted">
-          <Clock className="h-3.5 w-3.5 text-brand shrink-0" />
+        <div className="mt-3 flex items-center gap-2 border-t border-line-strong pt-3 text-xs text-fg-muted">
+          <Clock className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
           {draft.cameraIds.length > 0 && perCamBps > 0 ? (
             <span>
               Holds ≈ <span className="text-fg font-medium">{fmtDuration(holdSec)}</span> for{" "}
@@ -978,14 +969,14 @@ function AllocateStep({
       {/* Camera picker (adding only — while editing, memberships are managed on
           the destination cards, where mirrors are visible too) */}
       {editing ? (
-        <p className="mt-4 text-[11px] text-fg-faint">
+        <p className="hint mt-4">
           Cameras keep their current assignments — manage them on the destination card.
         </p>
       ) : (
       <>
-      <p className="mt-4 mb-2 text-xs font-medium text-fg-muted">Cameras to record here</p>
-      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-        {cameras.length === 0 && <p className="text-sm text-fg-faint">No cameras yet.</p>}
+      <p className="mb-2 mt-5 text-[13px] font-semibold text-fg">Cameras to record here</p>
+      <div className="max-h-52 divide-y divide-line-strong overflow-y-auto rounded-lg border border-line-strong">
+        {cameras.length === 0 && <p className="px-3 py-2.5 text-sm text-fg-faint">No cameras yet.</p>}
         {cameras.map((c) => {
           const on = selected.has(c.id);
           const currently = c.locationId && c.locationId !== "" ? locName(c.locationId) : "Primary";
@@ -993,12 +984,16 @@ function AllocateStep({
             <button
               key={c.id}
               onClick={() => toggle(c.id)}
-              className={`flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-colors ${
-                on ? "border-brand bg-brand/10" : "border-line bg-ink-850 hover:bg-ink-800"
+              className={`flex h-10 w-full items-center gap-3 px-3 text-left transition-colors ${
+                on ? "bg-brand/10" : "hover:bg-white/[0.03]"
               }`}
             >
-              <div className={`grid h-5 w-5 shrink-0 place-items-center rounded ${on ? "bg-brand" : "border border-line"}`}>
-                {on && <Check className="h-3.5 w-3.5 text-white" />}
+              <div
+                className={`grid h-4 w-4 shrink-0 place-items-center rounded-[3px] ${
+                  on ? "bg-brand" : "border border-fg-faint"
+                }`}
+              >
+                {on && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
               </div>
               <Video className="h-4 w-4 shrink-0 text-fg-faint" />
               <span className="flex-1 truncate text-sm text-fg">{c.name}</span>
@@ -1010,14 +1005,14 @@ function AllocateStep({
       </>
       )}
 
-      {error && <p className="mt-3 text-xs text-rec">{error}</p>}
+      {error && <p className="mt-3 text-xs text-danger">{error}</p>}
 
-      <div className="flex gap-2 mt-5">
-        <button className="btn-ghost h-9" onClick={onBack} disabled={saving}>
+      <div className="mt-5 flex gap-2">
+        <button className="btn-ghost" onClick={onBack} disabled={saving}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </button>
-        <button className="btn-primary h-9 flex-1" onClick={onSave} disabled={saving}>
+        <button className="btn-primary flex-1" onClick={onSave} disabled={saving}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
           {saving ? "Saving…" : editing ? "Apply changes" : "Save destination"}
         </button>
@@ -1031,10 +1026,10 @@ function AllocateStep({
 function DoneStep({ draft, onAddAnother, onClose }: { draft: Draft; onAddAnother: () => void; onClose: () => void }) {
   return (
     <div className="p-6 text-center">
-      <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-online/15">
-        <Check className="h-7 w-7 text-online" />
+      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-full bg-online/15">
+        <Check className="h-6 w-6 text-online" />
       </div>
-      <h3 className="text-lg font-semibold text-fg">{draft.name} is ready</h3>
+      <h3 className="text-base font-semibold text-fg">{draft.name} is ready</h3>
       <p className="mx-auto mt-2 max-w-md text-sm text-fg-muted leading-relaxed">
         {draft.cameraIds.length > 0
           ? `${draft.cameraIds.length} ${draft.cameraIds.length === 1 ? "camera" : "cameras"} now record here.`
@@ -1042,12 +1037,12 @@ function DoneStep({ draft, onAddAnother, onClose }: { draft: Draft; onAddAnother
         {draft.allocationBytes > 0 &&
           `Up to ${formatBytes(draft.allocationBytes)} is hard-reserved; the space fills in the background.`}
       </p>
-      <div className="flex gap-2 mt-6">
-        <button className="btn-ghost h-9 flex-1" onClick={onAddAnother}>
+      <div className="mt-6 flex gap-2">
+        <button className="btn-ghost flex-1" onClick={onAddAnother}>
           <Plus className="h-4 w-4" />
           Add another
         </button>
-        <button className="btn-primary h-9 flex-1" onClick={onClose}>
+        <button className="btn-primary flex-1" onClick={onClose}>
           Done
         </button>
       </div>

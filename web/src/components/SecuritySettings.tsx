@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck, ShieldOff, KeyRound, Fingerprint, Trash2, Plus } from "lucide-react";
+import { SettingsHeading, SettingsRow } from "./ui/Layout";
 import { Modal } from "./ui/Modal";
 import { TwoFactorSetup } from "./TwoFactorSetup";
 import { SignedInDevices } from "./SignedInDevices";
@@ -106,126 +107,127 @@ export function SecuritySettings() {
   }
 
   return (
-    <div className="panel">
-      <h2 className="text-sm font-medium text-fg mb-3">Security</h2>
-
-      <div className="flex items-center justify-between rounded-lg bg-ink-850 p-3.5 mb-4">
-        <div className="flex items-center gap-3">
-          {user?.twoFactor ? (
-            <ShieldCheck className="h-5 w-5 text-online" />
-          ) : (
-            <ShieldOff className="h-5 w-5 text-fg-muted" />
-          )}
-          <div>
-            <p className="text-sm text-fg">Two-factor authentication</p>
-            <p className="text-xs text-fg-faint">
-              {user?.twoFactor
-                ? "On — a one-time code is required when you sign in on a new device."
-                : "Off — add an authenticator app for stronger security."}
-            </p>
+    <>
+      <SettingsHeading>Sign-in</SettingsHeading>
+      <div className="divide-y divide-line">
+        <SettingsRow
+          label="Two-factor authentication"
+          hint={
+            user?.twoFactor
+              ? "On — a one-time code is required when you sign in on a new device."
+              : "Off — add an authenticator app for stronger security."
+          }
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            {user?.twoFactor ? (
+              <span className="pill-green">
+                <ShieldCheck className="h-3 w-3" /> On
+              </span>
+            ) : (
+              <span className="pill-gray">
+                <ShieldOff className="h-3 w-3" /> Off
+              </span>
+            )}
+            {user?.twoFactor ? (
+              <button className="btn-ghost text-danger hover:border-danger/50 hover:bg-danger/10" onClick={() => setDisabling(true)}>
+                Turn off
+              </button>
+            ) : (
+              <button className="btn-outline" onClick={() => setSetup(true)}>
+                Set up
+              </button>
+            )}
           </div>
-        </div>
-        {user?.twoFactor ? (
-          <button
-            className="btn-ghost !text-rec !border-rec/30 hover:!bg-rec/10"
-            onClick={() => setDisabling(true)}
-          >
-            Turn off
-          </button>
-        ) : (
-          <button className="btn-subtle" onClick={() => setSetup(true)}>
-            Set up
-          </button>
-        )}
-      </div>
+        </SettingsRow>
 
-      <div className="rounded-lg bg-ink-850 p-3.5 mb-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Fingerprint className="h-5 w-5 text-brand" />
-            <div>
-              <p className="text-sm text-fg">Passkeys</p>
-              <p className="text-xs text-fg-faint">
-                Sign in with your fingerprint, face, or device PIN — no password.
+        <SettingsRow
+          label="Passkeys"
+          hint="Sign in with your fingerprint, face, or device PIN — no password."
+          align="start"
+        >
+          <div className="max-w-xl">
+            {(passkeys.data?.length ?? 0) > 0 && (
+              <ul className="mb-3 divide-y divide-line border-y border-line">
+                {passkeys.data!.map((p) => (
+                  <li key={p.id} className="flex items-center gap-3 py-2 transition-colors hover:bg-white/[0.02]">
+                    <Fingerprint className="h-4 w-4 shrink-0 text-fg-muted" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-fg">{p.name || "Passkey"}</p>
+                      <p className="text-xs text-fg-faint">
+                        Added {new Date(p.createdAt * 1000).toLocaleDateString()}
+                        {p.lastUsed > 0 && ` · last used ${new Date(p.lastUsed * 1000).toLocaleDateString()}`}
+                      </p>
+                    </div>
+                    <button
+                      className="btn-icon hover:text-danger"
+                      title="Remove passkey"
+                      aria-label="Remove passkey"
+                      onClick={() => removePasskey(p.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button className="btn-outline" disabled={!canPasskey || pkBusy} onClick={addPasskey}>
+              <Plus className="h-4 w-4" />
+              {pkBusy ? "Waiting…" : "Add passkey"}
+            </button>
+            {!canPasskey && (
+              <p className="mt-2 text-xs text-warn">
+                Passkeys need HTTPS or localhost — not available in this browser context.
               </p>
-            </div>
+            )}
+            {pkErr && <p className="mt-2 text-xs text-danger">{pkErr}</p>}
           </div>
-          <button className="btn-subtle" disabled={!canPasskey || pkBusy} onClick={addPasskey}>
-            <Plus className="h-4 w-4" />
-            {pkBusy ? "Waiting…" : "Add"}
-          </button>
-        </div>
-        {!canPasskey && (
-          <p className="text-xs text-amber mt-2">
-            Passkeys need HTTPS or localhost — not available in this browser context.
-          </p>
-        )}
-        {pkErr && <p className="text-xs text-rec mt-2">{pkErr}</p>}
-        {(passkeys.data?.length ?? 0) > 0 && (
-          <div className="mt-3 space-y-1.5">
-            {passkeys.data!.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center gap-3 rounded-md bg-ink-800 px-3 py-2"
-              >
-                <KeyRound className="h-4 w-4 text-fg-muted shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-fg truncate">{p.name || "Passkey"}</p>
-                  <p className="text-xs text-fg-faint">
-                    Added {new Date(p.createdAt * 1000).toLocaleDateString()}
-                    {p.lastUsed > 0 && ` · last used ${new Date(p.lastUsed * 1000).toLocaleDateString()}`}
-                  </p>
-                </div>
-                <button
-                  className="text-fg-faint hover:text-rec p-1"
-                  title="Remove passkey"
-                  onClick={() => removePasskey(p.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        </SettingsRow>
       </div>
 
       <SignedInDevices />
 
-      <form onSubmit={changePw} className="space-y-3">
-        <p className="text-xs font-medium text-fg-muted flex items-center gap-1.5">
-          <KeyRound className="h-3.5 w-3.5" /> Change password
-        </p>
-        <input
-          className="input"
-          type="password"
-          autoComplete="current-password"
-          placeholder="Current password"
-          value={cur}
-          onChange={(e) => setCur(e.target.value)}
-        />
-        <div className="grid grid-cols-2 gap-3">
+      <SettingsHeading>Change password</SettingsHeading>
+      <form onSubmit={changePw} className="divide-y divide-line">
+        <SettingsRow label="Current password">
           <input
-            className="input"
+            className="input max-w-sm"
+            type="password"
+            autoComplete="current-password"
+            aria-label="Current password"
+            value={cur}
+            onChange={(e) => setCur(e.target.value)}
+          />
+        </SettingsRow>
+        <SettingsRow label="New password" hint="At least 8 characters.">
+          <input
+            className="input max-w-sm"
             type="password"
             autoComplete="new-password"
-            placeholder="New password"
+            aria-label="New password"
             value={nw}
             onChange={(e) => setNw(e.target.value)}
           />
+        </SettingsRow>
+        <SettingsRow label="Repeat new password">
           <input
-            className="input"
+            className="input max-w-sm"
             type="password"
             autoComplete="new-password"
-            placeholder="Repeat new"
+            aria-label="Repeat new password"
             value={nw2}
             onChange={(e) => setNw2(e.target.value)}
           />
-        </div>
-        {pwErr && <p className="text-xs text-rec">{pwErr}</p>}
-        {pwMsg && <p className="text-xs text-online">{pwMsg}</p>}
-        <button type="submit" className="btn-primary" disabled={busy || !cur || !nw}>
-          Update password
-        </button>
+        </SettingsRow>
+        <SettingsRow label="">
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="submit" className="btn-primary" disabled={busy || !cur || !nw}>
+              <KeyRound className="h-4 w-4" />
+              Update password
+            </button>
+            {pwErr && <p className="text-xs text-danger">{pwErr}</p>}
+            {pwMsg && <p className="text-xs text-online">{pwMsg}</p>}
+          </div>
+        </SettingsRow>
       </form>
 
       <Modal open={setup} onClose={() => setSetup(false)} title="Set up two-factor">
@@ -256,11 +258,7 @@ export function SecuritySettings() {
             >
               Cancel
             </button>
-            <button
-              className="btn-primary !bg-rec hover:!bg-rec/90"
-              disabled={busy || !disableVal.trim()}
-              onClick={disable2fa}
-            >
+            <button className="btn-danger" disabled={busy || !disableVal.trim()} onClick={disable2fa}>
               Turn off
             </button>
           </div>
@@ -276,9 +274,9 @@ export function SecuritySettings() {
             value={disableVal}
             onChange={(e) => setDisableVal(e.target.value)}
           />
-          {disableErr && <p className="text-xs text-rec">{disableErr}</p>}
+          {disableErr && <p className="text-xs text-danger">{disableErr}</p>}
         </div>
       </Modal>
-    </div>
+    </>
   );
 }

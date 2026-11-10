@@ -102,7 +102,11 @@ export function VerticalTimeline({
   // toward the edge reads LIVE rather than flashing a future timestamp.
   const atLive = live || selectedMs >= nowMs;
   const visible = (r: TR) => r.end > bottomTime && r.start < topTime;
-  const railX = 58;
+  // Rail geometry (px from the left edge). The axis reads, left to right:
+  // time label · major tick · 8px air · rail — the labels/ticks are laid out
+  // from railX so the whole column moves together.
+  const railX = 72;
+  const TICK_END = railX - 8; // ticks stop short of the rail
   // One flat rail, three states, no patterns or hatching:
   //   grey  = nothing recorded   blue = recorded   lighter blue = motion/event
   // Absence of blue IS the "no recording" state, which is why there is no
@@ -291,14 +295,22 @@ export function VerticalTimeline({
           time-positioned lives in here; the fixed playhead stays outside it. */}
       <div ref={scrollRef} className="absolute inset-0">
       {minors.map((t) => (
-        <div key={`mi${t}`} className="absolute h-px w-2 bg-line" style={{ left: railX - 10, top: `${pct(t)}%` }} />
+        <div
+          key={`mi${t}`}
+          className="absolute h-px w-1.5 bg-line-strong"
+          style={{ left: TICK_END - 6, top: `${pct(t)}%` }}
+        />
       ))}
       {majors.map((t) => (
-        <div key={`ma${t}`} className="absolute left-0 flex items-center gap-2" style={{ top: `${pct(t)}%` }}>
-          <span className="w-10 text-right text-[11px] font-mono text-fg-faint -translate-y-1/2 whitespace-nowrap">
+        <div
+          key={`ma${t}`}
+          className="absolute flex items-center gap-1.5"
+          style={{ left: TICK_END - 12 - 6 - 40, top: `${pct(t)}%` }}
+        >
+          <span className="w-10 -translate-y-1/2 whitespace-nowrap text-right text-[11px] tabular-nums text-fg-faint">
             {fmtHM(t)}
           </span>
-          <div className="h-px w-3 bg-line-strong -translate-y-1/2" />
+          <div className="h-px w-3 -translate-y-1/2 bg-fg-faint/60" />
         </div>
       ))}
 
@@ -363,7 +375,7 @@ export function VerticalTimeline({
           the playhead's own LIVE bar IS this divider, so we don't double it up. */}
       {!live && nowMs <= topTime && nowMs >= bottomTime && (
         <div
-          className="absolute z-[5] h-px bg-online/70"
+          className="absolute z-[5] h-px bg-brand/60"
           style={{ left: railX - 5, right: 0, top: `${pct(nowMs)}%` }}
         />
       )}
@@ -377,15 +389,16 @@ export function VerticalTimeline({
         className="absolute left-0 right-0 z-10 flex items-center -translate-y-1/2"
         style={{ top: `${playheadFrac * 100}%` }}
       >
+        {/* The blue line runs edge to edge, the marker sits on it at the left. */}
+        <div className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 bg-brand" />
         <div
-          className={`rounded-md px-2 py-1 text-[12px] font-medium tabular-nums shadow ${
-            atLive ? "bg-online text-[#06251a]" : "bg-brand text-white"
+          className={`relative ml-1.5 rounded-md bg-brand px-1.5 py-[5px] text-center font-semibold leading-none text-white tabular-nums shadow-panel ${
+            atLive ? "text-[13px] tracking-wide" : "text-[12px]"
           }`}
-          style={{ minWidth: 66, textAlign: "center" }}
+          style={{ minWidth: 56 }}
         >
           {atLive ? "LIVE" : fmtHMS(selectedMs)}
         </div>
-        <div className={`flex-1 h-0.5 ${atLive ? "bg-online" : "bg-brand"}`} />
       </div>
     </div>
   );

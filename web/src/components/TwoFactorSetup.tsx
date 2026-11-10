@@ -39,21 +39,24 @@ export function TwoFactorSetup({ onDone }: { onDone: () => void }) {
 
   if (recovery) {
     return (
-      <div className="space-y-3">
-        <p className="flex items-center gap-2 text-sm text-online">
-          <ShieldCheck className="h-4 w-4" /> Two-factor authentication is on.
-        </p>
-        <p className="text-xs text-fg-faint">
-          Save these recovery codes somewhere safe — each works once if you lose your authenticator.
-        </p>
-        <div className="grid grid-cols-2 gap-1.5 font-mono text-xs bg-ink-850 rounded-lg p-3">
+      <div className="space-y-4">
+        <div className="flex items-start gap-3 rounded-md bg-online/10 px-3 py-2.5">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-online" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-fg">Two-factor authentication is on.</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
+              Save these recovery codes somewhere safe — each works once if you lose your authenticator.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-md border border-line bg-ink-900 px-4 py-3 font-mono text-[13px] tabular-nums">
           {recovery.map((c) => (
-            <span key={c} className="text-fg-muted">
+            <span key={c} className="select-all text-fg/85">
               {c}
             </span>
           ))}
         </div>
-        <button className="btn-primary w-full" onClick={onDone}>
+        <button className="btn-primary h-10 w-full" onClick={onDone}>
           Done
         </button>
       </div>
@@ -61,29 +64,39 @@ export function TwoFactorSetup({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-fg-faint leading-relaxed">
-        Scan this with an authenticator app (Google Authenticator, Authy, 1Password…), then enter the
-        6-digit code to confirm.
+    <div className="space-y-4">
+      <p className="text-sm leading-relaxed text-fg-muted">
+        Scan this with an authenticator app (Google Authenticator, Authy, 1Password…), then enter the 6-digit code to
+        confirm.
       </p>
-      <div className="grid place-items-center min-h-[160px]">
-        {qr ? <img src={qr} alt="2FA QR code" className="rounded-lg bg-white p-2" /> : <Spinner />}
+      <div className="flex justify-center">
+        {qr ? (
+          <img src={qr} alt="2FA QR code" className="h-[176px] w-[176px] rounded-lg bg-white p-2" />
+        ) : (
+          <div className="grid h-[176px] w-[176px] place-items-center rounded-lg border border-line bg-ink-900">
+            <Spinner />
+          </div>
+        )}
       </div>
       {secret && (
-        <p className="text-center text-xs text-fg-faint">
-          Or enter manually: <code className="text-fg-muted break-all">{secret}</code>
-        </p>
+        <div>
+          <p className="mb-1.5 text-center text-xs text-fg-faint">Or enter this key manually</p>
+          <code className="block select-all break-all rounded-md border border-line bg-ink-900 px-3 py-2 text-center font-mono text-xs text-fg-muted">
+            {secret}
+          </code>
+        </div>
       )}
       <input
-        className="input text-center tracking-[0.3em] font-mono"
+        className="input h-10 text-center font-mono tracking-[0.3em]"
         placeholder="000000"
         inputMode="numeric"
         autoComplete="one-time-code"
+        aria-label="6-digit code"
         value={code}
         onChange={(e) => setCode(e.target.value)}
       />
-      {err && <p className="text-xs text-rec">{err}</p>}
-      <button className="btn-primary w-full" disabled={busy || code.trim().length < 6} onClick={verify}>
+      {err && <p className="text-xs text-danger">{err}</p>}
+      <button className="btn-primary h-10 w-full" disabled={busy || code.trim().length < 6} onClick={verify}>
         {busy ? "Verifying…" : "Enable two-factor"}
       </button>
     </div>

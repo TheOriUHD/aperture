@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import clsx from "clsx";
 import { Trash2, RefreshCw, Plus, HardDrive, Server, Cloud, Lock, Pencil, Timer, PauseCircle, Video, ChevronDown } from "lucide-react";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
+import { SettingsHeading, SettingsRow } from "./ui/Layout";
+import { Skeleton } from "./ui/Skeleton";
 import { StorageSetupWizard } from "./storage/StorageSetupWizard";
 import { EditLocationModal } from "./storage/EditLocationModal";
 import { useStorage, type StorageLocation } from "../hooks/useStorage";
@@ -9,7 +12,6 @@ import { useCameras } from "../hooks/useCameras";
 import { usePurge, useReindex, type PurgeResult } from "../hooks/useSystem";
 import { ApiError } from "../lib/api";
 import { formatBytes } from "../lib/format";
-import { donutSegments } from "../lib/donut";
 
 type Preset = "24h" | "7d" | "month" | "all" | "custom";
 const presetLabel: Record<Preset, string> = {
@@ -20,8 +22,12 @@ const presetLabel: Record<Preset, string> = {
   custom: "Custom range",
 };
 
-const CAM_COLORS = ["#3b9ef0", "#2dd4bf", "#f5b23d", "#a78bfa", "#f472b6", "#4ade80", "#fb923c"];
-const APP_COLOR = "#6b7280";
+// Categorical fills for the per-camera segments of the usage bar (and their
+// legend swatches). App data is the light grey block at the bar's far end; the
+// bare track is the free space left in the allocation.
+const CAM_FILLS = ["bg-violet-400", "bg-brand", "bg-online", "bg-amber-400", "bg-teal-400", "bg-pink-400", "bg-sky-300"];
+const APP_FILL = "bg-fg-muted";
+const TRACK = "bg-ink-600";
 
 function fmtCapacity(sec: number): string {
   if (sec >= 86400 * 2) return `${(sec / 86400).toFixed(1)} days`;
@@ -38,44 +44,44 @@ function toLocalInput(ms: number) {
   return d.toISOString().slice(0, 16);
 }
 
-function Donut({
-  segments,
-  centerLabel,
-  centerSub,
-  size = 180,
-  thickness = 22,
-}: {
-  segments: { value: number; color: string }[];
-  centerLabel: string;
-  centerSub: string;
-  size?: number;
-  thickness?: number;
-}) {
-  const r = (size - thickness) / 2;
-  const paths = donutSegments(segments.map((s) => s.value), size / 2, size / 2, r);
+// UsageBar is the single horizontal stacked bar of the overview: footage per
+// camera from the left, app data pinned to the right end, free space between.
+function UsageBar({ segments, total }: { segments: { value: number; fill: string; right?: boolean }[]; total: number }) {
+  const pct = (v: number) => (total > 0 ? Math.max(0, (v / total) * 100) : 0);
+  const left = segments.filter((s) => !s.right && s.value > 0);
+  const right = segments.filter((s) => s.right && s.value > 0);
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#1a1e27" strokeWidth={thickness} />
-      {segments.map((s, i) =>
-        paths[i] ? <path key={i} d={paths[i]} fill="none" stroke={s.color} strokeWidth={thickness} strokeLinecap="butt" /> : null,
-      )}
-      <text x="50%" y="47%" textAnchor="middle" className="fill-fg" style={{ fontSize: 22, fontWeight: 600 }}>
-        {centerLabel}
-      </text>
-      <text x="50%" y="60%" textAnchor="middle" className="fill-fg-faint" style={{ fontSize: 11 }}>
-        {centerSub}
-      </text>
-    </svg>
+    <div className={clsx("flex h-2 w-full overflow-hidden rounded-full", TRACK)}>
+      {left.map((s, i) => (
+        <div key={i} className={clsx("h-full shrink-0 border-r border-ink-900 last:border-r-0", s.fill)} style={{ width: `${Math.max(pct(s.value), 0.6)}%` }} />
+      ))}
+      <div className="flex-1" />
+      {right.map((s, i) => (
+        <div key={i} className={clsx("h-full shrink-0 border-l border-ink-900", s.fill)} style={{ width: `${Math.max(pct(s.value), 0.6)}%` }} />
+      ))}
+    </div>
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function LegendItem({ fill, label, value }: { fill: string; label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-line bg-ink-900/40 px-3 py-2">
-      <p className="text-[11px] text-fg-faint">{label}</p>
-      <p className={`text-sm font-semibold tabular-nums ${accent ? "" : "text-fg"}`} style={accent ? { color: accent } : undefined}>
-        {value}
-      </p>
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-fg-muted">
+      <span className={clsx("h-2 w-2 shrink-0 rounded-[2px]", fill)} />
+      {label}
+      <span className="tabular-nums text-fg-faint">{value}</span>
+    </span>
+  );
+}
+
+// A list's heading with its create action on the right.
+function ListHeader({ title, description, action }: { title: string; description?: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 pt-6 first:pt-0">
+      <div className="min-w-0">
+        <h3 className="text-sm font-semibold text-fg">{title}</h3>
+        {description && <p className="mt-1 text-xs leading-relaxed text-fg-faint">{description}</p>}
+      </div>
+      {action}
     </div>
   );
 }
@@ -95,7 +101,7 @@ export interface CardCam {
   retentionDays: number; // per-location override (0 = the camera's own)
 }
 
-function DestinationCard({
+function DestinationRow({
   loc,
   cams,
   onEdit,
@@ -110,7 +116,7 @@ function DestinationCard({
   onToggle: (cameraId: string) => void;
   busy: boolean;
 }) {
-  // Which cameras record or mirror here is edited ON the card. It used to be
+  // Which cameras record or mirror here is edited ON the row. It used to be
   // reachable only from Settings → Cameras → edit a camera, so clicking through
   // from a card that listed camera names led to the location editor — a dead end.
   const [picking, setPicking] = useState(false);
@@ -123,97 +129,115 @@ function DestinationCard({
   const denom = cap > 0 ? cap : loc.diskTotalBytes || Math.max(1, loc.usedBytes);
   const pct = Math.min(100, Math.round((loc.usedBytes / denom) * 100));
   const capLabel = loc.isDefault ? "hard-reserved" : loc.type === "local" ? "hard-reserved" : "soft cap";
+  const members = cams.filter((c) => c.member);
 
   return (
-    <div className={`rounded-xl border p-3.5 ${loc.enabled ? "border-line bg-ink-850" : "border-line/60 bg-ink-850/50"}`}>
-      <div className="flex items-start gap-3">
-        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand/12">
-          <Icon className="h-5 w-5 text-brand" />
+    <div
+      className={clsx(
+        "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-2.5 py-3.5",
+        "md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_72px]",
+        !loc.enabled && "opacity-70",
+      )}
+    >
+      {/* Name, type and where it points */}
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-ink-800">
+          <Icon className="h-[18px] w-[18px] text-fg-muted" />
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-sm font-semibold text-fg">{loc.name}</span>
-            {loc.isDefault && (
-              <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand">Default</span>
-            )}
-            <span className="rounded bg-ink-900 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-faint">{loc.type}</span>
-            {loc.hasCredential && <Lock className="h-3 w-3 text-fg-faint" />}
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-medium text-fg">{loc.name}</span>
+            {loc.isDefault && <span className="pill-blue">Default</span>}
+            <span className="pill-gray uppercase">{loc.type}</span>
+            {loc.hasCredential && <Lock className="h-3 w-3 text-fg-faint" aria-label="Credentials stored" />}
             {!loc.enabled && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-amber">
+              <span className="pill-orange">
                 <PauseCircle className="h-3 w-3" /> paused
               </span>
             )}
           </div>
-          <p className="truncate font-mono text-[11px] text-fg-faint">{where || "—"}</p>
+          <p className="mt-0.5 truncate font-mono text-[11px] text-fg-faint">{where || "—"}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button className="btn-icon text-fg-faint hover:text-fg" title="Edit" onClick={onEdit}>
-            <Pencil className="h-4 w-4" />
+      </div>
+
+      {/* Actions (top-right on a phone, last column on desktop) */}
+      <div className="flex justify-end md:order-last">
+        <button className="btn-icon" title="Edit" aria-label="Edit" onClick={onEdit}>
+          <Pencil className="h-4 w-4" />
+        </button>
+        {!loc.isDefault && (
+          <button className="btn-icon hover:text-danger" title="Remove" aria-label="Remove" onClick={onRemove}>
+            <Trash2 className="h-4 w-4" />
           </button>
-          {!loc.isDefault && (
-            <button className="btn-icon text-fg-faint hover:text-rec" title="Remove" onClick={onRemove}>
-              <Trash2 className="h-4 w-4" />
-            </button>
+        )}
+      </div>
+
+      {/* Usage */}
+      <div className="col-span-2 min-w-0 md:col-span-1">
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-650">
+          <div className="h-full rounded-full bg-brand" style={{ width: `${Math.max(pct, loc.usedBytes > 0 ? 2 : 0)}%` }} />
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 text-[11px] tabular-nums text-fg-faint">
+          <span>
+            <span className="text-fg-muted">{formatBytes(loc.usedBytes)}</span>
+            {cap > 0 ? ` of ${formatBytes(cap)} ${capLabel}` : " used · no limit"}
+          </span>
+          {loc.diskFreeBytes != null && loc.diskFreeBytes > 0 && (
+            <span>
+              {formatBytes(loc.diskFreeBytes)} free on {loc.type === "local" ? "disk" : "share"}
+            </span>
           )}
         </div>
       </div>
 
-      <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-ink-900">
-        <div className="h-full rounded-full bg-brand" style={{ width: `${Math.max(pct, loc.usedBytes > 0 ? 2 : 0)}%` }} />
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 text-[11px] text-fg-faint tabular-nums">
-        <span>
-          <span className="text-fg-muted">{formatBytes(loc.usedBytes)}</span>
-          {cap > 0 ? ` of ${formatBytes(cap)} ${capLabel}` : " used · no limit"}
-        </span>
-        {loc.diskFreeBytes != null && loc.diskFreeBytes > 0 && <span>{formatBytes(loc.diskFreeBytes)} free on {loc.type === "local" ? "disk" : "share"}</span>}
-      </div>
-      <div className="mt-2 border-t border-line/60 pt-2">
+      {/* Cameras recording here — opens the picker below the row */}
+      <div className="col-span-2 min-w-0 md:col-span-1">
         <button
-          className="flex w-full items-center gap-1.5 text-left text-[11px] text-fg-muted hover:text-fg"
+          className="flex w-full min-w-0 items-center gap-2 rounded-md text-left text-sm text-fg-muted transition-colors hover:text-fg"
           onClick={() => setPicking((v) => !v)}
           disabled={busy}
+          aria-expanded={picking}
         >
-          <Video className="h-3 w-3 shrink-0" />
-          <span className="truncate">
-            {(() => {
-              const members = cams.filter((c) => c.member);
-              if (members.length === 0) return "No cameras — click to assign";
-              return `${members.length} ${members.length === 1 ? "camera" : "cameras"}: ${members
-                .map((c) => c.name)
-                .join(", ")}`;
-            })()}
+          <Video className="h-4 w-4 shrink-0 text-fg-faint" />
+          <span className="min-w-0 truncate">
+            {members.length === 0 ? (
+              <span className="text-brand">No cameras — click to assign</span>
+            ) : (
+              <>
+                <span className="text-fg">
+                  {members.length} {members.length === 1 ? "camera" : "cameras"}
+                </span>
+                <span className="text-fg-faint"> · {members.map((c) => c.name).join(", ")}</span>
+              </>
+            )}
           </span>
-          <ChevronDown className={`ml-auto h-3 w-3 shrink-0 transition-transform ${picking ? "rotate-180" : ""}`} />
+          <ChevronDown className={clsx("ml-auto h-4 w-4 shrink-0 text-fg-faint transition-transform", picking && "rotate-180")} />
         </button>
+      </div>
 
-        {picking && (
-          <div className="mt-2 space-y-1 rounded-lg border border-line bg-ink-900 p-2">
-            <p className="px-0.5 pb-1 text-[10px] text-fg-faint">
-              Tick the cameras that record here. A camera ticked on several destinations records
-              to all of them at the same time.
-            </p>
+      {picking && (
+        <div className="col-span-full mb-0.5 rounded-lg border border-line p-3 md:order-last">
+          <p className="mb-2 text-xs text-fg-faint">
+            Tick the cameras that record here. A camera ticked on several destinations records
+            to all of them at the same time.
+          </p>
+          <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
             {cams.map((c) => (
-              <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-0.5 py-1 text-xs text-fg">
-                <input
-                  type="checkbox"
-                  className="accent-brand"
-                  checked={c.member}
-                  disabled={busy}
-                  onChange={() => onToggle(c.id)}
-                />
-                <span className="truncate">{c.name}</span>
+              <label
+                key={c.id}
+                className="flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-1 text-sm text-fg hover:bg-white/[0.03]"
+              >
+                <input type="checkbox" checked={c.member} disabled={busy} onChange={() => onToggle(c.id)} />
+                <span className="min-w-0 truncate">{c.name}</span>
                 {c.member && c.retentionDays > 0 && (
-                  <span className="ml-auto text-[10px] text-fg-faint">{c.retentionDays}d here</span>
+                  <span className="ml-auto shrink-0 text-[11px] text-fg-faint">{c.retentionDays}d here</span>
                 )}
               </label>
             ))}
-            <p className="px-0.5 pt-1 text-[10px] text-fg-faint">
-              New footage only — existing recordings stay where they are.
-            </p>
           </div>
-        )}
-      </div>
+          <p className="mt-2 text-[11px] text-fg-faint">New footage only — existing recordings stay where they are.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -302,9 +326,14 @@ export function StorageManager() {
   };
 
 
-  // Per-camera footage donut (footage by camera + app data = total footprint).
-  const camSegs = (storage?.cameras ?? []).map((c, i) => ({ value: c.bytes, color: CAM_COLORS[i % CAM_COLORS.length] }));
-  const donutSegs = [...camSegs, { value: app, color: APP_COLOR }];
+  // Usage bar: footage by camera + app data (= the total footprint), measured
+  // against the allocation when there is one.
+  // Colours go to cameras that actually hold footage, so the first ones are
+  // never spent on empty cameras.
+  const camSegs = (storage?.cameras ?? [])
+    .filter((c) => c.bytes > 0)
+    .map((c, i) => ({ name: c.name, value: c.bytes, fill: CAM_FILLS[i % CAM_FILLS.length] }));
+  const barTotal = Math.max(totalAlloc, totalUsed, recorded + app, 1);
 
   function range(): { from: number; to: number } {
     const now = Date.now();
@@ -358,60 +387,109 @@ export function StorageManager() {
   }
 
   return (
-    <div className="panel space-y-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-medium text-fg">Storage</h2>
-        <button className="btn-subtle h-8" disabled={reindex.isPending} onClick={doReindex} title="Index any footage on disk the database lost track of">
-          <RefreshCw className={`h-3.5 w-3.5 ${reindex.isPending ? "animate-spin" : ""}`} />
-          {reindex.isPending ? "Scanning…" : "Re-scan"}
-        </button>
-      </div>
-      {reindexMsg && <p className="-mt-2 text-xs text-online">{reindexMsg}</p>}
-
-      {/* Global overview */}
-      {storage && (
-        <div className="flex flex-col items-center gap-5 rounded-xl border border-line bg-ink-850 p-4 sm:flex-row">
-          <Donut
-            segments={donutSegs}
-            centerLabel={formatBytes(recorded + app)}
-            centerSub="stored"
-          />
-          <div className="w-full flex-1">
-            <div className="grid grid-cols-2 gap-2">
-              <Stat label="Recorded footage" value={formatBytes(recorded)} />
-              <Stat label="App & database" value={formatBytes(app)} />
-              <Stat label="Allocated to Aperture" value={totalAlloc > 0 ? formatBytes(totalAlloc) : "—"} accent="#3b9ef0" />
-              <Stat label="Free in allocation" value={totalAlloc > 0 ? formatBytes(freeInAlloc) : "—"} />
+    <>
+      {/* Overview */}
+      <section className="panel">
+        {storage ? (
+          <>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+              <h3 className="text-sm font-semibold text-fg">
+                Overview{" "}
+                <span className="font-normal tabular-nums text-fg-muted">
+                  ({formatBytes(totalUsed || recorded + app)}
+                  {totalAlloc > 0 ? ` / ${formatBytes(totalAlloc)}` : " stored"})
+                </span>
+              </h3>
+              {storage.recordingRateBps > 0 && totalAlloc > 0 && (
+                <p className="flex items-center gap-1.5 text-xs text-fg-muted">
+                  <Timer className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
+                  Holds ≈ <span className="font-medium text-fg">{fmtCapacity((freeInAlloc / storage.recordingRateBps) || 0)}</span> more at the current rate
+                </p>
+              )}
             </div>
-            <p className="mt-2.5 text-[11px] text-fg-faint">
-              Across {locations.length} {locations.length === 1 ? "destination" : "destinations"} · {cameras?.length ?? 0}{" "}
-              {(cameras?.length ?? 0) === 1 ? "camera" : "cameras"}
-            </p>
-            {storage.recordingRateBps > 0 && totalAlloc > 0 && (
-              <div className="mt-2 flex items-center gap-2 text-[11px] text-fg-muted">
-                <Timer className="h-3.5 w-3.5 shrink-0 text-brand" />
-                Holds ≈ <span className="font-medium text-fg">{fmtCapacity((freeInAlloc / storage.recordingRateBps) || 0)}</span> more at the current rate
-              </div>
-            )}
+
+            <div className="mt-4">
+              <UsageBar
+                total={barTotal}
+                segments={[...camSegs, { value: app, fill: APP_FILL, right: true }]}
+              />
+            </div>
+            <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5">
+              {camSegs.map((c, i) => (
+                <LegendItem key={i} fill={c.fill} label={c.name} value={formatBytes(c.value)} />
+              ))}
+              <LegendItem fill={APP_FILL} label="App & database" value={formatBytes(app)} />
+              {totalAlloc > 0 && <LegendItem fill={TRACK} label="Free in allocation" value={formatBytes(freeInAlloc)} />}
+            </div>
+
+            {/* The destinations at a glance, like drive chips. */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {locations.map((l) => (
+                <span
+                  key={l.id || "default"}
+                  className="inline-flex h-7 items-center gap-2 rounded-md bg-ink-800 px-2.5 text-xs text-fg"
+                >
+                  <span className={clsx("h-1.5 w-1.5 rounded-full", l.enabled ? "bg-online" : "bg-warn")} />
+                  {l.name}
+                  <span className="tabular-nums text-fg-faint">
+                    {l.allocationBytes > 0 ? formatBytes(l.allocationBytes) : "no limit"}
+                  </span>
+                </span>
+              ))}
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-fg-faint">
+              <span className="tabular-nums">
+                Recorded footage {formatBytes(recorded)} · Allocated to Aperture{" "}
+                {totalAlloc > 0 ? formatBytes(totalAlloc) : "—"} · Across {locations.length}{" "}
+                {locations.length === 1 ? "destination" : "destinations"} · {cameras?.length ?? 0}{" "}
+                {(cameras?.length ?? 0) === 1 ? "camera" : "cameras"}
+              </span>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-4">
+              <button
+                className="btn-link"
+                disabled={reindex.isPending}
+                onClick={doReindex}
+                title="Index any footage on disk the database lost track of"
+              >
+                <RefreshCw className={clsx("h-3.5 w-3.5", reindex.isPending && "animate-spin")} />
+                {reindex.isPending ? "Scanning…" : "Re-scan"}
+              </button>
+              {reindexMsg && <span className="text-xs text-online">{reindexMsg}</span>}
+            </div>
+          </>
+        ) : (
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-56" />
+            <Skeleton className="h-2 w-full" />
+            <Skeleton className="h-3 w-80" />
           </div>
-        </div>
-      )}
+        )}
+      </section>
 
       {/* Destinations */}
-      <div>
-        <div className="mb-2.5 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-fg-muted">Recording destinations</p>
-            <p className="text-[11px] text-fg-faint">Local disks and network shares. Point cameras at them from each camera’s settings.</p>
-          </div>
-          <button className="btn-subtle h-8 shrink-0" onClick={() => setWizardOpen(true)}>
-            <Plus className="h-3.5 w-3.5" />
-            Add
+      <ListHeader
+        title="Recording destinations"
+        description="Local disks and network shares. Point cameras at them from each camera’s settings."
+        action={
+          <button className="btn-outline shrink-0" onClick={() => setWizardOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Add destination
           </button>
+        }
+      />
+      <div>
+        <div className="hidden grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_72px] gap-x-6 border-b border-line pb-2 text-[13px] font-semibold text-fg md:grid">
+          <span>Name</span>
+          <span>Usage</span>
+          <span>Cameras</span>
+          <span />
         </div>
-        <div className="space-y-2.5">
+        <div className="divide-y divide-line border-b border-line">
           {locations.map((loc) => (
-            <DestinationCard
+            <DestinationRow
               key={loc.id || "default"}
               loc={loc}
               cams={cardCams(loc.id)}
@@ -421,65 +499,82 @@ export function StorageManager() {
               onToggle={(camId) => toggleCamera(camId, loc.id)}
             />
           ))}
+          {locations.length === 0 && !storage && (
+            <div className="space-y-2 py-3">
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9" />
+            </div>
+          )}
         </div>
         {locData?.dataDir && (
-          <p className="mt-2.5 flex items-center gap-1.5 text-[11px] text-fg-faint">
-            <Lock className="h-3 w-3" />
-            App &amp; database stay at <span className="font-mono">{locData.dataDir}</span> (fixed with the install).
+          <p className="mt-2.5 text-[11px] leading-relaxed text-fg-faint">
+            <Lock className="-mt-0.5 mr-1.5 inline h-3 w-3" />
+            App &amp; database stay at <span className="break-all font-mono">{locData.dataDir}</span> (fixed with the
+            install).
           </p>
         )}
       </div>
 
       {/* Delete footage */}
-      <div className="border-t border-line pt-4">
-        <p className="mb-2.5 text-xs font-medium text-fg-muted">Delete footage</p>
-        <div className="mb-3 grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Camera</label>
-            <select className="input" value={cameraId} onChange={(e) => setCameraId(e.target.value)}>
-              <option value="">All cameras</option>
-              {cameras?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Range</label>
-            <select className="input" value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
-              {(["24h", "7d", "month", "all", "custom"] as Preset[]).map((p) => (
-                <option key={p} value={p}>
-                  {presetLabel[p]}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+      <SettingsHeading description="Permanently removes recordings in a time range.">Delete footage</SettingsHeading>
+      <div className="divide-y divide-line">
+        <SettingsRow label="Camera">
+          <select className="input max-w-[280px]" value={cameraId} onChange={(e) => setCameraId(e.target.value)} aria-label="Camera">
+            <option value="">All cameras</option>
+            {cameras?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </SettingsRow>
+        <SettingsRow label="Range">
+          <select className="input max-w-[280px]" value={preset} onChange={(e) => setPreset(e.target.value as Preset)} aria-label="Range">
+            {(["24h", "7d", "month", "all", "custom"] as Preset[]).map((p) => (
+              <option key={p} value={p}>
+                {presetLabel[p]}
+              </option>
+            ))}
+          </select>
+        </SettingsRow>
         {preset === "custom" && (
-          <div className="mb-3 grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">From</label>
-              <input type="datetime-local" className="input" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+          <SettingsRow label="From – to">
+            <div className="grid max-w-lg grid-cols-1 gap-3 sm:grid-cols-2">
+              <input
+                type="datetime-local"
+                className="input"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                aria-label="From"
+              />
+              <input
+                type="datetime-local"
+                className="input"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                aria-label="To"
+              />
             </div>
-            <div>
-              <label className="label">To</label>
-              <input type="datetime-local" className="input" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
-            </div>
-          </div>
+          </SettingsRow>
         )}
-        <div className="flex items-center gap-3">
-          <button className="btn-danger" disabled={!validRange || purge.isPending} onClick={() => setConfirmOpen(true)}>
-            <Trash2 className="h-4 w-4" />
-            Delete footage
-          </button>
-          {result && (
-            <span className="text-xs text-fg-muted">
-              Freed {formatBytes(result.freedBytes)} ({result.deletedSegments} segments
-              {result.deletedEvents ? `, ${result.deletedEvents} events` : ""})
-            </span>
-          )}
-        </div>
+        <SettingsRow label="">
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              className="btn-ghost text-danger hover:border-danger/50 hover:bg-danger/10"
+              disabled={!validRange || purge.isPending}
+              onClick={() => setConfirmOpen(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete footage
+            </button>
+            {result && (
+              <span className="text-xs text-fg-muted">
+                Freed {formatBytes(result.freedBytes)} ({result.deletedSegments} segments
+                {result.deletedEvents ? `, ${result.deletedEvents} events` : ""})
+              </span>
+            )}
+          </div>
+        </SettingsRow>
       </div>
 
       <ConfirmDialog
@@ -530,6 +625,6 @@ export function StorageManager() {
           setEditLoc(null);
         }}
       />
-    </div>
+    </>
   );
 }

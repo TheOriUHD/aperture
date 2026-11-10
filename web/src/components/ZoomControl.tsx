@@ -23,10 +23,10 @@ export function ZoomControl({
       onPointerDown={swallow}
       onPointerUp={swallow}
       onClick={swallow}
-      className={`flex flex-col items-center rounded-full bg-ink-700/95 p-0.5 backdrop-blur-sm shadow-pop touch-none ${className}`}
+      className={`flex touch-none flex-col items-center rounded-lg border border-line bg-ink-800/95 p-0.5 shadow-pop backdrop-blur-sm ${className}`}
     >
       <button
-        className={`grid h-12 w-12 place-items-center rounded-full text-fg-muted active:bg-ink-600 ${value >= max ? "opacity-40" : ""}`}
+        className={`grid h-12 w-12 place-items-center rounded-md text-fg-muted active:bg-white/[0.08] ${value >= max ? "opacity-40" : ""}`}
         aria-label="Zoom in"
         onClick={(e) => {
           e.stopPropagation();
@@ -35,9 +35,9 @@ export function ZoomControl({
       >
         <ZoomIn className="h-5 w-5" />
       </button>
-      <div className="h-px w-6 bg-line" />
+      <div className="h-px w-6 bg-line-strong" />
       <button
-        className={`grid h-12 w-12 place-items-center rounded-full text-fg-muted active:bg-ink-600 ${value <= 0 ? "opacity-40" : ""}`}
+        className={`grid h-12 w-12 place-items-center rounded-md text-fg-muted active:bg-white/[0.08] ${value <= 0 ? "opacity-40" : ""}`}
         aria-label="Zoom out"
         onClick={(e) => {
           e.stopPropagation();

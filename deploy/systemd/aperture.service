@@ -29,7 +29,9 @@ RestartSec=2
 # [Unit] as StartLimitIntervalSec — systemd silently ignores it in [Service].
 
 # --- shutdown --------------------------------------------------------------
-# cmd/nvrd/main.go:355-368 drains extensions (5s) then HTTP (10s) => ~15s worst case.
+# nvrd's ordered shutdown (cmd/nvrd/main.go, budget in cmd/nvrd/shutdown.go): extensions
+# (5s+2s), then background services incl. every recorder ffmpeg closing its segment (20s),
+# then HTTP (10s) => ~37s worst case, normally 1-2s. Keep this above that.
 TimeoutStopSec=45
 # 'mixed' = SIGTERM to nvrd alone so its ordered shutdown runs undisturbed, SIGKILL to
 # the whole cgroup only at timeout. 'control-group' would signal ffmpeg and every
@@ -41,10 +43,19 @@ FinalKillSignal=SIGKILL
 
 # --- resource limits: replaces compose mem_limit/pids_limit/cpus -----------
 # Documented "Layer 2" containment for a runaway or escaped extension.
-MemoryHigh=1800M
-MemoryMax=2G
+# These also bound nvrd's own ffmpeg workers, and the web server shares the limit
+# with them: at the limit the API is throttled with everything else. Stream copy
+# costs almost nothing, but a camera opted into a lower recording quality is
+# software re-encoded (internal/record/quality.go), about 0.7 GB and 1.3 cores for a
+# 4K camera. At 1800M/300% two such cameras pinned the service at its memory
+# ceiling, 1.8 GB in swap and throttled 98% of the time, and the web app took
+# seconds to show anything. Object recognition on an NVIDIA GPU adds about 1.1 GB
+# (the CUDA worker, with the package model); at 3G/3.5G it reached the ceiling and
+# began swapping, so the VM went to 8 GB and the limits to 4.5G/5G.
+MemoryHigh=4608M
+MemoryMax=5G
 TasksMax=1024
-CPUQuota=300%
+CPUQuota=600%
 LimitNOFILE=65536
 # MANDATORY. Extensions carry a raised oom_score_adj so they die first under memory
 # pressure (internal/ext/supervisor.go:406-414). systemd's default OOMPolicy=stop would

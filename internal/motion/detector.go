@@ -5,6 +5,7 @@
 package motion
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -12,7 +13,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,12 +28,47 @@ const (
 	postrollMs     = 5000
 	cooldown       = 5 * time.Second
 	reconcileEvery = 60 * time.Second
+	// motionHold is how long a camera counts as "in motion" after its last
+	// motion frame, for the live outline and live object recognition.
+	motionHold = 1500 * time.Millisecond
 )
+
+// FrameSink receives what object recognition needs from the motion pipeline:
+// colour frames (decoded once, alongside the motion grid), each motion frame's
+// coarse change map, and when a camera starts and stops moving.
+type FrameSink interface {
+	// FrameSize is the height colour frames should fit in for a camera (they
+	// may be up to three times as wide, for panoramic cameras); 0 means the
+	// camera needs none.
+	FrameSize(cameraID string) int
+	// FrameRate is how many colour frames a second to deliver (motion itself
+	// always looks at 5).
+	FrameRate(cameraID string) int
+	// OnFrame gets each colour frame (packed RGB). rgb is reused afterwards.
+	OnFrame(cameraID string, w, h int, rgb []byte)
+	// OnMotion gets each motion frame's SearchW×SearchH change map. Reused afterwards.
+	OnMotion(cameraID string, cells []bool)
+	// OnMotionState gets a camera starting (true) or stopping (false) to move.
+	OnMotionState(cameraID string, active bool)
+}
 
 // snapshotter is the subset of the stream manager the detector needs.
 type snapshotter interface {
 	RTSPURL(cameraID string) string
+	RTSPURLSub(cameraID string) string
 	SnapshotCached(ctx context.Context, cameraID string) ([]byte, error)
+}
+
+// motionSource is the stream motion detection decodes. Detection only ever looks
+// at a 64x36 grid, so a camera with a sub stream is watched on that: decoding a 4K
+// HEVC main stream for it cost over a core and about half a gigabyte per camera,
+// enough to starve the whole service. Sub streams show the same picture as the main
+// one (measured on the live cameras), so motion zones stay where they were drawn.
+func motionSource(sm snapshotter, cam store.Camera) string {
+	if cam.RTSPSubURL != "" {
+		return sm.RTSPURLSub(cam.ID)
+	}
+	return sm.RTSPURL(cam.ID)
 }
 
 type activeEvent struct {
@@ -55,14 +93,21 @@ type Detector struct {
 	mu      sync.Mutex
 	active  map[string]context.CancelFunc
 	sigs    map[string]string // cameraID -> settings signature (for restart-on-change)
+	cams    sync.WaitGroup    // per-camera detectors; Run waits for them (and their ffmpeg) on shutdown
 
 	tuneMu sync.Mutex
 	tune   map[string]camTune // cameraID -> event-lifecycle tuning
 
-	evMu    sync.Mutex
-	events  map[string]*activeEvent // cameraID -> ongoing event
-	onEvent      func(*store.Event) // notified when a new event opens
-	onEventClose func(string)       // notified (event id) when an event finalizes
+	sink   FrameSink       // object recognition, when wired (guarded by mu)
+	moving map[string]bool // cameraID -> currently in motion (motion-state loop only)
+	// liveTicks is the last motion frame of live-only cameras (recognition on,
+	// nothing recorded): they get the live outline and boxes but no events.
+	liveTicks map[string]int64
+
+	evMu         sync.Mutex
+	events       map[string]*activeEvent // cameraID -> ongoing event
+	onEvent      func(*store.Event)      // notified when a new event opens
+	onEventClose func(string)            // notified (event id) when an event finalizes
 }
 
 // camTune is a camera's per-event timing, captured at event open.
@@ -71,6 +116,20 @@ type camTune struct {
 	postroll int64
 	cooldown int64
 	minDur   int64
+}
+
+// SetFrameSink wires object recognition in. Cameras restart their decoder on
+// the next Reconcile when the frames they need change.
+func (d *Detector) SetFrameSink(s FrameSink) {
+	d.mu.Lock()
+	d.sink = s
+	d.mu.Unlock()
+}
+
+func (d *Detector) frameSink() FrameSink {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.sink
 }
 
 // SetOnEvent registers a callback invoked (async) when a new event starts.
@@ -84,10 +143,12 @@ func (d *Detector) SetOnEventClose(fn func(string)) { d.onEventClose = fn }
 func New(cfg *config.Config, st *store.Store, sm snapshotter, log *slog.Logger) *Detector {
 	return &Detector{
 		cfg: cfg, st: st, sm: sm, log: log,
-		active: map[string]context.CancelFunc{},
-		sigs:   map[string]string{},
-		tune:   map[string]camTune{},
-		events: map[string]*activeEvent{},
+		active:    map[string]context.CancelFunc{},
+		sigs:      map[string]string{},
+		tune:      map[string]camTune{},
+		events:    map[string]*activeEvent{},
+		moving:    map[string]bool{},
+		liveTicks: map[string]int64{},
 	}
 }
 
@@ -129,16 +190,25 @@ func (d *Detector) Run(ctx context.Context) {
 
 	recon := time.NewTicker(reconcileEvery)
 	fin := time.NewTicker(time.Second)
+	state := time.NewTicker(250 * time.Millisecond)
 	defer recon.Stop()
 	defer fin.Stop()
+	defer state.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			// Taking the lock first: a Reconcile in flight has either added its
+			// detector to d.cams already or will see ctx done and start none.
+			d.mu.Lock()
+			d.mu.Unlock()
+			d.cams.Wait() // each detector's ffmpeg is killed and reaped
 			return
 		case <-recon.C:
 			d.Reconcile()
 		case <-fin.C:
 			d.finalizeStale()
+		case <-state.C:
+			d.motionStates()
 		}
 	}
 }
@@ -160,9 +230,15 @@ func (d *Detector) Reconcile() {
 		return
 	}
 	want := map[string]*store.Camera{}
+	liveOnly := map[string]bool{}
 	for _, c := range cams {
 		if d.shouldDetect(c) {
 			want[c.ID] = c
+		} else if d.sink != nil && c.Enabled && c.RTSPMainURL != "" && d.sink.FrameSize(c.ID) > 0 {
+			// Object recognition wants this camera although it records
+			// nothing: watch motion for the live view only.
+			want[c.ID] = c
+			liveOnly[c.ID] = true
 		}
 	}
 
@@ -178,6 +254,9 @@ func (d *Detector) Reconcile() {
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.baseCtx.Err() != nil {
+		return // shutting down: Run is waiting on d.cams
+	}
 	for id, cancel := range d.active {
 		if _, ok := want[id]; !ok {
 			cancel()
@@ -186,7 +265,14 @@ func (d *Detector) Reconcile() {
 		}
 	}
 	for id, cam := range want {
-		sig := strconv.FormatFloat(cam.MotionThreshold, 'f', 4, 64) + "|" + cam.MotionZonesJSON
+		// The source is part of the signature, so adding or removing a sub stream
+		// moves detection onto it.
+		frames, rate := 0, 0
+		if d.sink != nil {
+			frames = d.sink.FrameSize(id)
+			rate = d.sink.FrameRate(id)
+		}
+		sig := strconv.FormatFloat(cam.MotionThreshold, 'f', 4, 64) + "|" + cam.MotionZonesJSON + "|" + motionSource(d.sm, *cam) + "|" + strconv.Itoa(frames) + "@" + strconv.Itoa(rate) + "|" + strconv.FormatBool(liveOnly[id])
 		if _, ok := d.active[id]; ok {
 			if d.sigs[id] == sig {
 				continue
@@ -199,8 +285,14 @@ func (d *Detector) Reconcile() {
 		d.active[id] = cancel
 		d.sigs[id] = sig
 		c := *cam
-		go d.detectCamera(cctx, c)
-		d.log.Info("motion detection started", "camera", id, "threshold", cam.MotionThreshold)
+		sink := d.sink
+		live := liveOnly[id]
+		d.cams.Add(1)
+		go func() {
+			defer d.cams.Done()
+			d.detectCamera(cctx, c, sink, frames, rate, live)
+		}()
+		d.log.Info("motion detection started", "camera", id, "threshold", cam.MotionThreshold, "recognitionFrames", frames, "liveOnly", live)
 	}
 }
 
@@ -210,7 +302,17 @@ func (d *Detector) Reconcile() {
 // ignore-masked cells are skipped, and the fraction of changed cells is compared
 // to the camera's sensitivity. This replaces the whole-frame scene-change scalar
 // so that motion zones (and, later, object gating) have spatial information.
-func (d *Detector) detectCamera(ctx context.Context, cam store.Camera) {
+//
+// When object recognition wants frames for the camera, the same decode also
+// produces colour frames (fitted within 3·frames×frames) on a second pipe, so
+// recognition costs no extra decoding.
+//
+// A live-only camera (recognition on, recording off) creates no events: its
+// motion only drives the live outline and live recognition.
+func (d *Detector) detectCamera(ctx context.Context, cam store.Camera, sink FrameSink, frames, rate int, liveOnly bool) {
+	if rate <= 0 {
+		rate = 5
+	}
 	threshold := cam.MotionThreshold
 	if threshold <= 0 {
 		threshold = 0.02
@@ -223,18 +325,60 @@ func (d *Detector) detectCamera(ctx context.Context, cam store.Camera) {
 	const frameSize = gridW * gridH
 	backoff := time.Second
 	for ctx.Err() == nil {
-		vf := fmt.Sprintf("fps=5,scale=%d:%d,format=gray", gridW, gridH)
-		cmd := exec.CommandContext(ctx, "ffmpeg",
-			"-hide_banner", "-loglevel", "error", "-nostdin",
-			"-rtsp_transport", "tcp", "-i", d.sm.RTSPURL(cam.ID),
-			"-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "gray", "-")
+		var cmd *exec.Cmd
+		var colour *os.File
+		if sink != nil && frames > 0 {
+			fc := fmt.Sprintf("[0:v]split=2[a][b];[a]fps=5,scale=%d:%d,format=gray[m];"+
+				"[b]fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2,format=rgb24[c]", gridW, gridH, rate, 3*frames, frames)
+			cmd = exec.CommandContext(ctx, "ffmpeg",
+				"-hide_banner", "-loglevel", "info", "-nostats", "-nostdin",
+				"-threads", "2", "-rtsp_transport", "tcp", "-i", motionSource(d.sm, cam), "-an",
+				"-filter_complex", fc,
+				"-map", "[m]", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1",
+				"-map", "[c]", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:3")
+			r, w, err := os.Pipe()
+			if err != nil {
+				return
+			}
+			colour = r
+			cmd.ExtraFiles = []*os.File{w}
+		} else {
+			vf := fmt.Sprintf("fps=5,scale=%d:%d,format=gray", gridW, gridH)
+			cmd = exec.CommandContext(ctx, "ffmpeg",
+				"-hide_banner", "-loglevel", "error", "-nostdin",
+				"-threads", "2", "-rtsp_transport", "tcp", "-i", motionSource(d.sm, cam),
+				"-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "gray", "-")
+		}
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			return
 		}
-		if err := cmd.Start(); err != nil {
+		var stderr io.ReadCloser
+		if colour != nil {
+			if stderr, err = cmd.StderrPipe(); err != nil {
+				return
+			}
+		}
+		err = cmd.Start()
+		if colour != nil {
+			cmd.ExtraFiles[0].Close() // the child holds the write end now
+		}
+		if err != nil {
 			d.log.Warn("motion ffmpeg start failed", "camera", cam.ID, "err", err)
+			if colour != nil {
+				colour.Close()
+			}
 		} else {
+			var colourDone chan struct{}
+			if colour != nil {
+				colourDone = make(chan struct{})
+				size := make(chan [2]int, 1)
+				go watchColourSize(stderr, size)
+				go func() {
+					defer close(colourDone)
+					readColour(colour, size, func(w, h int, rgb []byte) { sink.OnFrame(cam.ID, w, h, rgb) })
+				}()
+			}
 			start := time.Now()
 			prev := make([]byte, frameSize)
 			cur := make([]byte, frameSize)
@@ -249,13 +393,26 @@ func (d *Detector) detectCamera(ctx context.Context, cam store.Camera) {
 						frameCells[i] = false
 					}
 					if frac := diffFrac(prev, cur, mask, active, frameCells); frac > threshold {
-						d.onTick(cam.ID, frac, frameCells)
+						if liveOnly {
+							d.evMu.Lock()
+							d.liveTicks[cam.ID] = time.Now().UnixMilli()
+							d.evMu.Unlock()
+						} else {
+							d.onTick(cam.ID, frac, frameCells)
+						}
+						if sink != nil {
+							sink.OnMotion(cam.ID, frameCells)
+						}
 					}
 				}
 				prev, cur = cur, prev
 				havePrev = true
 			}
 			_ = cmd.Wait()
+			if colour != nil {
+				colour.Close()
+				<-colourDone
+			}
 			if ctx.Err() != nil {
 				return
 			}
@@ -269,6 +426,96 @@ func (d *Detector) detectCamera(ctx context.Context, cam store.Camera) {
 		case <-time.After(backoff):
 		}
 		backoff = min(backoff*2, 30*time.Second)
+	}
+}
+
+// outSize matches ffmpeg's description of the colour output, e.g.
+// "Stream #1:0: Video: rawvideo (RGB[24] / 0x18424752), rgb24(pc, …), 416x236, …".
+var outSize = regexp.MustCompile(`, (\d{2,5})x(\d{2,5})[ ,]`)
+
+// watchColourSize reads ffmpeg's log for the colour output's frame size and
+// then keeps draining it.
+func watchColourSize(stderr io.Reader, size chan<- [2]int) {
+	sc := bufio.NewScanner(stderr)
+	sent := false
+	for sc.Scan() {
+		line := sc.Text()
+		if sent || !strings.Contains(line, "Stream #1:0") || !strings.Contains(line, "rgb24") {
+			continue
+		}
+		if m := outSize.FindStringSubmatch(line); m != nil {
+			w, _ := strconv.Atoi(m[1])
+			h, _ := strconv.Atoi(m[2])
+			size <- [2]int{w, h}
+			sent = true
+		}
+	}
+	if !sent {
+		close(size)
+	}
+}
+
+// readColour reads fixed-size RGB frames once their size is known, handing
+// each to fn. It always drains the pipe so ffmpeg never blocks on it.
+func readColour(r io.Reader, size <-chan [2]int, fn func(w, h int, rgb []byte)) {
+	var wh [2]int
+	var ok bool
+	select {
+	case wh, ok = <-size:
+	case <-time.After(30 * time.Second):
+	}
+	if !ok || wh[0] <= 0 || wh[1] <= 0 {
+		_, _ = io.Copy(io.Discard, r)
+		return
+	}
+	buf := make([]byte, wh[0]*wh[1]*3)
+	for {
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return
+		}
+		fn(wh[0], wh[1], buf)
+	}
+}
+
+// motionStates tells the sink when cameras start and stop moving.
+func (d *Detector) motionStates() {
+	sink := d.frameSink()
+	if sink == nil {
+		return
+	}
+	now := time.Now().UnixMilli()
+	d.evMu.Lock()
+	now2 := map[string]bool{}
+	for camID, ev := range d.events {
+		if now-ev.lastTick < motionHold.Milliseconds() {
+			now2[camID] = true
+		}
+	}
+	for camID, at := range d.liveTicks {
+		if now-at < motionHold.Milliseconds() {
+			now2[camID] = true
+		} else if now-at > time.Minute.Milliseconds() {
+			delete(d.liveTicks, camID)
+		}
+	}
+	d.evMu.Unlock()
+	var on, off []string
+	for id := range now2 {
+		if !d.moving[id] {
+			on = append(on, id)
+		}
+	}
+	for id := range d.moving {
+		if !now2[id] {
+			off = append(off, id)
+		}
+	}
+	d.moving = now2
+	for _, id := range on {
+		sink.OnMotionState(id, true)
+	}
+	for _, id := range off {
+		sink.OnMotionState(id, false)
 	}
 }
 

@@ -28,10 +28,14 @@ import {
   Volume2,
   VolumeX,
   ScanEye,
-  Grid2x2,
+  Grid2x2Plus,
+  Maximize,
+  ScanSearch,
+  Check,
   Search,
   Trash2,
   Film,
+  X,
 } from "lucide-react";
 import { CameraRail } from "../components/CameraRail";
 import { CameraImagingOverlay } from "../components/CameraImagingOverlay";
@@ -43,6 +47,8 @@ import { ZoomControl } from "../components/ZoomControl";
 import { ExportCenter } from "../components/ExportCenter";
 import { CameraModal } from "../components/CameraModal";
 import { DetectionOverlay } from "../components/DetectionOverlay";
+import { LiveObjectsOverlay } from "../components/LiveObjectsOverlay";
+import { useObjectBoxes } from "../components/ObjectBox";
 import { GridSearchOverlay, filterByRegion, type Region } from "../components/GridSearch";
 import { MultiCamGrid } from "../components/MultiCamGrid";
 import { AddCamerasModal } from "../components/AddCamerasModal";
@@ -143,7 +149,9 @@ export function Playback() {
   const [muted, setMuted] = useState(true); // both live + playback start muted; tap to hear
   const [dateOpen, setDateOpen] = useState(false); // custom date/time picker popover
   const [fs, setFs] = useState(false); // mobile pseudo-fullscreen (rotate + fill)
-  const [boxesOn, setBoxesOn] = useState(false); // object-detection box overlay
+  // Object boxes: one switch shared with the live views (remembered per browser).
+  const [boxesOn, setBoxesOnPref] = useObjectBoxes();
+  const setBoxesOn = (fn: (v: boolean) => boolean) => setBoxesOnPref(fn(boxesOn));
   const [gridOpen, setGridOpen] = useState(false); // grid-search draw overlay
   const [region, setRegion] = useState<Region | null>(null); // grid-search motion area
   const [quality, setQuality] = useState<"auto" | "low" | "high">("auto");
@@ -899,7 +907,7 @@ export function Playback() {
   const datePickerPopover = dateOpen && (
     <>
       <div className="fixed inset-0 z-40" onClick={() => setDateOpen(false)} />
-      <div className="absolute bottom-16 left-3 z-50">
+      <div className="absolute bottom-16 left-3 z-50 animate-fade-in">
         <DateTimePicker
           value={selectedMs}
           max={nowMs}
@@ -926,10 +934,9 @@ export function Playback() {
 
   if (!isDesktop) {
     return (
-      <div
-        className="flex h-full min-h-0 flex-col bg-ink-900"
-        style={{ paddingTop: "env(safe-area-inset-top)" }}
-      >
+      <div className="flex h-full min-h-0 flex-col bg-ink-900">
+        {/* The app header (which owns the safe-area inset) shows the title. */}
+        <TopBar title="Playback" />
         {exportModal}
         {/* camera switcher (slides in/out) */}
         <div
@@ -937,29 +944,28 @@ export function Playback() {
             camerasOpen ? "max-h-[120px]" : "max-h-0"
           }`}
         >
-          <div className="flex gap-2 overflow-x-auto p-2">
-            {(cameras ?? []).map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedId(c.id)}
-                className="shrink-0 w-[120px]"
-              >
-                <div
-                  className={`relative aspect-video rounded-lg overflow-hidden border ${
-                    c.id === selectedId ? "border-brand ring-1 ring-brand" : "border-line"
-                  }`}
-                >
-                  <MobileThumb cameraId={c.id} enabled={c.enabled} />
-                </div>
-                <p
-                  className={`mt-1 text-[11px] uppercase tracking-wide truncate ${
-                    c.id === selectedId ? "text-fg font-medium" : "text-fg-muted"
-                  }`}
-                >
-                  {c.name}
-                </p>
-              </button>
-            ))}
+          <div className="flex gap-1.5 overflow-x-auto px-2 py-2">
+            {(cameras ?? []).map((c) => {
+              const on = c.id === selectedId;
+              return (
+                <button key={c.id} onClick={() => setSelectedId(c.id)} className="w-[120px] shrink-0">
+                  <div className={`rounded-lg p-0.5 ${on ? "bg-ink-650" : ""}`}>
+                    <div className="relative aspect-video overflow-hidden rounded-md bg-ink-950">
+                      <MobileThumb cameraId={c.id} enabled={c.enabled} />
+                    </div>
+                  </div>
+                  <p className="mt-1 flex justify-center">
+                    <span
+                      className={`max-w-full truncate rounded px-1.5 py-px text-[11px] ${
+                        on ? "bg-brand font-medium text-white" : "text-fg-muted"
+                      }`}
+                    >
+                      {c.name}
+                    </span>
+                  </p>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -978,7 +984,7 @@ export function Playback() {
         >
           {renderPlayer()}
           {selected && !mobileFs && (
-            <div className="absolute top-2 left-2 flex max-w-[62%] items-center gap-1 rounded-md bg-black/40 px-2 py-1 text-[11px] font-mono text-white/90 backdrop-blur-sm">
+            <div className="osd-surface pointer-events-none absolute left-2 top-2 flex h-6 max-w-[62%] items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-white/95">
               <span className="shrink-0 tabular-nums">
                 {fmtDate(overlayTime)} {fmtClock(overlayTime)}
               </span>
@@ -994,16 +1000,27 @@ export function Playback() {
 
         {/* control header */}
         {selected && (
-          <div className="flex items-center gap-2 px-3 h-12 border-b border-line shrink-0">
-            <span className="flex items-center gap-2 text-sm font-medium text-fg">
-              <span className={`h-2.5 w-2.5 rounded-full ${isLive ? "bg-rec" : "bg-fg-faint"}`} />
-              {selected.name}
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-ink-800 px-3">
+            <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-fg">
+              {isLive ? (
+                <span className="pill-blue shrink-0 gap-1 font-semibold tracking-wide">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brand" />
+                  LIVE
+                </span>
+              ) : (
+                <span className="pill-gray shrink-0 tabular-nums">{fmtClock(overlayTime)}</span>
+              )}
+              <span className="truncate">{selected.name}</span>
             </span>
-            <div className="ml-auto flex items-center gap-0.5">
+            <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {!isLive && (
                 <>
-                  <BarBtn onClick={togglePlay} label={paused ? "Play" : "Pause"}>
-                    {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+                  <BarBtn onClick={togglePlay} label={paused ? "Play" : "Pause"} strong>
+                    {paused ? (
+                      <Play className="h-4 w-4" fill="currentColor" strokeWidth={0} />
+                    ) : (
+                      <Pause className="h-4 w-4" fill="currentColor" strokeWidth={0} />
+                    )}
                   </BarBtn>
                   <BarBtn onClick={() => seekToTime(selectedMs - 30_000)} label="Back 30 seconds">
                     <Rewind className="h-4 w-4" />
@@ -1053,7 +1070,7 @@ export function Playback() {
           {!atLiveEdge && (
             <button
               onClick={goLive}
-              className="absolute bottom-16 right-3 h-10 w-10 rounded-full bg-brand text-white grid place-items-center shadow-pop"
+              className="absolute bottom-16 right-3 grid h-10 w-10 place-items-center rounded-full bg-brand-solid text-white shadow-pop active:bg-brand-hover"
               aria-label="Jump to live"
             >
               <ArrowUp className="h-4 w-4" />
@@ -1061,14 +1078,16 @@ export function Playback() {
           )}
           <button
             onClick={openDatePicker}
-            className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-ink-700/90 px-3.5 py-2.5 text-xs text-fg backdrop-blur-sm"
+            className={`absolute bottom-3 left-3 flex h-10 items-center gap-2 rounded-lg border border-line bg-ink-800/95 px-3.5 text-[13px] font-medium shadow-pop backdrop-blur-sm ${
+              dateOpen ? "text-brand" : "text-fg"
+            }`}
           >
-            <Calendar className="h-3.5 w-3.5" />
+            <Calendar className="h-4 w-4 text-fg-muted" />
             {fmtDay(selectedMs)}
           </button>
           <button
             onClick={snapshot}
-            className="absolute bottom-3 right-3 h-10 w-10 rounded-full bg-ink-700/90 text-fg-muted grid place-items-center backdrop-blur-sm"
+            className="absolute bottom-3 right-3 grid h-10 w-10 place-items-center rounded-lg border border-line bg-ink-800/95 text-fg-muted shadow-pop backdrop-blur-sm active:text-fg"
             aria-label="Snapshot"
           >
             <CameraIcon className="h-4 w-4" />
@@ -1080,8 +1099,10 @@ export function Playback() {
   }
 
   // ---- Desktop layout -----------------------------------------------------
+  // Filled frames tiled on the page: camera list | timeline | player, with the
+  // events strip as a full-width frame underneath.
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col p-3.5">
       {exportModal}
       <CameraModal open={settingsOpen} onClose={() => setSettingsOpen(false)} camera={selected} />
       <AddCamerasModal
@@ -1108,8 +1129,9 @@ export function Playback() {
 
       <TopBar title="Playback" />
 
-      {/* Top half: rail + timeline + player. Events panel is a full-width section below. */}
-      <div className={`flex min-h-0 flex-1 ${railRight ? "flex-row-reverse" : ""}`}>
+      {/* Top half: rail + timeline + player, each its own frame. The events panel
+          is a full-width frame below. */}
+      <div className={`flex min-h-0 flex-1 gap-3 ${railRight ? "flex-row-reverse" : ""}`}>
         {showRail && (
           <CameraRail
             cameras={cameras ?? []}
@@ -1120,19 +1142,20 @@ export function Playback() {
         )}
 
       {/* timeline column */}
-      <div className="relative w-[220px] shrink-0 border-x border-line flex flex-col bg-ink-900">
-        <div className="px-3 pt-3 pb-2.5 space-y-2.5">
-          <div className="flex items-center justify-between">
+      <div className="frame relative flex w-[196px] shrink-0 flex-col">
+        <div className="space-y-2 px-2.5 pb-1 pt-2.5">
+          <div className="flex items-center justify-between gap-1 pl-1">
             <button
               onClick={() => setDateOpen((o) => !o)}
-              className="text-sm font-medium text-fg hover:text-brand"
+              className={`truncate rounded text-[13px] font-medium hover:text-brand ${dateOpen ? "text-brand" : "text-fg"}`}
+              title="Pick a date and time"
             >
               {fmtDate(selectedMs)}
             </button>
-            <div className="flex items-center gap-0.5">
+            <div className="flex shrink-0 items-center">
               <button
                 onClick={() => setShowRail((v) => !v)}
-                className={`btn-icon h-6 w-6 ${showRail ? "" : "text-brand"}`}
+                className={`btn-icon h-7 w-6 ${showRail ? "" : "text-brand hover:text-brand"}`}
                 aria-label={showRail ? "Hide the camera list" : "Show the camera list"}
                 title={showRail ? "Hide the camera list" : "Show the camera list"}
               >
@@ -1140,7 +1163,7 @@ export function Playback() {
               </button>
               <button
                 onClick={() => setShowEvents((v) => !v)}
-                className={`btn-icon h-6 w-6 ${showEvents ? "" : "text-brand"}`}
+                className={`btn-icon h-7 w-6 ${showEvents ? "" : "text-brand hover:text-brand"}`}
                 aria-label={showEvents ? "Hide the events panel" : "Show the events panel"}
                 title={showEvents ? "Hide the events panel" : "Show the events panel"}
               >
@@ -1148,7 +1171,7 @@ export function Playback() {
               </button>
               <button
                 onClick={() => setRailRight((r) => !r)}
-                className="btn-icon h-6 w-6"
+                className="btn-icon h-7 w-6"
                 aria-label="Flip timeline to the other side"
                 title="Flip timeline to the other side"
               >
@@ -1157,11 +1180,12 @@ export function Playback() {
             </div>
           </div>
           {/* zoom pill */}
-          <div className="flex items-center gap-2 rounded-full bg-ink-800 px-3 py-1">
+          <div className="flex h-7 items-center gap-2 rounded-full bg-white/[0.05] px-2.5">
             <button
               onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}
-              className="text-fg-faint hover:text-fg leading-none"
+              className="grid h-5 w-4 place-items-center text-sm leading-none text-fg-muted hover:text-fg"
               aria-label="Zoom out timeline"
+              title="Zoom out"
             >
               −
             </button>
@@ -1173,16 +1197,19 @@ export function Playback() {
               value={zoomIdx}
               onChange={(e) => setZoomIdx(Number(e.target.value))}
               className="tl-zoom flex-1 min-w-0"
+              aria-label="Timeline zoom"
               style={{
-                background: `linear-gradient(to right, #1b9df0 ${(zoomIdx / (ZOOMS.length - 1)) * 100}%, #2a3038 ${
+                // brand (#4797ff) fill up to the thumb, ink-600 (#3a3e43) track after it
+                background: `linear-gradient(to right, #4797ff ${(zoomIdx / (ZOOMS.length - 1)) * 100}%, #3a3e43 ${
                   (zoomIdx / (ZOOMS.length - 1)) * 100
                 }%)`,
               }}
             />
             <button
               onClick={() => setZoomIdx((i) => Math.min(ZOOMS.length - 1, i + 1))}
-              className="text-fg-faint hover:text-fg leading-none"
+              className="grid h-5 w-4 place-items-center text-sm leading-none text-fg-muted hover:text-fg"
               aria-label="Zoom in timeline"
+              title="Zoom in"
             >
               +
             </button>
@@ -1207,28 +1234,32 @@ export function Playback() {
           {/* Jump-to-live pill: only while scrubbing the past; bounces back to live. */}
           <button
             onClick={goLive}
-            className={`absolute bottom-4 right-3 z-10 grid h-9 w-9 place-items-center rounded-full bg-brand text-white shadow-pop transition-all duration-200 hover:bg-[#2aa6f5] ${
+            className={`absolute bottom-3 right-3 z-10 grid h-8 w-8 place-items-center rounded-full bg-brand-solid text-white shadow-pop transition-all duration-200 hover:bg-brand-hover ${
               atLiveEdge ? "pointer-events-none scale-90 opacity-0" : "scale-100 opacity-100"
             }`}
             aria-label="Jump to live"
+            title="Jump to live"
           >
             <ArrowUp className="h-4 w-4" />
           </button>
         </div>
 
         {/* Manage menu: download / timelapse / remove */}
-        <div className="relative border-t border-line">
+        <div className="relative px-2.5 pb-2 pt-1">
           <button
             onClick={() => setManageOpen((o) => !o)}
-            className="flex w-full items-center justify-center gap-2 py-2.5 text-sm text-brand hover:bg-ink-850"
+            className={`flex h-8 w-full items-center justify-center gap-2 rounded-md text-sm font-medium text-brand transition-colors hover:bg-white/[0.04] ${
+              manageOpen ? "bg-white/[0.04]" : ""
+            }`}
+            aria-expanded={manageOpen}
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-4 w-4 text-fg-muted" />
             Manage
           </button>
           {manageOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setManageOpen(false)} />
-              <div className="absolute bottom-12 left-2 right-2 z-50 rounded-lg border border-line bg-ink-850 p-1.5 shadow-pop">
+              <div className="card absolute bottom-11 left-2 z-50 w-60 p-1 shadow-pop animate-fade-in">
                 <ManageItem
                   icon={<Download className="h-4 w-4" />}
                   label="Download clip"
@@ -1272,7 +1303,7 @@ export function Playback() {
         {dateOpen && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setDateOpen(false)} />
-            <div className="absolute top-12 left-3 z-50">
+            <div className="absolute left-2 top-11 z-50 animate-fade-in">
               <DateTimePicker
                 value={selectedMs}
                 max={nowMs}
@@ -1287,9 +1318,9 @@ export function Playback() {
         )}
       </div>
 
-      {/* player + control bar + events */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        <div ref={containerRef} className="relative flex-1 overflow-hidden bg-black min-h-0">
+      {/* player frame: video on black, control bar under it inside the frame */}
+      <div className="frame flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden bg-black">
           {multiActive ? (
             <MultiCamGrid
               cameras={multiView}
@@ -1311,8 +1342,11 @@ export function Playback() {
             // the zoom); the name/controls below stay put outside it.
             <div className="absolute inset-0" style={{ transform: zoomTransform, transformOrigin: "0 0" }}>
               {renderPlayer()}
-              {boxesOn && selected && (
-                <DetectionOverlay events={events} atMs={selectedMs} videoRef={playerVideoRef} fit="contain" />
+              {boxesOn && selected && !isLive && (
+                <DetectionOverlay cameraId={selected.id} events={events} atMs={selectedMs} videoRef={playerVideoRef} fit="contain" />
+              )}
+              {selected && isLive && (
+                <LiveObjectsOverlay cameraId={selected.id} videoRef={playerVideoRef} fit="contain" outline={false} />
               )}
             </div>
           )}
@@ -1322,10 +1356,10 @@ export function Playback() {
           )}
 
           {selected && multiView.length <= 1 && (
-            <div className="absolute top-3 left-3 flex items-center gap-2 rounded-md bg-black/35 px-2.5 py-1 backdrop-blur-sm">
-              <span className="text-xs font-mono tabular-nums text-white/90">{fmtClock(overlayTime)}</span>
-              <span className="text-white/30">|</span>
-              <span className="text-xs font-medium text-white">{selected.name}</span>
+            <div className="osd-chip pointer-events-none absolute left-3 top-3 max-w-[50%]">
+              <span className="shrink-0 tabular-nums text-white/85">{fmtClock(overlayTime)}</span>
+              <span className="h-3.5 w-px shrink-0 bg-white/25" />
+              <span className="truncate">{selected.name}</span>
             </div>
           )}
           {selected && !gridOpen && !multiActive && (
@@ -1356,10 +1390,10 @@ export function Playback() {
                 </VidBtn>
               ) : (
                 <div className="group relative">
-                  <span className="grid h-8 w-8 cursor-default place-items-center rounded-md bg-black/45 text-white/50 backdrop-blur-sm">
+                  <span className="osd-btn cursor-default text-white/40 hover:bg-transparent">
                     <Settings className="h-4 w-4" />
                   </span>
-                  <div className="pointer-events-none absolute right-0 top-9 hidden w-max max-w-[220px] rounded-md bg-black/85 px-2.5 py-1.5 text-[11px] leading-snug text-white/90 group-hover:block">
+                  <div className="osd-panel pointer-events-none absolute right-0 top-10 hidden w-max max-w-[220px] px-2.5 py-1.5 text-[11px] leading-snug text-white/90 group-hover:block">
                     You don&apos;t have permission to edit this camera&apos;s settings.
                   </div>
                 </div>
@@ -1374,11 +1408,12 @@ export function Playback() {
           {region && !gridOpen && (
             <button
               onClick={() => setRegion(null)}
-              className="absolute bottom-3 left-3 z-10 flex items-center gap-1.5 rounded-full bg-brand/90 px-3 py-1.5 text-xs font-medium text-white shadow-pop hover:bg-brand"
+              className="absolute bottom-3 left-1/2 z-10 flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-md bg-brand-solid px-3 text-xs font-medium text-white shadow-pop transition-colors hover:bg-brand-hover"
+              title="Clear the motion area"
             >
               <Search className="h-3.5 w-3.5" />
               Motion area · {filteredEvents.length} {filteredEvents.length === 1 ? "event" : "events"}
-              <span className="ml-0.5 opacity-80">✕</span>
+              <X className="ml-0.5 h-3.5 w-3.5 opacity-80" />
             </button>
           )}
           {selected && multiView.length <= 1 && <KeyboardHelp />}
@@ -1392,56 +1427,70 @@ export function Playback() {
           {selected && !multiActive && !gridOpen && <ExtensionOSD cameraId={selected.id} />}
         </div>
 
-        {/* control bar (below the video) */}
+        {/* control bar (below the video, inside the player frame): time and
+            conditions on the left, transport centred, view tools on the right */}
         {selected && (
-          <div className="flex items-center gap-1 h-12 px-3 border-t border-line bg-ink-900 shrink-0">
-            {isLive ? (
-              <span className="pill bg-online/20 text-online mr-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-online" />
-                LIVE
-              </span>
-            ) : (
-              <BarBtn onClick={togglePlay} label={paused ? "Play" : "Pause"}>
-                {paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-              </BarBtn>
-            )}
-            <BarBtn onClick={() => setMuted((m) => !m)} label={muted ? "Unmute" : "Mute"}>
-              {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-            </BarBtn>
-            <SkipBtn dir={-1} onClick={() => seekToTime((isLive ? nowMs : selectedMs) - 10_000)} />
-            {!isLive && <SkipBtn dir={1} onClick={() => seekToTime(selectedMs + 10_000)} />}
-            {!isLive && (
-              <>
-                <BarBtn
-                  onClick={() => {
-                    const p = findPrevEvent(selectedMs);
-                    if (p) seekToTime(p);
-                  }}
-                  label="Previous motion event"
+          // Equal-basis sides keep the transport centred; on a narrow player
+          // the sides fall back to their content width instead of overlapping it.
+          <div className="flex h-12 shrink-0 items-center gap-2 px-3 min-[1200px]:gap-3">
+            <div className="flex flex-1 basis-0 items-center gap-2 whitespace-nowrap min-[1200px]:gap-3">
+              {isLive ? (
+                <span className="pill-blue h-6 shrink-0 gap-1.5 px-2 font-semibold tracking-wide">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brand" />
+                  LIVE
+                </span>
+              ) : (
+                <button
+                  onClick={goLive}
+                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium text-brand transition-colors hover:bg-brand/10"
+                  title="Back to the live view"
+                  aria-label="Go live"
                 >
-                  <ChevronFirst className="h-4 w-4" />
-                </BarBtn>
-                <BarBtn
-                  onClick={() => {
-                    const n = findNextEvent(selectedMs);
-                    if (n) seekToTime(n);
-                  }}
-                  label="Next motion event"
-                >
-                  <ChevronLast className="h-4 w-4" />
-                </BarBtn>
-              </>
-            )}
-            {!isLive && (
-              <button onClick={goLive} className="ml-1 h-8 rounded-md px-2.5 text-xs text-fg-muted hover:text-fg hover:bg-ink-700">
-                Go live
-              </button>
-            )}
-            <div className="ml-2 flex items-center gap-2">
-              <span className="text-xs font-mono text-fg-muted tabular-nums">{fmtClock(overlayTime)}</span>
-              {selected && <PlaybackConditions tsMs={selectedMs} variant="bar" cameraId={selected.id} live={isLive} />}
+                  <ArrowUp className="h-3.5 w-3.5" />
+                  <span className="hidden min-[1200px]:inline">Go live</span>
+                </button>
+              )}
+              <div className="flex items-center gap-2.5">
+                <span className="text-[13px] font-semibold tabular-nums text-fg">{fmtClock(overlayTime)}</span>
+                {selected && (
+                  <span className="hidden items-center min-[1200px]:flex">
+                    <PlaybackConditions tsMs={selectedMs} variant="bar" cameraId={selected.id} live={isLive} />
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="ml-auto flex items-center gap-0.5">
+
+            <div className="flex shrink-0 items-center gap-0.5">
+              {/* Change global viewer quality. */}
+              <div className="relative">
+                <BarBtn onClick={() => setQualityOpen((o) => !o)} label="Change global viewer quality" active={qualityOpen}>
+                  {/* A filled chip in the button's own colour, label knocked out. */}
+                  <span className="rounded-[3px] bg-current px-1 py-[2px] leading-none">
+                    <span className="block text-[9px] font-bold uppercase leading-none tracking-wide text-ink-800">
+                      {quality === "low" ? "SD" : quality === "high" ? "HD" : "Auto"}
+                    </span>
+                  </span>
+                </BarBtn>
+                {qualityOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setQualityOpen(false)} />
+                    <div className="card absolute bottom-10 left-1/2 z-20 w-36 -translate-x-1/2 p-1 shadow-pop animate-fade-in">
+                      {(["high", "auto", "low"] as const).map((opt) => (
+                        <MenuOption
+                          key={opt}
+                          selected={quality === opt}
+                          onClick={() => {
+                            setQuality(opt);
+                            setQualityOpen(false);
+                          }}
+                        >
+                          {opt === "high" ? "High (HD)" : opt === "low" ? "Low (SD)" : "Auto"}
+                        </MenuOption>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               {/* Playback speed — greyed out while live. Hidden in multi-view. */}
               {!multiActive && (
                 <div className="relative">
@@ -1451,70 +1500,86 @@ export function Playback() {
                     disabled={isLive}
                     active={!isLive && playbackRate !== 1}
                   >
-                    <Gauge className="h-4 w-4" />
+                    {!isLive && playbackRate !== 1 ? (
+                      <span className="text-[11px] font-semibold tabular-nums">{playbackRate}×</span>
+                    ) : (
+                      <Gauge className="h-4 w-4" />
+                    )}
                   </BarBtn>
                   {speedOpen && !isLive && (
-                    <div className="absolute bottom-10 right-0 z-20 rounded-md border border-line bg-ink-850 p-1 shadow-pop">
+                    <div className="card absolute bottom-10 left-1/2 z-20 w-24 -translate-x-1/2 p-1 shadow-pop animate-fade-in">
                       {RATES.map((rate) => (
-                        <button
+                        <MenuOption
                           key={rate}
+                          selected={playbackRate === rate}
                           onClick={() => {
                             setPlaybackRate(rate);
                             setSpeedOpen(false);
                           }}
-                          className={`block w-full rounded px-3 py-1 text-left text-xs tabular-nums ${
-                            playbackRate === rate ? "bg-brand text-white" : "text-fg-muted hover:bg-ink-700"
-                          }`}
                         >
-                          {rate}×
-                        </button>
+                          <span className="tabular-nums">{rate}×</span>
+                        </MenuOption>
                       ))}
                     </div>
                   )}
                 </div>
               )}
+              {/* Recorded-only controls stay in place (greyed) while live, so the
+                  transport never shifts under the pointer when you go live. */}
+              <BarBtn
+                onClick={() => {
+                  const p = findPrevEvent(selectedMs);
+                  if (p) seekToTime(p);
+                }}
+                label="Previous motion event"
+                disabled={isLive}
+              >
+                <ChevronFirst className="h-4 w-4" />
+              </BarBtn>
+              <SkipBtn dir={-1} onClick={() => seekToTime((isLive ? nowMs : selectedMs) - 10_000)} />
+              {!isLive ? (
+                <BarBtn onClick={togglePlay} label={paused ? "Play" : "Pause"} strong>
+                  {paused ? (
+                    <Play className="h-5 w-5" fill="currentColor" strokeWidth={0} />
+                  ) : (
+                    <Pause className="h-5 w-5" fill="currentColor" strokeWidth={0} />
+                  )}
+                </BarBtn>
+              ) : (
+                <BarBtn onClick={() => undefined} label="Live — scrub the timeline to review footage" disabled strong>
+                  <Pause className="h-5 w-5" fill="currentColor" strokeWidth={0} />
+                </BarBtn>
+              )}
+              <SkipBtn dir={1} onClick={() => seekToTime(selectedMs + 10_000)} disabled={isLive} />
+              <BarBtn
+                onClick={() => {
+                  const n = findNextEvent(selectedMs);
+                  if (n) seekToTime(n);
+                }}
+                label="Next motion event"
+                disabled={isLive}
+              >
+                <ChevronLast className="h-4 w-4" />
+              </BarBtn>
+              <BarBtn onClick={() => setMuted((m) => !m)} label={muted ? "Unmute" : "Mute"}>
+                {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              </BarBtn>
+              <BarBtn onClick={fullscreen} label="Fullscreen">
+                <Maximize className="h-4 w-4" />
+              </BarBtn>
+            </div>
+
+            <div className="flex flex-1 basis-0 items-center justify-end gap-0.5">
               {/* Multi-camera playback — opens the picker. */}
               <BarBtn onClick={() => setAddCamsOpen(true)} label="Multi-camera playback" active={multiActive}>
-                <Grid2x2 className="h-4 w-4" />
+                <Grid2x2Plus className="h-4 w-4" />
               </BarBtn>
               {/* Grid search — single-view only. */}
               {!multiActive && (
                 <BarBtn onClick={() => setGridOpen(true)} label="Grid search (motion area)" active={!!region}>
-                  <Search className="h-4 w-4" />
+                  <ScanSearch className="h-4 w-4" />
                 </BarBtn>
               )}
-              {/* Change global viewer quality. */}
-              <div className="relative">
-                <BarBtn onClick={() => setQualityOpen((o) => !o)} label="Change global viewer quality">
-                  <span className="text-[11px] font-semibold">
-                    {quality === "low" ? "SD" : quality === "high" ? "HD" : "Auto"}
-                  </span>
-                </BarBtn>
-                {qualityOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setQualityOpen(false)} />
-                    <div className="absolute bottom-10 right-0 z-20 w-32 rounded-md border border-line bg-ink-850 p-1 shadow-pop">
-                      {(["high", "auto", "low"] as const).map((opt) => (
-                        <button
-                          key={opt}
-                          onClick={() => {
-                            setQuality(opt);
-                            setQualityOpen(false);
-                          }}
-                          className={`block w-full rounded px-3 py-1.5 text-left text-xs ${
-                            quality === opt ? "bg-brand text-white" : "text-fg-muted hover:bg-ink-700"
-                          }`}
-                        >
-                          {opt === "high" ? "High (HD)" : opt === "low" ? "Low (SD)" : "Auto"}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-              <BarBtn onClick={fullscreen} label="Fullscreen">
-                <Maximize2 className="h-4 w-4" />
-              </BarBtn>
             </div>
           </div>
         )}
@@ -1536,12 +1601,15 @@ function BarBtn({
   children,
   active,
   disabled,
+  strong,
 }: {
   onClick: () => void;
   label: string;
   children: React.ReactNode;
   active?: boolean;
   disabled?: boolean;
+  // The primary transport control (play/pause) reads brighter than the rest.
+  strong?: boolean;
 }) {
   return (
     <button
@@ -1549,15 +1617,41 @@ function BarBtn({
       aria-label={label}
       title={label}
       disabled={disabled}
-      className={`grid h-8 min-w-8 place-items-center rounded-md px-1.5 transition-colors ${
+      className={`grid h-8 min-w-7 place-items-center rounded-md px-1 transition-colors min-[1200px]:min-w-8 min-[1200px]:px-1.5 ${
         disabled
-          ? "cursor-not-allowed text-fg-faint/40"
+          ? "cursor-not-allowed text-fg-faint/50"
           : active
-            ? "bg-brand/15 text-brand hover:bg-brand/25"
-            : "text-fg-muted hover:bg-ink-700 hover:text-fg"
+            ? "bg-brand/10 text-brand hover:bg-brand/20"
+            : strong
+              ? "text-fg hover:bg-white/[0.06]"
+              : "text-fg-muted hover:bg-white/[0.06] hover:text-fg"
       }`}
     >
       {children}
+    </button>
+  );
+}
+
+// A row in a control-bar popover (quality, speed): the current choice is marked
+// in the accent colour with a check.
+function MenuOption({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex h-8 w-full items-center justify-between gap-2 rounded px-2.5 text-left text-[13px] transition-colors ${
+        selected ? "bg-brand-ink text-brand" : "text-fg/90 hover:bg-white/[0.05]"
+      }`}
+    >
+      {children}
+      {selected && <Check className="h-3.5 w-3.5 shrink-0" />}
     </button>
   );
 }
@@ -1577,17 +1671,18 @@ function ManageItem({
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm ${
-        danger ? "text-rec hover:bg-rec/10" : "text-fg-muted hover:bg-ink-700 hover:text-fg"
+      className={`flex h-9 w-full items-center gap-2.5 rounded px-2.5 text-left text-[13px] transition-colors ${
+        danger ? "text-danger hover:bg-danger/10" : "text-fg/90 hover:bg-white/[0.05] hover:text-fg"
       }`}
     >
-      {icon}
+      <span className={`shrink-0 ${danger ? "" : "text-fg-muted"}`}>{icon}</span>
       {label}
     </button>
   );
 }
 
-// Overlay button for the video's top-right cluster (dark pill, light icon).
+// Overlay button for the video's top-right cluster — the shared .osd-btn, so
+// first-party controls and extension toolbar entries are indistinguishable.
 function VidBtn({
   onClick,
   label,
@@ -1604,9 +1699,8 @@ function VidBtn({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`grid h-8 w-8 place-items-center rounded-md backdrop-blur-sm transition-colors ${
-        active ? "bg-brand text-white hover:bg-[#2aa6f5]" : "bg-black/45 text-white/85 hover:bg-black/70"
-      }`}
+      aria-pressed={active}
+      className={`osd-btn ${active ? "osd-btn-active" : ""}`}
     >
       {children}
     </button>
@@ -1614,13 +1708,18 @@ function VidBtn({
 }
 
 // UniFi-style ±10s skip: a circular arrow with a "10" tucked inside.
-function SkipBtn({ dir, onClick }: { dir: 1 | -1; onClick: () => void }) {
+function SkipBtn({ dir, onClick, disabled }: { dir: 1 | -1; onClick: () => void; disabled?: boolean }) {
   const Icon = dir < 0 ? RotateCcw : RotateCw;
+  const label = dir < 0 ? "Back 10 seconds" : "Forward 10 seconds";
   return (
     <button
       onClick={onClick}
-      aria-label={dir < 0 ? "Back 10 seconds" : "Forward 10 seconds"}
-      className="relative h-8 w-8 grid place-items-center rounded-md text-fg-muted hover:text-fg hover:bg-ink-700"
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className={`relative grid h-8 w-7 place-items-center rounded-md transition-colors min-[1200px]:w-8 ${
+        disabled ? "cursor-not-allowed text-fg-faint/50" : "text-fg-muted hover:bg-white/[0.06] hover:text-fg"
+      }`}
     >
       <Icon className="h-[18px] w-[18px]" />
       <span className="absolute text-[7px] font-bold leading-none">10</span>
@@ -1633,21 +1732,19 @@ function SkipBtn({ dir, onClick }: { dir: 1 | -1; onClick: () => void }) {
 function KeyboardHelp() {
   return (
     <div className="group absolute bottom-3 left-3 z-10">
-      <button
-        className="h-8 w-8 grid place-items-center rounded-md bg-black/45 text-white/80 backdrop-blur-sm hover:bg-black/70"
-        aria-label="Keyboard shortcuts"
-      >
+      <button className="osd-btn" aria-label="Keyboard shortcuts">
         <Keyboard className="h-4 w-4" />
       </button>
-      <div className="pointer-events-none absolute bottom-10 left-0 hidden w-max rounded-lg border border-line bg-ink-850/95 p-3 shadow-pop backdrop-blur group-hover:block">
+      <div className="osd-panel pointer-events-none absolute bottom-10 left-0 hidden w-max p-3 group-hover:block">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-white/50">Shortcuts</p>
         <div className="grid grid-cols-[1fr_auto] items-center gap-x-5 gap-y-2 text-xs">
-          <span className="text-fg-muted">Skip ±1s</span>
+          <span className="text-white/75">Skip ±1s</span>
           <span className="flex gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd></span>
-          <span className="text-fg-muted">Frame ±1</span>
+          <span className="text-white/75">Frame ±1</span>
           <span className="flex gap-1"><Kbd>←</Kbd><Kbd>→</Kbd></span>
-          <span className="text-fg-muted">Slow / Speed up</span>
+          <span className="text-white/75">Slow / Speed up</span>
           <span className="flex gap-1"><Kbd>J</Kbd><Kbd>L</Kbd></span>
-          <span className="text-fg-muted">Play / Pause</span>
+          <span className="text-white/75">Play / Pause</span>
           <Kbd>Space</Kbd>
         </div>
       </div>
@@ -1657,7 +1754,7 @@ function KeyboardHelp() {
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-grid h-6 min-w-[22px] place-items-center rounded border border-line-strong bg-ink-800 px-1.5 text-[11px] font-medium text-fg">
+    <span className="inline-grid h-6 min-w-[22px] place-items-center rounded border border-white/15 bg-white/[0.06] px-1.5 text-[11px] font-medium text-white">
       {children}
     </span>
   );

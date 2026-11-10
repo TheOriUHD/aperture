@@ -62,7 +62,7 @@ if command -v ss >/dev/null; then
   done
 fi
 
-for b in nvrd nvrctl apdiscovery; do
+for b in nvrd nvrctl apdiscovery apdetect; do
   [ -x "$BIN_DIR/$b" ] || die "$BIN_DIR/$b not found or not executable.
   Build first:  make build-native   (or set BIN_DIR=/path/to/binaries)"
 done
@@ -119,6 +119,8 @@ install -m 0755 "$BIN_DIR/nvrd"        /usr/bin/nvrd
 install -m 0755 "$BIN_DIR/nvrctl"      /usr/bin/nvrctl
 install -d -m 0755 /usr/lib/aperture/bin
 install -m 0755 "$BIN_DIR/apdiscovery" /usr/lib/aperture/bin/apdiscovery
+# The object-recognition worker nvrd starts once a model is downloaded.
+install -m 0755 "$BIN_DIR/apdetect" /usr/lib/aperture/bin/apdetect
 # The SDK gets a directory to itself: --allow-read grants the whole parent dir.
 install -d -m 0755 /usr/lib/aperture/sdk
 install -m 0444 "$SRC/aperture-sdk/mod.ts" /usr/lib/aperture/sdk/mod.ts

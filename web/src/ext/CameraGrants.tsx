@@ -70,7 +70,7 @@ export function CameraGrantControl({
       {/* Only an all-requesting extension offers the future-inclusive "all"; a
           specific request has a fixed ceiling and is always an explicit list. */}
       {requestAll && (
-        <div className="grid gap-1.5">
+        <div className="grid gap-2">
           <Mode
             checked={isAll}
             onSelect={() => onChange(null)}
@@ -92,20 +92,20 @@ export function CameraGrantControl({
             <p className="text-xs text-fg-faint">No cameras are available to you to grant.</p>
           ) : (
             <>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-[11px] text-fg-faint">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-xs tabular-nums text-fg-faint">
                   {selected.size} of {choices.length} selected
                 </span>
-                <div className="flex gap-2 text-[11px]">
-                  <button type="button" className="text-brand hover:underline" onClick={() => onChange(choices.map((c) => c.id))}>
+                <div className="flex gap-3 text-xs">
+                  <button type="button" className="text-brand hover:text-brand-hover" onClick={() => onChange(choices.map((c) => c.id))}>
                     Select all
                   </button>
-                  <button type="button" className="text-fg-muted hover:underline" onClick={() => onChange([])}>
+                  <button type="button" className="text-fg-muted hover:text-fg" onClick={() => onChange([])}>
                     Clear
                   </button>
                 </div>
               </div>
-              <div className="grid max-h-48 gap-1.5 overflow-auto">
+              <div className="max-h-52 divide-y divide-line overflow-auto rounded-md border border-line">
                 {choices.map((c) => {
                   const on = selected.has(c.id);
                   return (
@@ -113,15 +113,16 @@ export function CameraGrantControl({
                       key={c.id}
                       type="button"
                       onClick={() => toggle(c.id)}
+                      aria-pressed={on}
                       className={clsx(
-                        "flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
-                        on ? "border-brand/40 bg-brand/10 text-fg" : "border-line bg-ink-850 text-fg-muted hover:text-fg",
+                        "flex h-9 w-full items-center gap-2.5 px-3 text-left text-sm transition-colors hover:bg-white/[0.03]",
+                        on ? "text-fg" : "text-fg-muted hover:text-fg",
                       )}
                     >
                       <span
                         className={clsx(
-                          "grid h-4 w-4 shrink-0 place-items-center rounded border",
-                          on ? "border-brand bg-brand text-white" : "border-line-strong",
+                          "grid h-4 w-4 shrink-0 place-items-center rounded-[3px] border",
+                          on ? "border-brand bg-brand text-white" : "border-fg-faint",
                         )}
                       >
                         {on && <Check className="h-3 w-3" />}
@@ -144,22 +145,23 @@ function Mode({ checked, onSelect, title, sub }: { checked: boolean; onSelect: (
     <button
       type="button"
       onClick={onSelect}
+      aria-pressed={checked}
       className={clsx(
-        "flex items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors",
-        checked ? "border-brand/40 bg-brand/10" : "border-line bg-ink-850 hover:border-line-strong",
+        "flex items-start gap-2.5 rounded-md border px-3 py-2.5 text-left transition-colors",
+        checked ? "border-brand/50 bg-brand/[0.08]" : "border-line hover:border-line-strong hover:bg-white/[0.02]",
       )}
     >
       <span
         className={clsx(
           "mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border",
-          checked ? "border-brand" : "border-line-strong",
+          checked ? "border-brand" : "border-fg-faint",
         )}
       >
         {checked && <span className="h-2 w-2 rounded-full bg-brand" />}
       </span>
       <span className="min-w-0">
         <span className="block text-sm text-fg">{title}</span>
-        <span className="block text-[11px] text-fg-faint">{sub}</span>
+        <span className="mt-0.5 block text-xs text-fg-faint">{sub}</span>
       </span>
     </button>
   );

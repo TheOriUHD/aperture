@@ -17,10 +17,10 @@ type Actions = ReturnType<typeof useExtActions>;
 // crash-loop escalates to a red pill (the one attention colour a row can carry).
 // "Update available" is shown separately as a single blue pill.
 function StatusDot({ ext }: { ext: ExtItem }) {
-  if (!ext.enabled) return <span className="text-xs text-fg-faint">Disabled</span>;
+  if (!ext.enabled) return <span className="text-sm text-fg-faint">Disabled</span>;
   if (ext.hasBackend && ext.state === "failed") {
     return (
-      <span className="pill bg-rec/15 text-rec">
+      <span className="pill-red">
         <AlertTriangle className="h-3 w-3" /> Needs attention
       </span>
     );
@@ -31,7 +31,7 @@ function StatusDot({ ext }: { ext: ExtItem }) {
     if (ext.state === "running") {
       label = "Running";
     } else if (ext.state === "starting") {
-      color = "bg-[#e6b45a]";
+      color = "bg-warn";
       label = "Starting";
     } else {
       color = "bg-fg-faint";
@@ -39,12 +39,21 @@ function StatusDot({ ext }: { ext: ExtItem }) {
     }
   }
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-fg-muted">
-      <span className={clsx("h-1.5 w-1.5 rounded-full", color)} />
+    <span className="inline-flex items-center gap-2 text-sm text-fg/80">
+      <span className={clsx("h-2 w-2 shrink-0 rounded-full", color)} />
       {label}
     </span>
   );
 }
+
+// The manager's column layout, shared by its header row and every ExtRow so the
+// rows line up like a table (a <table> can't host the per-row error boundary).
+export const EXT_COLS = {
+  version: "hidden w-24 shrink-0 md:block",
+  status: "w-[92px] shrink-0 sm:w-36",
+  enabled: "w-10 shrink-0 sm:w-14",
+  expand: "w-8 shrink-0",
+} as const;
 
 export function ExtRow({
   ext,
@@ -85,66 +94,79 @@ export function ExtRow({
     refetchInterval: open && ext.state === "running" ? 3000 : false,
   });
 
-  return (
-    <div className={clsx("rounded-xl border border-line bg-ink-850 transition-colors", !ext.enabled && "opacity-60")}>
-      <div className="flex items-center gap-3 p-3.5">
-        <ExtIcon icon={ext.icon} name={ext.name} size={40} />
+  const toggleOpen = () => setOpen((v) => !v);
 
-        <button onClick={() => setOpen((v) => !v)} className="min-w-0 flex-1 text-left">
+  return (
+    <div className={clsx("border-b border-line", open && "pb-4")}>
+      <div
+        onClick={toggleOpen}
+        className={clsx(
+          "-mx-2 flex min-h-14 cursor-pointer items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-white/[0.025]",
+          !ext.enabled && "[&>*:not(.ext-switch)]:opacity-60",
+        )}
+      >
+        <ExtIcon icon={ext.icon} name={ext.name} size={32} />
+
+        <button type="button" aria-expanded={open} className="min-w-0 flex-1 text-left">
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium text-fg">{ext.name}</span>
-            <span className="shrink-0 text-xs tabular-nums text-fg-faint">v{ext.version}</span>
+            {hasUpdate && (
+              <span className="pill-blue shrink-0">
+                <ArrowUpCircle className="h-3 w-3" /> Update
+              </span>
+            )}
           </div>
           <div className="mt-0.5 truncate text-xs text-fg-muted">
+            <span className="tabular-nums md:hidden">v{ext.version} · </span>
             {ext.author ? `by ${ext.author}` : "Unknown author"} · {ext.source === "store" ? "Store" : "Sideloaded"}
             {ext.modified && " · Edited"}
             {ext.pinned && " · Pinned"}
           </div>
         </button>
 
-        <div className="flex shrink-0 items-center gap-3">
-          {hasUpdate && (
-            <span className="pill bg-brand/15 text-brand">
-              <ArrowUpCircle className="h-3 w-3" /> Update
-            </span>
-          )}
+        <span className={clsx(EXT_COLS.version, "text-sm tabular-nums text-fg/80")}>v{ext.version}</span>
+        <div className={EXT_COLS.status}>
           <StatusDot ext={ext} />
+        </div>
+        <div className={clsx(EXT_COLS.enabled, "ext-switch")} onClick={(e) => e.stopPropagation()}>
           <Switch
             checked={ext.enabled}
             disabled={busy}
             onChange={(v) => (v ? actions.enable.mutate(ext.id) : actions.disable.mutate(ext.id))}
           />
-          <button onClick={() => setOpen((v) => !v)} className="btn-icon" aria-label={open ? "Collapse" : "Expand"}>
-            <ChevronDown className={clsx("h-4 w-4 transition-transform", open && "rotate-180")} />
-          </button>
         </div>
+        <button type="button" className={clsx(EXT_COLS.expand, "btn-icon")} aria-label={open ? "Collapse" : "Expand"}>
+          <ChevronDown className={clsx("h-4 w-4 transition-transform", open && "rotate-180")} />
+        </button>
       </div>
 
       {open && (
-        <div className="space-y-4 border-t border-line px-3.5 pb-3.5 pt-3.5">
+        <div className="mt-2 divide-y divide-line rounded-lg bg-ink-800 px-4 [&>*]:py-4">
           {ext.state === "failed" && ext.reason && (
-            <div className="flex items-start gap-2 rounded-lg border border-rec/30 bg-rec/10 px-3 py-2 text-sm text-fg">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rec" />
-              <span>This extension keeps crashing and has been stopped. {ext.reason}</span>
+            <div>
+              <div className="flex items-start gap-2.5 rounded-md border border-danger/30 bg-danger/[0.08] px-3 py-2.5 text-sm text-fg">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
+                <span>This extension keeps crashing and has been stopped. {ext.reason}</span>
+              </div>
             </div>
           )}
 
           {hasUpdate && (
-            <div className="flex items-center gap-3 rounded-lg border border-brand/25 bg-brand/[0.07] px-3 py-2.5">
+            <div className="flex items-center gap-3">
               <ArrowUpCircle className="h-5 w-5 shrink-0 text-brand" />
               <div className="min-w-0 flex-1 text-sm">
                 <span className="text-fg">Version {update?.latestVersion} available</span>
                 <span className="text-fg-muted"> · you have {ext.version}</span>
-                {update?.permissionsChanged && <span className="ml-1 text-[#e6b45a]">· needs new permissions</span>}
+                {update?.permissionsChanged && <span className="ml-1 text-warn">· needs new permissions</span>}
               </div>
-              <button className="btn-subtle h-8" disabled={busy} onClick={() => onUpdate(ext)}>
+              <button className="btn-primary" disabled={busy} onClick={() => onUpdate(ext)}>
                 {busy ? "Updating…" : "Update"}
               </button>
             </div>
           )}
 
           <div>
-            <p className="label">Permissions</p>
+            <p className="mb-2.5 text-[13px] font-semibold text-fg">Permissions</p>
             <PermissionList lines={ext.consent} />
           </div>
 
@@ -153,10 +175,10 @@ export function ExtRow({
           {ext.requestsCameras && <CameraEdit ext={ext} actions={actions} />}
 
           {ext.canPin && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-ink-900/40 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-sm text-fg">Pin to sidebar</p>
-                <p className="text-xs text-fg-muted">Give this extension its own icon and full-page view in the nav rail.</p>
+                <p className="text-[13px] font-semibold text-fg">Pin to sidebar</p>
+                <p className="mt-0.5 text-xs text-fg-faint">Give this extension its own icon and full-page view in the nav rail.</p>
               </div>
               <Switch
                 checked={ext.pinned}
@@ -168,24 +190,24 @@ export function ExtRow({
 
           {ext.hasBackend && (
             <div>
-              <p className="label">Logs</p>
-              <pre className="max-h-40 overflow-auto rounded-lg border border-line bg-ink-900 p-2.5 font-mono text-[11px] leading-relaxed text-fg-muted">
+              <p className="mb-2.5 text-[13px] font-semibold text-fg">Logs</p>
+              <pre className="max-h-48 overflow-auto rounded-md border border-line bg-ink-900 p-3 font-mono text-[11px] leading-relaxed text-fg-muted">
                 {logs.isLoading ? "Loading…" : logs.data?.lines.length ? logs.data.lines.join("\n") : "No output yet."}
               </pre>
             </div>
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <button className="btn-ghost h-8" onClick={() => onEdit(ext)}>
+            <button className="btn-ghost" onClick={() => onEdit(ext)}>
               <FileCode2 className="h-4 w-4" /> Edit files
             </button>
             {ext.revertable && (
-              <button className="btn-ghost h-8" disabled={actions.revert.isPending} onClick={() => actions.revert.mutate(ext.id)}>
+              <button className="btn-ghost" disabled={actions.revert.isPending} onClick={() => actions.revert.mutate(ext.id)}>
                 <RotateCcw className="h-4 w-4" /> Revert update
               </button>
             )}
             <button
-              className="btn-ghost h-8 ml-auto !border-rec/30 !text-rec hover:!bg-rec/10"
+              className="btn-ghost ml-auto border-danger/40 text-danger hover:border-danger/70 hover:bg-danger/10"
               onClick={() => onUninstall(ext)}
             >
               <Trash2 className="h-4 w-4" /> Uninstall
@@ -220,14 +242,14 @@ function CameraEdit({ ext, actions }: { ext: ExtItem; actions: Actions }) {
   const canSave = (grant === null || grant.length > 0) && dirty;
 
   return (
-    <div className="rounded-lg border border-line bg-ink-900/40 p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
+    <div>
+      <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm text-fg">Cameras</p>
-          <p className="text-[11px] text-fg-faint">Which cameras this extension can see. Changing it re-scopes the extension — no re-consent.</p>
+          <p className="text-[13px] font-semibold text-fg">Cameras</p>
+          <p className="mt-0.5 text-xs text-fg-faint">Which cameras this extension can see. Changing it re-scopes the extension — no re-consent.</p>
         </div>
         <button
-          className="btn-subtle h-8 shrink-0"
+          className="btn-subtle shrink-0"
           disabled={!canSave || actions.setCameras.isPending}
           onClick={() => actions.setCameras.mutate({ id: ext.id, cameras: grant })}
         >

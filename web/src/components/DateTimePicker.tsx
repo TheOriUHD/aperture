@@ -80,13 +80,13 @@ export function DateTimePicker({
   ];
 
   return (
-    <div className="w-[260px] select-none rounded-lg border border-line bg-ink-850 p-3 shadow-pop">
+    <div className="card w-[264px] select-none p-3 shadow-pop">
       {/* Month header */}
       <div className="mb-2 flex items-center justify-between">
         <button className="btn-icon h-7 w-7" onClick={() => bumpMonth(-1)} aria-label="Previous month">
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <span className="text-sm font-medium text-fg">
+        <span className="text-[13px] font-semibold text-fg">
           {MONTHS[view.getMonth()]} {view.getFullYear()}
         </span>
         <button className="btn-icon h-7 w-7" onClick={() => bumpMonth(1)} aria-label="Next month">
@@ -95,7 +95,7 @@ export function DateTimePicker({
       </div>
 
       {/* Weekday row */}
-      <div className="grid grid-cols-7 gap-0.5 text-center text-[10px] text-fg-faint">
+      <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] font-medium text-fg-faint">
         {WEEKDAYS.map((w) => (
           <div key={w} className="py-1">{w}</div>
         ))}
@@ -111,12 +111,12 @@ export function DateTimePicker({
               key={i}
               disabled={dayDisabled(d)}
               onClick={() => pickDay(d)}
-              className={`aspect-square rounded-md text-xs transition-colors disabled:opacity-25 ${
+              className={`aspect-square rounded-md text-xs tabular-nums transition-colors disabled:pointer-events-none disabled:opacity-25 ${
                 isSelected(d)
-                  ? "bg-brand text-white"
+                  ? "bg-brand-solid font-semibold text-white"
                   : isToday(d)
-                    ? "text-brand hover:bg-ink-700"
-                    : "text-fg-muted hover:bg-ink-700 hover:text-fg"
+                    ? "font-semibold text-brand hover:bg-white/[0.06]"
+                    : "text-fg/85 hover:bg-white/[0.06] hover:text-fg"
               }`}
             >
               {d}
@@ -134,10 +134,10 @@ export function DateTimePicker({
 
       {buffered && (
         <div className="mt-3 flex items-center justify-end gap-2 border-t border-line pt-3">
-          <button className="btn-ghost h-8" onClick={() => onCancel?.()}>
+          <button className="btn-ghost" onClick={() => onCancel?.()}>
             Cancel
           </button>
-          <button className="btn-primary h-8" onClick={() => onApply?.(clamp(draft))}>
+          <button className="btn-primary" onClick={() => onApply?.(clamp(draft))}>
             Apply
           </button>
         </div>
@@ -149,11 +149,21 @@ export function DateTimePicker({
 function TimeField({ label, digits, onBump }: { label: string; digits: string; onBump: (dir: number) => void }) {
   return (
     <div className="flex flex-col items-center">
-      <button className="text-fg-faint hover:text-fg" aria-label={`${label} up`} onClick={() => onBump(1)}>
+      <button
+        className="grid h-6 w-9 place-items-center rounded text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg"
+        aria-label={`${label} up`}
+        onClick={() => onBump(1)}
+      >
         <ChevronUp className="h-4 w-4" />
       </button>
-      <span className="w-9 text-center text-lg font-mono tabular-nums text-fg">{digits}</span>
-      <button className="text-fg-faint hover:text-fg" aria-label={`${label} down`} onClick={() => onBump(-1)}>
+      <span className="w-11 rounded-md bg-white/[0.045] py-1 text-center text-lg font-medium tabular-nums text-fg">
+        {digits}
+      </span>
+      <button
+        className="grid h-6 w-9 place-items-center rounded text-fg-muted transition-colors hover:bg-white/[0.06] hover:text-fg"
+        aria-label={`${label} down`}
+        onClick={() => onBump(-1)}
+      >
         <ChevronDown className="h-4 w-4" />
       </button>
     </div>

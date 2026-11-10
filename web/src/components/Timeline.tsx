@@ -42,7 +42,7 @@ export function Timeline({
     <div>
       <div
         onClick={handleClick}
-        className={`relative h-10 rounded-md bg-ink-850 border border-line overflow-hidden ${
+        className={`relative h-10 rounded-md bg-rail-idle/40 overflow-hidden ${
           onSeek ? "cursor-pointer" : ""
         }`}
       >
@@ -57,21 +57,21 @@ export function Timeline({
         {spans.map((s, i) => (
           <div
             key={`s${i}`}
-            className="absolute top-0 bottom-0 bg-brand-deep/85"
+            className="absolute top-0 bottom-0 bg-rail-rec"
             style={{ left: `${s.left}%`, width: `${s.width}%` }}
           />
         ))}
         {motion.map((s, i) => (
           <div
             key={`m${i}`}
-            className="absolute top-0 bottom-0 bg-motion"
+            className="absolute top-0 bottom-0 bg-rail-event"
             style={{ left: `${s.left}%`, width: `${Math.max(s.width, 0.4)}%` }}
           />
         ))}
         {playPct !== undefined && (
           <div className="absolute -top-1 -bottom-1 z-10" style={{ left: `${playPct}%` }}>
-            <div className="w-0.5 h-full bg-white" />
-            <div className="absolute -top-1 -left-[5px] h-3 w-3 rounded-full bg-white border-2 border-ink-900" />
+            <div className="w-0.5 h-full bg-brand" />
+            <div className="absolute -top-1 -left-[5px] h-3 w-3 rounded-full bg-brand border-2 border-ink-800" />
           </div>
         )}
         {empty && (
@@ -80,7 +80,7 @@ export function Timeline({
           </div>
         )}
       </div>
-      <div className="flex justify-between mt-1.5 text-[11px] font-mono text-fg-faint">
+      <div className="flex justify-between mt-1.5 text-[11px] tabular-nums text-fg-faint">
         {HOURS.map((h) => (
           <span key={h}>{String(h).padStart(2, "0")}:00</span>
         ))}

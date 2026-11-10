@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/TheOriUHD/aperture/internal/config"
@@ -41,6 +42,11 @@ const (
 	// without new footage counts as failing: up to a minute for Reconcile to notice
 	// the window, then ffmpeg connecting and the first segment landing and uploading.
 	scheduleStartGrace = 3 * time.Minute
+
+	// ffmpegStopGrace is how long a recording ffmpeg gets to finish after it is
+	// asked to stop (SIGTERM) before it is killed. Finishing means flushing the
+	// muxer and closing the segment it is writing, normally well under a second.
+	ffmpegStopGrace = 10 * time.Second
 )
 
 // Recorder supervises per-camera ffmpeg processes and indexes their output.
@@ -51,26 +57,51 @@ type Recorder struct {
 	reg *storage.Registry
 	log *slog.Logger
 
-	baseCtx context.Context
+	// runCam records one camera until its context ends; superviseFFmpeg, except
+	// in tests.
+	runCam func(ctx context.Context, cam store.Camera)
+
 	mu      sync.Mutex
-	active  map[string]context.CancelFunc // cameraID -> stop
+	baseCtx context.Context
+	active  map[string]*camProc // cameraID -> the supervisor meant to be recording
+	// exiting holds, per camera, the newest supervisor that was stopped and may
+	// still be finishing its segment. A new one for the same camera waits for it:
+	// two ffmpegs must never write one directory, as both could open the same
+	// second's file.
+	exiting map[string]*camProc
+	// procs counts every supervisor still running, stopped or not; Run waits for
+	// it on shutdown so each ffmpeg has closed its segment before nvrd exits.
+	procs sync.WaitGroup
 
 	lastIdx map[string]int64 // cameraID -> last indexed segment epoch (seconds)
 }
 
+// camProc is one camera's recording supervisor.
+type camProc struct {
+	stop context.CancelFunc
+	done chan struct{} // closed once its ffmpeg has exited and it has returned
+}
+
 // New constructs a Recorder.
 func New(cfg *config.Config, st *store.Store, sm *stream.Manager, reg *storage.Registry, log *slog.Logger) *Recorder {
-	return &Recorder{
+	r := &Recorder{
 		cfg: cfg, st: st, sm: sm, reg: reg, log: log,
-		active:  map[string]context.CancelFunc{},
+		active:  map[string]*camProc{},
+		exiting: map[string]*camProc{},
 		lastIdx: map[string]int64{},
 	}
+	r.runCam = r.superviseFFmpeg
+	return r
 }
 
 // Run starts the recorder: an initial reconcile plus the index and reconcile
-// loops. It returns when ctx is cancelled.
+// loops. When ctx is cancelled it stops every camera and returns only once each
+// ffmpeg has finished the segment it was writing (or been killed after
+// ffmpegStopGrace), so a caller that waits for Run loses no footage on shutdown.
 func (r *Recorder) Run(ctx context.Context) {
+	r.mu.Lock()
 	r.baseCtx = ctx
+	r.mu.Unlock()
 	r.Reconcile()
 	r.uploadOnce() // drain any spool left from a previous run
 
@@ -81,6 +112,7 @@ func (r *Recorder) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			r.drain()
 			return
 		case <-indexT.C:
 			r.indexOnce()
@@ -167,7 +199,7 @@ func scheduleMatch(scheds []*store.Schedule, now time.Time) bool {
 
 // Reconcile starts/stops per-camera recorders to match desired state.
 func (r *Recorder) Reconcile() {
-	if r.baseCtx == nil {
+	if !r.running() {
 		return
 	}
 	cams, err := r.st.ListCameras()
@@ -184,10 +216,14 @@ func (r *Recorder) Reconcile() {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for id, cancel := range r.active {
+	// Checked again under the lock: once Run has begun draining, starting a
+	// supervisor would race its WaitGroup.Wait and outlive the shutdown.
+	if r.baseCtx.Err() != nil {
+		return
+	}
+	for id := range r.active {
 		if _, ok := desired[id]; !ok {
-			cancel()
-			delete(r.active, id)
+			r.stopLocked(id)
 			r.log.Info("recorder stopped", "camera", id)
 		}
 	}
@@ -195,11 +231,70 @@ func (r *Recorder) Reconcile() {
 		if _, ok := r.active[id]; ok {
 			continue
 		}
-		cctx, cancel := context.WithCancel(r.baseCtx)
-		r.active[id] = cancel
-		c := *cam
-		go r.superviseFFmpeg(cctx, c)
+		r.startLocked(*cam)
 		r.log.Info("recorder started", "camera", id, "name", cam.Name)
+	}
+}
+
+// running reports whether Run has started and not yet been cancelled.
+func (r *Recorder) running() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.baseCtx != nil && r.baseCtx.Err() == nil
+}
+
+// startLocked starts a supervisor for cam. If a stopped one for the same camera
+// is still finishing its segment, the new one waits for it before it records.
+// Caller holds r.mu.
+func (r *Recorder) startLocked(cam store.Camera) {
+	ctx, cancel := context.WithCancel(r.baseCtx)
+	p := &camProc{stop: cancel, done: make(chan struct{})}
+	prev := r.exiting[cam.ID]
+	r.active[cam.ID] = p
+	r.procs.Add(1)
+	go func() {
+		defer r.procs.Done()
+		defer r.exited(cam.ID, p)
+		if prev != nil {
+			<-prev.done // bounded: prev's ffmpeg is killed after ffmpegStopGrace
+		}
+		r.runCam(ctx, cam)
+	}()
+}
+
+// stopLocked stops a camera's supervisor. Its ffmpeg finishes the current
+// segment in the background. Caller holds r.mu.
+func (r *Recorder) stopLocked(id string) {
+	p, ok := r.active[id]
+	if !ok {
+		return
+	}
+	p.stop()
+	delete(r.active, id)
+	r.exiting[id] = p
+}
+
+// exited marks a supervisor as finished: its ffmpeg is gone.
+func (r *Recorder) exited(id string, p *camProc) {
+	close(p.done)
+	r.mu.Lock()
+	if r.exiting[id] == p {
+		delete(r.exiting, id)
+	}
+	r.mu.Unlock()
+}
+
+// drain waits, after Run's context was cancelled, for every supervisor (and so
+// every ffmpeg) to finish. Taking the lock first means any Reconcile still in
+// flight has either already added its supervisor to procs or will see the
+// cancelled context and start none.
+func (r *Recorder) drain() {
+	r.mu.Lock()
+	n := len(r.active) + len(r.exiting)
+	r.mu.Unlock()
+	r.procs.Wait()
+	if n > 0 {
+		r.log.Info("recorder: all cameras stopped, segments closed", "cameras", n)
 	}
 }
 
@@ -207,12 +302,14 @@ func (r *Recorder) Reconcile() {
 // not the stream: go2rtc can reconnect a camera under a running ffmpeg (a stream
 // restart, a dropped link) and the camera's RTP clock comes back hours away. The
 // segment muxer cuts on those timestamps, so it then splits at every keyframe or
-// never, and audio and video end up hours apart in the file.
-func inputArgs(src string) []string {
-	return []string{
-		"-rtsp_transport", "tcp", "-use_wallclock_as_timestamps", "1", "-fflags", "+genpts",
-		"-i", src,
+// never, and audio and video end up hours apart in the file. A re-encoding recorder
+// also caps its decoder threads (quality.go), since only it decodes at all.
+func inputArgs(src string, reencode bool) []string {
+	args := []string{"-rtsp_transport", "tcp", "-use_wallclock_as_timestamps", "1", "-fflags", "+genpts"}
+	if reencode {
+		args = append(args, "-threads", reencodeThreads)
 	}
+	return append(args, "-i", src)
 }
 
 // superviseFFmpeg keeps an ffmpeg recording process alive for one camera,
@@ -234,7 +331,7 @@ func (r *Recorder) superviseFFmpeg(ctx context.Context, cam store.Camera) {
 			src = r.sm.RTSPURLSub(cam.ID)
 		}
 		args := []string{"-hide_banner", "-loglevel", "warning", "-nostdin"}
-		args = append(args, inputArgs(src)...)
+		args = append(args, inputArgs(src, reencode)...)
 		args = append(args,
 			// Record a single video + (optional) audio track. Some sources expose
 			// several video tracks (e.g. a dual-lens/"main+sub" feed); copying them
@@ -268,7 +365,7 @@ func (r *Recorder) superviseFFmpeg(ctx context.Context, cam store.Camera) {
 			"-strftime", "1",
 			filepath.Join(dir, "%s.ts"),
 		)
-		cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+		cmd := recordCmd(ctx, args)
 		start := time.Now()
 		err := cmd.Run()
 		if ctx.Err() != nil {
@@ -292,6 +389,19 @@ func (r *Recorder) superviseFFmpeg(ctx context.Context, cam store.Camera) {
 		case <-time.After(backoff):
 		}
 	}
+}
+
+// recordCmd builds a recording ffmpeg that, when ctx ends (shutdown, or the
+// camera stopped or restarted), is asked to finish rather than killed. On SIGTERM
+// ffmpeg stops reading, flushes its muxer and closes the segment it is writing,
+// so the footage up to the stop is on disk in full. exec.CommandContext's default,
+// SIGKILL, dropped whatever it still had buffered. An ffmpeg that has not exited
+// ffmpegStopGrace after the signal is killed.
+func recordCmd(ctx context.Context, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = ffmpegStopGrace
+	return cmd
 }
 
 // indexOnce scans each camera's directory and indexes any completed,
@@ -710,9 +820,8 @@ func (r *Recorder) resolveTarget(cam store.Camera) (dir, locID string, remote bo
 // change takes effect immediately (new ffmpeg processes pick up the new dir).
 func (r *Recorder) RestartAll() {
 	r.mu.Lock()
-	for id, cancel := range r.active {
-		cancel()
-		delete(r.active, id)
+	for id := range r.active {
+		r.stopLocked(id)
 	}
 	r.mu.Unlock()
 	r.Reconcile()
@@ -723,10 +832,7 @@ func (r *Recorder) RestartAll() {
 // changes so ffmpeg begins writing to the new directory immediately.
 func (r *Recorder) RestartCamera(id string) {
 	r.mu.Lock()
-	if cancel, ok := r.active[id]; ok {
-		cancel()
-		delete(r.active, id)
-	}
+	r.stopLocked(id)
 	r.mu.Unlock()
 	// The indexer cursor (lastIdx) is owned by the Run loop and needs no reset:
 	// new segments in the new directory carry later epochs than the old cursor, so

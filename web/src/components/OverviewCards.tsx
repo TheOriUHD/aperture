@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ExtensionSlot } from "../ext/ExtensionSlot";
 import { useQuery } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import {
   Car,
   PawPrint,
   Footprints,
+  Package,
   Waves,
 } from "lucide-react";
 import { useStorage } from "../hooks/useStorage";
@@ -22,10 +23,13 @@ import { useWeatherNow, useSite } from "../hooks/useEnvironment";
 import { wmoIcon, formatTemp } from "../lib/weather";
 import { formatBytes, fmtDuration } from "../lib/format";
 import { ExportCenter } from "./ExportCenter";
+import { CapacityBar, TierChips, pctText } from "./CapacityMeter";
+import { limitText } from "../lib/capacity";
+import { useCapacity } from "../hooks/useHardware";
+import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
 import type { Camera, MotionEvent } from "../lib/types";
 
-const CAM_COLORS = ["#1b9df0", "#38bdf8", "#818cf8", "#34d399", "#fbbf24", "#f472b6", "#a78bfa", "#2dd4bf"];
 
 function humanAge(ms: number): string {
   if (!ms) return "—";
@@ -79,6 +83,7 @@ function detTime(ms: number): string {
 
 function detIcon(e: MotionEvent) {
   const labels = [e.topLabel, ...(e.objects?.map((o) => o.label) ?? [])].filter(Boolean).map((l) => l!.toLowerCase());
+  if (e.type === "package") return Package;
   if (labels.some((l) => l.includes("person") || l.includes("people"))) return PersonStanding;
   if (labels.some((l) => ["car", "truck", "bus", "vehicle", "motor", "bike", "bicycle"].some((v) => l.includes(v))))
     return Car;
@@ -111,39 +116,22 @@ function EnvironmentBody() {
 
   return (
     <div className="flex items-center justify-center gap-2.5 text-fg">
-      <Icon className="h-6 w-6 shrink-0 text-fg-muted" />
-      <span className="text-lg font-medium">{tempStr}</span>
+      <Icon className="h-5 w-5 shrink-0 text-fg-muted" />
+      <span className="text-[15px] font-medium">{tempStr}</span>
       <span className="text-fg-faint">/</span>
-      <span className="text-lg font-medium tabular-nums">{clock}</span>
+      <span className="text-[15px] font-medium tabular-nums">{clock}</span>
     </div>
   );
 }
 
 // ---- System & storage ----------------------------------------------------
 
-function useResolutions(cameras: Camera[]) {
-  const [res, setRes] = useState<Record<string, { w: number; h: number }>>({});
-  const key = cameras.map((c) => `${c.id}:${c.enabled}`).join(",");
-  useEffect(() => {
-    const imgs: HTMLImageElement[] = [];
-    for (const c of cameras) {
-      if (!c.enabled) continue;
-      const img = new Image();
-      img.onload = () => setRes((r) => ({ ...r, [c.id]: { w: img.naturalWidth, h: img.naturalHeight } }));
-      img.src = `/api/v1/cameras/${c.id}/snapshot.jpg`;
-      imgs.push(img);
-    }
-    return () => imgs.forEach((i) => (i.onload = null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  return res;
-}
-
 function SystemBody({ cameras }: { cameras: Camera[] }) {
   const navigate = useNavigate();
   const { data: storage } = useStorage();
   const { data: status } = useSystemStatus();
-  const res = useResolutions(cameras);
+  const cap = useCapacity();
+  const { user } = useAuth();
 
   const online = cameras.filter((c) => c.enabled).length;
   const oldestList = storage?.cameras.filter((c) => c.oldestTs > 0).map((c) => c.oldestTs) ?? [];
@@ -151,33 +139,16 @@ function SystemBody({ cameras }: { cameras: Camera[] }) {
   const used = storage?.usedBytes ?? 0;
   // Total allocation across ALL destinations; `allocatedBytes` is local-only and
   // would understate capacity whenever a network location exists.
-  const cap = storage?.totalAllocatedBytes ?? storage?.allocatedBytes ?? 0;
-  const total = cap > 0 ? cap : storage?.diskTotalBytes ?? 0;
-  const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
-
-  const tiers = useMemo(() => {
-    let hd = 0,
-      k2 = 0,
-      k4 = 0;
-    for (const c of cameras) {
-      if (!c.enabled) continue;
-      const r = res[c.id];
-      if (!r) continue;
-      const h = Math.max(r.h, Math.round((r.w * 9) / 16));
-      if (h <= 1080) hd++;
-      else if (h <= 1440) k2++;
-      else k4++;
-    }
-    return { hd, k2, k4 };
-  }, [cameras, res]);
+  const alloc = storage?.totalAllocatedBytes ?? storage?.allocatedBytes ?? 0;
+  const total = alloc > 0 ? alloc : storage?.diskTotalBytes ?? 0;
 
   return (
     <>
       <button
-        onClick={() => navigate("/settings?tab=system")}
+        onClick={() => navigate("/settings?tab=storage")}
         className="group -mx-1 flex w-[calc(100%+0.5rem)] items-center gap-2.5 rounded-lg px-1 py-1 text-left hover:bg-ink-850"
       >
-        <Server className="h-7 w-7 shrink-0 text-fg-muted" />
+        <Server className="h-6 w-6 shrink-0 text-fg-muted" strokeWidth={1.5} />
         <CircleCheck className="h-5 w-5 shrink-0 text-online" />
         <span className="flex items-baseline gap-1.5">
           <span className="text-base font-medium text-fg">{formatBytes(used)}</span>
@@ -186,41 +157,14 @@ function SystemBody({ cameras }: { cameras: Camera[] }) {
         <ChevronRight className="ml-auto h-5 w-5 text-fg-faint group-hover:text-fg" />
       </button>
 
-      <dl className="mt-3.5 space-y-2.5 text-sm">
+      <dl className="mt-3.5 space-y-3 text-sm">
         <Row label="Oldest recording" value={oldest > 0 ? humanAge(oldest) : "—"} />
         <Row label={`Aperture ${status?.version ?? ""}`.trim()} value={status ? "Running" : "…"} ok />
         <Row label={`Cameras (${cameras.length})`} value={`${online} online`} ok={online === cameras.length} />
         <Row label="Uptime" value={status ? humanUptime(status.uptimeSec) : "…"} />
       </dl>
 
-      <div className="mt-4">
-        <div className="mb-1.5 flex items-center gap-2 text-sm">
-          <span className="text-fg-muted">Camera Capacity</span>
-          <span className="h-1.5 w-1.5 rounded-full bg-online" />
-          <span className="font-medium text-fg">{cameras.length}</span>
-          <span className="ml-auto text-xs text-fg-faint">
-            {Math.round(pct)}% of {cap > 0 ? "allocation" : "disk"}
-          </span>
-        </div>
-        <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-ink-700">
-          {storage?.cameras.map((c, i) => {
-            const w = total > 0 ? (c.bytes / total) * 100 : 0;
-            if (w <= 0) return null;
-            return (
-              <div
-                key={c.cameraId}
-                style={{ width: `${w}%`, backgroundColor: CAM_COLORS[i % CAM_COLORS.length] }}
-                title={`${c.name} — ${formatBytes(c.bytes)}`}
-              />
-            );
-          })}
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Tier label="HD" count={tiers.hd} className="bg-online/15 text-online" />
-          <Tier label="2K" count={tiers.k2} className="bg-brand/15 text-brand" />
-          <Tier label="4K/5K" count={tiers.k4} className="bg-[#818cf8]/15 text-[#a5b4fc]" />
-        </div>
-      </div>
+      <CapacityRow cameras={cameras.length} state={cap} canSetUp={user?.role === "admin"} onSetUp={() => navigate("/settings?tab=hardware")} />
     </>
   );
 }
@@ -234,11 +178,58 @@ function Row({ label, value, ok }: { label: string; value: string; ok?: boolean 
   );
 }
 
-function Tier({ label, count, className }: { label: string; count: number; className: string }) {
+// Camera Capacity: how much of this machine the cameras use, from the hardware
+// profile (Settings › Hardware). Without one there is nothing honest to show, so
+// it asks for it instead of guessing.
+function CapacityRow({
+  cameras,
+  state,
+  canSetUp,
+  onSetUp,
+}: {
+  cameras: number;
+  state: ReturnType<typeof useCapacity>;
+  canSetUp: boolean;
+  onSetUp: () => void;
+}) {
+  const c = state.capacity;
+  const tone = !c ? "bg-fg-faint" : c.pct > 1 ? "bg-danger" : c.pct > 0.85 ? "bg-warn" : "bg-online";
   return (
-    <div className="flex items-center gap-1.5 text-sm">
-      <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${className}`}>{label}</span>
-      <span className="tabular-nums text-fg-muted">×{count}</span>
+    <div className="mt-4">
+      <div className="mb-1.5 flex items-center gap-2 text-sm">
+        <span className="text-fg-muted">Camera Capacity</span>
+        <span className={`h-1.5 w-1.5 rounded-full ${tone}`} />
+        <span className="font-medium text-fg">{cameras}</span>
+        {c && (
+          <span
+            className={`ml-auto text-xs tabular-nums ${c.pct > 1 ? "text-danger" : c.pct > 0.85 ? "text-warn" : "text-fg-faint"}`}
+            title={`Limited by ${limitText(c.limitedBy)} · runs about ${c.supports.map((s) => `${s.count} × ${s.label}`).join(", ")}`}
+          >
+            {c.pct > 1 ? `Over capacity · ${pctText(c.pct)}` : `${pctText(c.pct)} used`}
+          </span>
+        )}
+      </div>
+      {c ? (
+        <>
+          <button onClick={canSetUp ? onSetUp : undefined} className="block w-full" title="Hardware and capacity">
+            <CapacityBar capacity={c} />
+          </button>
+          <div className="mt-3">
+            <TierChips capacity={c} />
+          </div>
+        </>
+      ) : state.loading ? (
+        <div className="h-2 w-full animate-pulse rounded-full bg-ink-700" />
+      ) : (
+        <div className="rounded-md border border-dashed border-line-strong px-3 py-2.5 text-xs leading-relaxed text-fg-muted">
+          Set the hardware Aperture runs on to see how many cameras it handles.
+          {canSetUp && (
+            <button className="btn-link mt-1 block text-xs" onClick={onSetUp}>
+              Set up hardware
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -259,12 +250,12 @@ function BitrateChart({ points }: { points: BitratePoint[] }) {
     <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
       <defs>
         <linearGradient id="brate" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(27,157,240,0.35)" />
-          <stop offset="100%" stopColor="rgba(27,157,240,0)" />
+          <stop offset="0%" stopColor="rgba(71,151,255,0.32)" />
+          <stop offset="100%" stopColor="rgba(71,151,255,0)" />
         </linearGradient>
       </defs>
       <path d={area} fill="url(#brate)" />
-      <path d={line} fill="none" stroke="#1b9df0" strokeWidth={1.6} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+      <path d={line} fill="none" stroke="#4797ff" strokeWidth={1.6} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -295,10 +286,10 @@ function BitrateBody() {
 // ---- Spotlights ----------------------------------------------------------
 
 // Actions intentionally unwired for now — the card's visibility is controlled by
-// a global admin toggle (Settings › System).
+// a global admin toggle (Settings › General › System).
 function SpotlightsCard() {
   return (
-    <div className="card p-4">
+    <div className="rounded-lg border border-line p-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-fg">Spotlights</h3>
         <ChevronRight className="h-4 w-4 text-fg-faint" />
@@ -308,7 +299,7 @@ function SpotlightsCard() {
       </p>
       <button
         type="button"
-        className="mt-3 flex items-center gap-1.5 text-sm font-medium text-brand hover:text-[#2aa6f5]"
+        className="mt-3 flex items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-hover"
       >
         <span className="grid h-4 w-4 place-items-center rounded-full border border-current">
           <Plus className="h-2.5 w-2.5" />
@@ -324,7 +315,7 @@ function SpotlightsCard() {
 function VideoArchivingCard({ cameras }: { cameras: Camera[] }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="card flex items-center justify-between p-4">
+    <div className="flex items-center justify-between rounded-lg border border-line p-4">
       <h3 className="text-sm font-medium text-fg">Video Archiving</h3>
       <button className="btn-ghost h-8" onClick={() => setOpen(true)} disabled={cameras.length === 0}>
         <Download className="h-4 w-4" />
@@ -350,7 +341,7 @@ function RecentDetectionsCard({ cameras }: { cameras: Camera[] }) {
   const list = (events ?? []).slice(0, 6);
 
   return (
-    <div className="card overflow-hidden">
+    <div className="overflow-hidden rounded-lg border border-line">
       <button
         onClick={() => navigate("/alarms")}
         className="flex w-full items-center justify-between p-4 hover:bg-ink-850"
@@ -409,15 +400,15 @@ export function OverviewSidebar({
   const showSpotlights = settings?.spotlightsEnabled !== false; // default on until loaded
   return (
     <div className="space-y-3">
-      <div className="card overflow-hidden">
-        <div className="px-4 py-3.5">
+      <div className="overflow-hidden rounded-lg border border-line">
+        <div className="px-4 py-3">
           <EnvironmentBody />
         </div>
         <div className="border-t border-line p-4">
           <SystemBody cameras={cameras} />
         </div>
       </div>
-      <div className="card p-4">
+      <div className="rounded-lg border border-line p-4">
         <BitrateBody />
       </div>
       {showSpotlights && <SpotlightsCard />}

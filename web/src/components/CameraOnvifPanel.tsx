@@ -78,17 +78,17 @@ export function CameraOnvifPanel({ cameraId, vendorMarked = false }: { cameraId:
   ];
 
   return (
-    <div className="rounded-lg border border-line bg-ink-850 p-3">
+    <div>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="h-4 w-4 text-fg-muted" />
-            <span className="text-sm font-medium text-fg">Camera picture settings</span>
+            <span className="text-sm text-fg">Camera picture settings</span>
             {probe?.ok && probe.device.model && (
-              <span className="pill bg-ink-700 text-fg-faint">{probe.device.model}</span>
+              <span className="pill-gray">{probe.device.model}</span>
             )}
           </div>
-          <p className="mt-0.5 text-[11px] text-fg-faint leading-relaxed">
+          <p className="hint mt-0.5">
             Adjust the camera&apos;s own image settings over ONVIF, live. Off by default; nothing
             contacts the camera over ONVIF until you switch it on.
           </p>
@@ -207,7 +207,7 @@ export function CameraOnvifPanel({ cameraId, vendorMarked = false }: { cameraId:
                     </div>
                     <input
                       type="range"
-                      className="w-full accent-brand"
+                      className="w-full"
                       min={r.min}
                       max={r.max}
                       value={val}
@@ -236,7 +236,7 @@ export function CameraOnvifPanel({ cameraId, vendorMarked = false }: { cameraId:
                           apply({ irCutFilter: m });
                         }}
                         className={`rounded-md px-2.5 py-1 text-xs ${
-                          draft.irCutFilter === m ? "bg-brand text-white" : "bg-ink-700 text-fg-muted hover:text-fg"
+                          draft.irCutFilter === m ? "bg-brand-solid text-white" : "bg-ink-700 text-fg-muted hover:text-fg"
                         }`}
                       >
                         {m === "ON" ? "Day" : m === "OFF" ? "Night" : "Auto"}

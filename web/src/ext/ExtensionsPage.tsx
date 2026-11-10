@@ -1,6 +1,8 @@
 import { useParams } from "react-router-dom";
 import { Puzzle } from "lucide-react";
 import { EmptyState } from "../components/ui/EmptyState";
+import { Spinner } from "../components/ui/Spinner";
+import { TopBar } from "../components/TopBar";
 import { ExtensionPanel } from "./ExtensionSlot";
 import { panelsForSlot } from "./panels";
 import { useExtPanels } from "./useExtPanels";
@@ -17,22 +19,32 @@ export function ExtensionsPage() {
 
   if (!panel) {
     return (
-      <div className="flex-1 overflow-auto p-4">
-        {isLoading ? null : (
-          <EmptyState
-            icon={Puzzle}
-            title="Extension not available"
-            hint="This extension isn't installed or enabled. Manage extensions in Settings → Extensions."
-          />
-        )}
-      </div>
+      <>
+        <TopBar title="Extensions" />
+        <div className="flex-1 overflow-auto p-4">
+          {isLoading ? (
+            <div className="grid place-items-center py-20">
+              <Spinner label="Loading extension" />
+            </div>
+          ) : (
+            <EmptyState
+              icon={Puzzle}
+              title="Extension not available"
+              hint="This extension isn't installed or enabled. Manage extensions in Settings → Extensions."
+            />
+          )}
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="flex-1 overflow-auto p-4">
-      <h1 className="mb-3 text-lg font-medium text-fg">{panel.title || panel.extName}</h1>
-      <ExtensionPanel panel={panel} />
-    </div>
+    <>
+      <TopBar title={panel.title || panel.extName} />
+      <div className="flex-1 overflow-auto px-4 py-4 lg:px-6">
+        <h1 className="mb-3 text-[15px] font-semibold text-fg lg:hidden">{panel.title || panel.extName}</h1>
+        <ExtensionPanel panel={panel} />
+      </div>
+    </>
   );
 }

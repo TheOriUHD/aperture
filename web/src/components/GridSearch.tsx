@@ -101,23 +101,23 @@ export function GridSearchOverlay({
         )}
         {!draft && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center">
-            <span className="rounded-full bg-black/60 px-3 py-1.5 text-xs text-white">
-              Drag to draw a motion search area
-            </span>
+            <span className="osd-chip">Drag to draw a motion search area</span>
           </div>
         )}
       </div>
 
-      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-ink-850/95 px-2 py-1.5 shadow-pop">
-        <span className="px-1.5 text-xs text-fg-muted">Grid Search</span>
+      <div className="osd-panel absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 p-1.5">
+        <span className="px-2 text-[13px] font-medium text-white/90">Grid Search</span>
+        <span className="mx-0.5 h-5 w-px bg-white/10" />
         <button
           onClick={() => setDraft(null)}
-          className="btn-icon h-8 w-8"
+          className="btn-icon text-white/75 hover:text-white"
           title="Clear area"
+          aria-label="Clear area"
         >
           <Eraser className="h-4 w-4" />
         </button>
-        <button onClick={onClose} className="btn-icon h-8 w-8" title="Cancel">
+        <button onClick={onClose} className="btn-icon text-white/75 hover:text-white" title="Cancel" aria-label="Cancel">
           <X className="h-4 w-4" />
         </button>
         <button
@@ -125,7 +125,7 @@ export function GridSearchOverlay({
             onApply(draft);
             onClose();
           }}
-          className="btn-primary h-8"
+          className="btn-primary ml-1"
         >
           <Check className="h-4 w-4" /> Apply
         </button>

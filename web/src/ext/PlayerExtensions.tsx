@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { X } from "lucide-react";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { ExtensionPanel } from "./ExtensionSlot";
 import { panelsForSlot, type ExtPanel } from "./panels";
@@ -72,15 +73,15 @@ function ToolbarEntry({ panel, cameraId }: { panel: ExtPanel; cameraId?: string 
         // player container is overflow-hidden, so this is clipped to the video box
         // by design — a dropdown cannot escape the picture.
         <div className="osd-panel absolute right-0 top-10 z-30 w-72 overflow-hidden">
-          <div className="flex items-center justify-between px-3 pt-2.5">
-            <span className="text-xs font-medium text-white/90">{label}</span>
+          <div className="flex items-center justify-between gap-2 pl-3 pr-2 pt-2">
+            <span className="truncate text-[13px] font-semibold text-white">{label}</span>
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="text-white/50 hover:text-white"
+              className="grid h-6 w-6 shrink-0 place-items-center rounded text-white/50 transition-colors hover:bg-white/10 hover:text-white"
               aria-label="Close"
             >
-              ×
+              <X className="h-3.5 w-3.5" />
             </button>
           </div>
           <ExtensionPanel panel={panel} cameraId={cameraId} chrome="bare" initialHeight={160} />

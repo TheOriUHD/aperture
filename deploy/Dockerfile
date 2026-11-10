@@ -20,7 +20,8 @@ COPY --from=web /web/dist internal/webassets/dist
 ARG VERSION=0.0.0-docker
 RUN CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/TheOriUHD/aperture/internal/version.Version=${VERSION}" -o /out/nvrd ./cmd/nvrd \
  && CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/TheOriUHD/aperture/internal/version.Version=${VERSION}" -o /out/nvrctl ./cmd/nvrctl \
- && CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/TheOriUHD/aperture/internal/version.Version=${VERSION}" -o /out/apdiscovery ./cmd/apdiscovery
+ && CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/TheOriUHD/aperture/internal/version.Version=${VERSION}" -o /out/apdiscovery ./cmd/apdiscovery \
+ && CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/TheOriUHD/aperture/internal/version.Version=${VERSION}" -o /out/apdetect ./cmd/apdetect
 
 # 2b) Deno runtime for backend extensions. Its permission flags ARE the sandbox
 # (see internal/ext); the binary is a single static-ish executable we copy in.
@@ -37,6 +38,7 @@ COPY --from=gobuild /out/nvrctl /usr/local/bin/nvrctl
 # multicast cannot cross the bridge nvrd sits on, so the advertisement has to be
 # made from the host's network namespace.
 COPY --from=gobuild /out/apdiscovery /usr/local/bin/apdiscovery
+COPY --from=gobuild /out/apdetect /usr/local/bin/apdetect
 COPY --from=deno /deno /usr/local/bin/deno
 # The backend SDK (@aperture/sdk) as a read-only local module. The supervisor's
 # generated import map resolves the bare specifier to this path and adds it to the

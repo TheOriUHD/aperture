@@ -54,9 +54,9 @@ export function EnrollChooser({ onFinish }: { onFinish: () => void }) {
 
   return (
     <div className="space-y-3">
-      <div>
-        <h3 className="text-base font-medium text-fg">{title}</h3>
-        <p className="text-sm text-fg-muted mt-0.5">{subtitle}</p>
+      <div className="pb-1">
+        <h3 className="text-sm font-semibold text-fg">{title}</h3>
+        <p className="mt-0.5 text-pretty text-sm text-fg-muted">{subtitle}</p>
       </div>
 
       <OptionRow
@@ -87,10 +87,10 @@ export function EnrollChooser({ onFinish }: { onFinish: () => void }) {
         onClick={() => setView("totp")}
       />
 
-      {err && <p className="text-xs text-rec">{err}</p>}
+      {err && <p className="text-xs text-danger">{err}</p>}
 
       <button
-        className={`${count === 0 ? "btn-ghost" : "btn-primary"} w-full`}
+        className={`${count === 0 ? "btn-ghost" : "btn-primary"} !mt-5 h-10 w-full`}
         disabled={busy}
         onClick={onFinish}
       >
@@ -121,16 +121,16 @@ function OptionRow({
       type="button"
       disabled={added || disabled}
       onClick={onClick}
-      className={`w-full flex items-center gap-3 rounded-lg border p-3.5 text-left transition ${
+      className={`group flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 ${
         added
-          ? "border-online/40 bg-online/5"
+          ? "border-online/30 bg-online/[0.06]"
           : disabled
-            ? "border-line bg-ink-850 opacity-60 cursor-not-allowed"
-            : "border-line-strong bg-ink-850 hover:border-brand hover:bg-ink-800"
+            ? "cursor-not-allowed border-line opacity-50"
+            : "border-line-strong hover:border-brand/60 hover:bg-white/[0.03]"
       }`}
     >
       <div
-        className={`grid place-items-center h-9 w-9 rounded-lg shrink-0 ${
+        className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${
           added ? "bg-online/15 text-online" : "bg-ink-700 text-brand"
         }`}
       >
@@ -138,12 +138,12 @@ function OptionRow({
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-fg">{title}</p>
-        <p className="text-xs text-fg-faint leading-snug">{subtitle}</p>
+        <p className="mt-0.5 text-xs leading-snug text-fg-faint">{subtitle}</p>
       </div>
       {added ? (
-        <span className="pill bg-online/15 text-online shrink-0">Added</span>
+        <span className="pill-green shrink-0">Added</span>
       ) : actionable ? (
-        <ChevronRight className="h-4 w-4 text-fg-faint shrink-0" />
+        <ChevronRight className="h-4 w-4 shrink-0 text-fg-faint transition-colors group-hover:text-brand" />
       ) : null}
     </button>
   );

@@ -82,22 +82,22 @@ export function ConsentModal({
       {stage && (
         <div className="space-y-4">
           <div className="flex items-start gap-3">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-ink-700 text-fg-muted">
-              <Puzzle className="h-5 w-5" />
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-ink-700 text-fg-muted">
+              <Puzzle className="h-5 w-5" strokeWidth={1.75} />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h3 className="truncate text-base font-medium text-fg">{stage.name}</h3>
-                <span className="pill bg-ink-700 text-fg-muted">v{stage.version}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-[15px] font-semibold text-fg">{stage.name}</h3>
+                <span className="pill-gray">v{stage.version}</span>
                 {store ? (
-                  <span className="pill bg-online/15 text-online">
+                  <span className="pill-green">
                     <ShieldCheck className="h-3 w-3" /> Store
                   </span>
                 ) : (
-                  <span className="pill bg-[#e0a54a]/15 text-[#e6b45a]">Sideloaded</span>
+                  <span className="pill-orange">Sideloaded</span>
                 )}
               </div>
-              <p className="mt-0.5 text-xs text-fg-muted">
+              <p className="mt-1 text-xs leading-relaxed text-fg-muted">
                 {stage.author ? `by ${stage.author}` : "Unknown author"}
                 {stage.description ? ` · ${stage.description}` : ""}
               </p>
@@ -105,7 +105,7 @@ export function ConsentModal({
           </div>
 
           {isUpdate && stage.currentVersion && (
-            <div className="flex items-start gap-2.5 rounded-lg border border-brand/25 bg-brand/[0.07] px-3 py-2.5 text-sm text-fg">
+            <div className="flex items-start gap-2.5 rounded-md border border-brand/30 bg-brand/[0.08] px-3 py-2.5 text-sm text-fg">
               <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
               <span>
                 Replacing <b>version {stage.currentVersion}</b> with <b>version {stage.version}</b>. Its settings and
@@ -115,8 +115,8 @@ export function ConsentModal({
           )}
 
           {!store && (
-            <div className="flex items-start gap-2.5 rounded-lg border border-rec/30 bg-rec/10 px-3 py-2.5 text-sm text-fg">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rec" />
+            <div className="flex items-start gap-2.5 rounded-md border border-danger/30 bg-danger/[0.08] px-3 py-2.5 text-sm text-fg">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
               <span>
                 <b>Sideloaded extension.</b> This came from a file or URL you provided and has{" "}
                 <b>not been reviewed by anyone</b>. Only continue if you trust where it came from.
@@ -125,10 +125,10 @@ export function ConsentModal({
           )}
 
           {downgrade && (
-            <label className="flex items-start gap-2.5 rounded-lg border border-[#e0a54a]/40 bg-[#e0a54a]/10 px-3 py-2.5 text-sm text-fg">
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-warn/40 bg-warn/[0.08] px-3 py-2.5 text-sm text-fg">
               <input
                 type="checkbox"
-                className="mt-0.5 h-4 w-4 shrink-0 accent-[#e6b45a]"
+                className="mt-0.5 h-4 w-4 shrink-0 accent-warn"
                 checked={downgradeAck}
                 onChange={(e) => setDowngradeAck(e.target.checked)}
               />
@@ -140,11 +140,11 @@ export function ConsentModal({
           )}
 
           <div>
-            <p className="label">
+            <p className="mb-2 text-[13px] font-semibold text-fg">
               {isUpdate ? "This update will be allowed to:" : "This extension will be allowed to:"}
             </p>
             {permsChanged && (
-              <p className="mb-1.5 flex items-center gap-1.5 text-[11px] text-[#e6b45a]">
+              <p className="mb-2 flex items-center gap-1.5 text-xs text-warn">
                 <AlertTriangle className="h-3 w-3" /> This version requests permissions the installed one didn't — review them.
               </p>
             )}
@@ -152,12 +152,12 @@ export function ConsentModal({
           </div>
 
           {needsCamera && (
-            <div className="rounded-lg border border-line bg-ink-900/40 p-3">
-              <div className="mb-2 flex items-center gap-2">
-                <Cctv className="h-4 w-4 shrink-0 text-fg-muted" />
+            <div className="border-t border-line pt-4">
+              <div className="mb-3 flex items-start gap-2.5">
+                <Cctv className="mt-0.5 h-4 w-4 shrink-0 text-fg-muted" />
                 <div>
-                  <p className="text-sm text-fg">{stage.cameraConsent || "Cameras"}</p>
-                  <p className="text-[11px] text-fg-faint">
+                  <p className="text-[13px] font-semibold text-fg">{stage.cameraConsent || "Cameras"}</p>
+                  <p className="mt-0.5 text-xs text-fg-faint">
                     You decide which cameras — the request is a default you can narrow now or from its settings later.
                   </p>
                 </div>
@@ -172,13 +172,13 @@ export function ConsentModal({
           )}
 
           {stage.hasSettings && !isUpdate && (
-            <p className="flex items-start gap-2 text-[11px] text-fg-faint">
+            <p className="flex items-start gap-2 text-xs text-fg-faint">
               <Settings2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               After installing, configure this extension from its row in Extensions before it can run.
             </p>
           )}
 
-          {error && <p className="text-sm text-rec">{error}</p>}
+          {error && <p className="text-sm text-danger">{error}</p>}
         </div>
       )}
     </Modal>

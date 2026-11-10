@@ -50,7 +50,7 @@ function Row({ item }: { item: Classified }) {
   const Icon = item.icon;
   if (item.kind === "safe") {
     return (
-      <div className="flex items-center gap-2 px-1 pt-1 text-xs text-fg-muted">
+      <div className="flex items-center gap-2 px-1 pt-2 text-xs text-fg-muted">
         <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-online" />
         <span>{item.line}</span>
       </div>
@@ -58,15 +58,8 @@ function Row({ item }: { item: Classified }) {
   }
   const risky = item.risky;
   return (
-    <div
-      className={
-        "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm " +
-        (risky
-          ? "border-[#e0a54a]/35 bg-[#e0a54a]/10 text-fg"
-          : "border-line bg-ink-850 text-fg")
-      }
-    >
-      <Icon className={"mt-0.5 h-4 w-4 shrink-0 " + (risky ? "text-[#e6b45a]" : "text-fg-faint")} />
+    <div className={"flex items-start gap-2.5 px-3 py-2.5 text-sm text-fg " + (risky ? "bg-warn/[0.08]" : "")}>
+      <Icon className={"mt-0.5 h-4 w-4 shrink-0 " + (risky ? "text-warn" : "text-fg-faint")} />
       <span className="leading-snug">{item.line}</span>
     </div>
   );
@@ -80,13 +73,17 @@ export function PermissionList({ lines }: { lines: string[] }) {
   const normal = items.filter((i) => !i.risky && i.kind !== "safe");
   const safe = items.filter((i) => i.kind === "safe");
   return (
-    <div className="space-y-2">
-      {risky.map((it, i) => (
-        <Row key={"r" + i} item={it} />
-      ))}
-      {normal.map((it, i) => (
-        <Row key={"n" + i} item={it} />
-      ))}
+    <div>
+      {risky.length + normal.length > 0 && (
+        <div className="divide-y divide-line overflow-hidden rounded-md border border-line">
+          {risky.map((it, i) => (
+            <Row key={"r" + i} item={it} />
+          ))}
+          {normal.map((it, i) => (
+            <Row key={"n" + i} item={it} />
+          ))}
+        </div>
+      )}
       {safe.map((it, i) => (
         <Row key={"s" + i} item={it} />
       ))}

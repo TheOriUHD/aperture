@@ -2,6 +2,9 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Webhook as WebhookIcon, Plus, Trash2, Send } from "lucide-react";
 import { api } from "../lib/api";
+import { Switch } from "./ui/Switch";
+import { EmptyState } from "./ui/EmptyState";
+import { IntegrationHeader } from "./IntegrationParts";
 
 interface Webhook {
   id: string;
@@ -57,70 +60,124 @@ export function Webhooks() {
     setTestMsg((m) => ({ ...m, [h.id]: r.ok ? `OK (${r.code})` : r.error || `HTTP ${r.code}` }));
   }
 
+  const list = hooks ?? [];
+
   return (
-    <div className="panel space-y-4">
-      <div className="flex items-center gap-2">
-        <WebhookIcon className="h-4 w-4 text-fg-muted" />
-        <h2 className="text-sm font-medium text-fg">Webhooks</h2>
-        <button className="btn-subtle ml-auto h-8" onClick={() => setDraft({ name: "", url: "" })}>
-          <Plus className="h-4 w-4" /> Add
-        </button>
-      </div>
-      <p className="text-xs text-fg-muted leading-relaxed">
+    <div>
+      <IntegrationHeader
+        icon={WebhookIcon}
+        title="Webhooks"
+        action={
+          <button className="btn-outline" onClick={() => setDraft({ name: "", url: "" })}>
+            <Plus className="h-4 w-4" /> Add webhook
+          </button>
+        }
+      >
         POST every event as JSON to any URL. Payloads are signed with{" "}
-        <code className="text-fg-faint">X-Aperture-Signature: sha256=…</code> (HMAC of the body).
-      </p>
+        <code className="text-fg">X-Aperture-Signature: sha256=…</code> (HMAC of the body).
+      </IntegrationHeader>
 
       {draft && (
-        <div className="space-y-2 rounded-md border border-line p-3">
-          <input
-            className="input"
-            placeholder="Name"
-            value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          />
-          <input
-            className="input"
-            placeholder="https://your-endpoint/hook"
-            value={draft.url}
-            onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-          />
-          <div className="flex gap-2">
-            <button className="btn-primary h-8" onClick={create}>
-              Create
-            </button>
-            <button className="btn-ghost h-8" onClick={() => setDraft(null)}>
+        <div className="mb-4 mt-2 rounded-lg border border-line p-4">
+          <p className="mb-3 text-sm font-semibold text-fg">New webhook</p>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+            <div>
+              <label className="label">Name</label>
+              <input
+                className="input"
+                placeholder="Name"
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="label">URL</label>
+              <input
+                className="input font-mono text-xs"
+                placeholder="https://your-endpoint/hook"
+                value={draft.url}
+                onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button className="btn-ghost" onClick={() => setDraft(null)}>
               Cancel
+            </button>
+            <button className="btn-primary" onClick={create}>
+              Create
             </button>
           </div>
         </div>
       )}
 
-      <div className="divide-y divide-line">
-        {(hooks ?? []).length === 0 && (
-          <p className="py-2 text-xs text-fg-faint">No webhooks configured.</p>
-        )}
-        {(hooks ?? []).map((h) => (
-          <div key={h.id} className="flex items-center gap-3 py-2">
-            <button
-              onClick={() => toggle(h)}
-              className={`h-2.5 w-2.5 rounded-full ${h.enabled ? "bg-online" : "bg-fg-faint"}`}
-              aria-label={h.enabled ? "Disable" : "Enable"}
-            />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm text-fg">{h.name}</p>
-              <p className="truncate font-mono text-[11px] text-fg-faint">{h.url}</p>
-            </div>
-            {testMsg[h.id] && <span className="text-[11px] text-fg-muted">{testMsg[h.id]}</span>}
-            <button className="btn-icon h-8 w-8" onClick={() => test(h)} aria-label="Send test">
-              <Send className="h-4 w-4" />
-            </button>
-            <button className="btn-icon h-8 w-8" onClick={() => remove(h.id)} aria-label="Delete webhook">
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
-      </div>
+      {list.length === 0 ? (
+        !draft && (
+          <EmptyState
+            icon={WebhookIcon}
+            title="No webhooks configured."
+            hint="Add one to send every event to n8n, Node-RED or your own endpoint."
+          />
+        )
+      ) : (
+        <div className="mt-2 overflow-x-auto">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th className="hidden md:table-cell">URL</th>
+                <th className="hidden sm:table-cell">Last test</th>
+                <th className="w-px">Enabled</th>
+                <th className="w-px" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((h) => (
+                <tr key={h.id}>
+                  <td className="max-w-[220px]">
+                    <span className="block truncate text-fg">{h.name}</span>
+                    <span className="block truncate font-mono text-[11px] text-fg-faint md:hidden">{h.url}</span>
+                    {testMsg[h.id] && <span className="block text-[11px] text-fg-muted sm:hidden">{testMsg[h.id]}</span>}
+                  </td>
+                  <td className="hidden max-w-[360px] md:table-cell">
+                    <span className="block truncate font-mono text-xs" title={h.url}>
+                      {h.url}
+                    </span>
+                  </td>
+                  <td className="hidden whitespace-nowrap text-xs sm:table-cell">
+                    {testMsg[h.id] ? (
+                      <span className={testMsg[h.id].startsWith("OK") ? "text-online" : testMsg[h.id] === "…" ? "text-fg-muted" : "text-danger"}>
+                        {testMsg[h.id]}
+                      </span>
+                    ) : (
+                      <span className="text-fg-faint">–</span>
+                    )}
+                  </td>
+                  <td>
+                    <Switch checked={h.enabled} onChange={() => toggle(h)} label={h.enabled ? "Disable" : "Enable"} />
+                  </td>
+                  <td className="!px-1">
+                    <div className="flex items-center justify-end">
+                      <button className="btn-icon" onClick={() => test(h)} aria-label="Send test" title="Send test">
+                        <Send className="h-4 w-4" />
+                      </button>
+                      <button
+                        className="btn-icon hover:text-danger"
+                        onClick={() => remove(h.id)}
+                        aria-label="Delete webhook"
+                        title="Delete webhook"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

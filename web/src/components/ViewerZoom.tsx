@@ -53,11 +53,11 @@ export function ViewerZoom({
           onPointerMove={(e) => dragging.current && moveTo(e)}
           onPointerUp={() => (dragging.current = false)}
           onPointerCancel={() => (dragging.current = false)}
-          className="relative aspect-video w-full cursor-move touch-none overflow-hidden rounded-lg border border-white/15 bg-black/70 shadow-pop backdrop-blur"
+          className="osd-panel relative aspect-video w-full cursor-move touch-none overflow-hidden"
           title="Drag to move the zoomed area"
         >
           <div
-            className="absolute rounded-[2px] border border-white/80 bg-white/25"
+            className="absolute rounded-[2px] border border-brand bg-brand/25"
             style={{
               left: `${(cx - frac / 2) * 100}%`,
               top: `${(cy - frac / 2) * 100}%`,
@@ -68,18 +68,18 @@ export function ViewerZoom({
         </div>
       )}
 
-      <div className="flex w-full items-center justify-between rounded-lg bg-black/60 p-0.5 shadow-pop backdrop-blur">
+      <div className="osd-chip w-full justify-between gap-0 px-0.5">
         <button
           onClick={() => onZoom(round2(Math.max(1, zoom - STEP)))}
           disabled={zoom <= 1}
-          className="grid h-7 w-7 place-items-center rounded-md text-white/85 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent"
+          className="grid h-7 w-7 place-items-center rounded text-white/85 transition-colors hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent"
           aria-label="Zoom out"
         >
           <Minus className="h-3.5 w-3.5" />
         </button>
         <button
           onClick={() => onZoom(1)}
-          className="flex-1 text-center text-xs font-medium tabular-nums text-white hover:text-brand"
+          className="h-7 flex-1 rounded text-center text-xs font-medium tabular-nums text-white transition-colors hover:text-brand"
           title="Reset to 100%"
         >
           {Math.round(zoom * 100)}%
@@ -87,7 +87,7 @@ export function ViewerZoom({
         <button
           onClick={() => onZoom(round2(Math.min(MAX, zoom + STEP)))}
           disabled={zoom >= MAX}
-          className="grid h-7 w-7 place-items-center rounded-md text-white/85 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent"
+          className="grid h-7 w-7 place-items-center rounded text-white/85 transition-colors hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent"
           aria-label="Zoom in"
         >
           <Plus className="h-3.5 w-3.5" />

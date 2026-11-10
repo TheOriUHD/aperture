@@ -292,7 +292,30 @@ func cameraTopics(prefix, cameraID string) []string {
 	}
 }
 
-// ForgetCamera takes a deleted camera out of Home Assistant. Its topics are
+// haCameras drops the cameras kept out of Home Assistant.
+func haCameras(cams []*store.Camera) []*store.Camera {
+	out := make([]*store.Camera, 0, len(cams))
+	for _, c := range cams {
+		if !c.HAHidden {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Republish announces the published cameras now instead of at the next periodic
+// pass, for a camera just put back into Home Assistant.
+func (p *Publisher) Republish() {
+	if !p.connected() {
+		return
+	}
+	p.publishDiscovery()
+	p.publishMotionRecording()
+	p.publishControlState()
+}
+
+// ForgetCamera takes a camera out of Home Assistant: a deleted one, or one switched
+// to stay out. Its topics are
 // retained, so without this the broker goes on announcing it and HA keeps a dead
 // device. An empty retained payload is how MQTT deletes one.
 func (p *Publisher) ForgetCamera(cameraID string) {
@@ -316,6 +339,7 @@ func (p *Publisher) publishDiscovery() {
 	if err != nil {
 		return
 	}
+	cams = haCameras(cams)
 	for _, c := range cams {
 		dev := camDevice(c.ID, c.Name)
 		motionCfg := map[string]any{
@@ -384,6 +408,7 @@ func (p *Publisher) publishMotionRecording() {
 	if err != nil {
 		return
 	}
+	cams = haCameras(cams)
 	now := time.Now().UnixMilli()
 	for _, c := range cams {
 		motion := p.cameraInMotion(c.ID, now)
@@ -430,6 +455,7 @@ func (p *Publisher) publishSnapshots() {
 	if err != nil {
 		return
 	}
+	cams = haCameras(cams)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	for _, c := range cams {

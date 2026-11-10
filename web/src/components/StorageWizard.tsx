@@ -3,69 +3,38 @@ import { HardDrive, ShieldCheck, ChevronLeft, ChevronRight, Loader2, X, Check } 
 import { useDiskStats, useReserveStorage, type DiskStats } from "../hooks/useStorage";
 import { useScrollLock } from "../hooks/useScrollLock";
 import { formatBytes } from "../lib/format";
-import { donutSegments } from "../lib/donut";
 
-const OTHER = "#3a4150";
-const APERTURE = "#1b9df0";
-const FREE = "#20242e";
+// Fills for the whole-disk bar and its legend: other programs' data (locked),
+// the space reserved for Aperture, and what stays free.
+const OTHER = "bg-fg-faint";
+const APERTURE = "bg-brand";
+const FREE = "bg-ink-600";
 const GiB = 1024 ** 3;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-// A slice-based donut of the whole disk.
-function DiskDonut({
-  other,
-  aperture,
-  free,
-  size = 208,
-}: {
-  other: number;
-  aperture: number;
-  free: number;
-  size?: number;
-}) {
-  const thickness = 26;
-  const r = (size - thickness) / 2;
+// A horizontal stacked bar of the whole disk, with the share going to Aperture
+// called out above it.
+function DiskBar({ other, aperture, free }: { other: number; aperture: number; free: number }) {
   const total = other + aperture + free || 1;
-  const segs = [
-    { v: other, color: OTHER },
-    { v: aperture, color: APERTURE },
-    { v: free, color: FREE },
-  ];
   const pct = Math.round((aperture / total) * 100);
-  const paths = donutSegments(
-    segs.map((s) => s.v),
-    size / 2,
-    size / 2,
-    r,
-  );
+  const w = (v: number) => `${(v / total) * 100}%`;
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
-      <g>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#12151c" strokeWidth={thickness} />
-        {segs.map((s, i) =>
-          paths[i] ? (
-            <path key={i} d={paths[i]} fill="none" stroke={s.color} strokeWidth={thickness} strokeLinecap="butt" />
-          ) : null,
-        )}
-      </g>
-      <text x="50%" y="46%" textAnchor="middle" className="fill-fg" style={{ fontSize: 30, fontWeight: 700 }}>
-        {pct}%
-      </text>
-      <text x="50%" y="58%" textAnchor="middle" className="fill-fg-faint" style={{ fontSize: 12 }}>
-        to Aperture
-      </text>
-    </svg>
+    <div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-3xl font-semibold tabular-nums text-fg">{pct}%</span>
+        <span className="text-sm text-fg-muted">to Aperture</span>
+      </div>
+      <div className={`mt-3 flex h-2.5 w-full overflow-hidden rounded-full ${FREE}`}>
+        <div className={`h-full ${OTHER}`} style={{ width: w(other) }} />
+        <div className={`h-full border-l border-ink-800 ${APERTURE} transition-[width] duration-150`} style={{ width: w(aperture) }} />
+      </div>
+    </div>
   );
 }
 
-function Swatch({ color, ring }: { color: string; ring?: boolean }) {
-  return (
-    <span
-      className="h-2.5 w-2.5 rounded-sm shrink-0"
-      style={{ backgroundColor: color, border: ring ? "1px solid #2f3542" : undefined }}
-    />
-  );
+function Swatch({ fill }: { fill: string }) {
+  return <span className={`h-2.5 w-2.5 shrink-0 rounded-[3px] ${fill}`} />;
 }
 
 export function StorageWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -134,23 +103,24 @@ export function StorageWizard({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ zIndex: 60 }}>
-      <div className="absolute inset-0 bg-black/70 animate-fade-in" onClick={applying ? undefined : onClose} />
-      <div className="relative w-[min(96vw,640px)] card overflow-hidden shadow-pop animate-fade-in">
+      <div className="absolute inset-0 bg-black/60 animate-fade-in" onClick={applying ? undefined : onClose} />
+      <div className="card relative w-[min(96vw,640px)] overflow-hidden shadow-pop animate-fade-in">
         {/* header / progress */}
-        <div className="flex items-center gap-3 px-5 pt-4 pb-3 border-b border-line">
-          <HardDrive className="h-4 w-4 text-brand" />
-          <span className="text-sm font-medium text-fg">Storage allocation</span>
+        <div className="flex h-14 items-center gap-3 border-b border-line px-5">
+          <HardDrive className="h-4 w-4 text-fg-muted" />
+          <h2 className="text-base font-medium text-fg">Storage allocation</h2>
           <div className="ml-auto flex items-center gap-1.5">
+            <span className="mr-1 text-xs tabular-nums text-fg-faint">Step {step} of 3</span>
             {[1, 2, 3].map((n) => (
               <span
                 key={n}
-                className={`h-1.5 rounded-full transition-all ${
-                  n === step ? "w-6 bg-brand" : n < step ? "w-4 bg-brand/50" : "w-4 bg-ink-700"
+                className={`h-1 rounded-full transition-all ${
+                  n === step ? "w-5 bg-brand" : n < step ? "w-3 bg-brand/50" : "w-3 bg-ink-600"
                 }`}
               />
             ))}
             {!applying && (
-              <button onClick={onClose} className="ml-2 btn-icon h-7 w-7" aria-label="Close">
+              <button onClick={onClose} className="btn-icon ml-2" aria-label="Close">
                 <X className="h-4 w-4" />
               </button>
             )}
@@ -160,8 +130,8 @@ export function StorageWizard({ open, onClose }: { open: boolean; onClose: () =>
         {applying ? (
           <Applying alloc={alloc} />
         ) : !disk ? (
-          <div className="grid place-items-center py-20 text-fg-faint">
-            <Loader2 className="h-5 w-5 animate-spin" />
+          <div className="grid place-items-center py-20">
+            <Loader2 className="h-5 w-5 animate-spin text-brand" />
           </div>
         ) : step === 1 ? (
           <Intro onNext={() => setStep(2)} disk={disk} />
@@ -184,16 +154,16 @@ export function StorageWizard({ open, onClose }: { open: boolean; onClose: () =>
 function Intro({ onNext, disk }: { onNext: () => void; disk: DiskStats }) {
   return (
     <div className="p-6">
-      <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-brand/15">
-        <ShieldCheck className="h-7 w-7 text-brand" />
+      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-lg border border-line-strong bg-ink-850">
+        <ShieldCheck className="h-6 w-6 text-brand" strokeWidth={1.75} />
       </div>
-      <h3 className="text-center text-lg font-semibold text-fg">Reserve space for Aperture</h3>
+      <h3 className="text-center text-base font-semibold text-fg">Reserve space for Aperture</h3>
       <p className="mx-auto mt-2 max-w-md text-center text-sm text-fg-muted leading-relaxed">
         You’ll set how much of this {formatBytes(disk.totalBytes)} disk belongs to Aperture. That space is{" "}
         <span className="text-fg">hard-reserved</span> — physically held for recordings so no other program can take
         it, even while Aperture is off. Aperture stays within it automatically, trimming the oldest footage as it fills.
       </p>
-      <ul className="mx-auto mt-5 max-w-md space-y-2.5">
+      <ul className="mx-auto mt-5 max-w-md space-y-2.5 rounded-lg border border-line-strong p-4">
         {[
           "Pick an amount with a live view of the whole disk",
           "The rest stays free for your other data",
@@ -205,7 +175,7 @@ function Intro({ onNext, disk }: { onNext: () => void; disk: DiskStats }) {
           </li>
         ))}
       </ul>
-      <button className="btn-primary w-full mt-6" onClick={onNext}>
+      <button className="btn-primary mt-6 w-full" onClick={onNext}>
         Get started
         <ChevronRight className="h-4 w-4" />
       </button>
@@ -231,23 +201,23 @@ function Allocate({
   const shrinksFootage = alloc < disk.apertureUsedBytes;
   return (
     <div className="p-6">
-      <div className="flex flex-col sm:flex-row items-center gap-6">
-        <DiskDonut other={disk.otherBytes} aperture={alloc} free={Math.max(0, free)} />
-        <div className="flex-1 w-full space-y-2.5">
-          <Legend color={APERTURE} label="Aperture" value={alloc} strong />
-          <Legend color={FREE} label="Free" value={Math.max(0, free)} ring />
-          <Legend color={OTHER} label="Other data (locked)" value={disk.otherBytes} />
-          <div className="flex justify-between border-t border-line pt-2 text-xs text-fg-muted">
-            <span>Whole disk</span>
-            <span className="tabular-nums">{formatBytes(disk.totalBytes)}</span>
-          </div>
+      <div className="rounded-lg border border-line-strong p-4">
+        <DiskBar other={disk.otherBytes} aperture={alloc} free={Math.max(0, free)} />
+        <div className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-3">
+          <Legend fill={APERTURE} label="Aperture" value={alloc} strong />
+          <Legend fill={FREE} label="Free" value={Math.max(0, free)} />
+          <Legend fill={OTHER} label="Other data (locked)" value={disk.otherBytes} />
+        </div>
+        <div className="mt-3 flex justify-between border-t border-line-strong pt-2.5 text-xs text-fg-muted">
+          <span>Whole disk</span>
+          <span className="tabular-nums">{formatBytes(disk.totalBytes)}</span>
         </div>
       </div>
 
       <div className="mt-6">
-        <div className="flex items-end justify-between mb-2">
+        <div className="mb-2 flex items-end justify-between">
           <label className="label mb-0">Allocate to Aperture</label>
-          <span className="text-lg font-semibold text-fg tabular-nums">{formatBytes(alloc)}</span>
+          <span className="text-lg font-semibold tabular-nums text-fg">{formatBytes(alloc)}</span>
         </div>
         <input
           type="range"
@@ -256,30 +226,31 @@ function Allocate({
           step={GiB / 2}
           value={alloc}
           onChange={(e) => setAlloc(clamp(Number(e.target.value), GiB, maxAlloc))}
-          className="w-full accent-brand"
+          className="w-full"
+          aria-label="Allocate to Aperture"
         />
-        <div className="flex justify-between text-[11px] text-fg-faint mt-1">
+        <div className="mt-1 flex justify-between text-[11px] text-fg-faint">
           <span>1 GB</span>
           <span>Max {formatBytes(maxAlloc)}</span>
         </div>
         {shrinksFootage ? (
-          <p className="text-[11px] text-amber mt-2">
+          <p className="mt-2 text-xs text-warn">
             Below your current {formatBytes(disk.apertureUsedBytes)} of footage — the oldest recordings will be deleted
             to fit.
           </p>
         ) : (
-          <p className="text-[11px] text-fg-faint mt-2">
+          <p className="hint mt-2">
             {formatBytes(disk.marginBytes)} is always kept free so the disk can’t be filled completely.
           </p>
         )}
       </div>
 
-      <div className="flex gap-2 mt-6">
-        <button className="btn-ghost h-9" onClick={onBack}>
+      <div className="mt-6 flex gap-2">
+        <button className="btn-ghost" onClick={onBack}>
           <ChevronLeft className="h-4 w-4" />
           Back
         </button>
-        <button className="btn-primary h-9 flex-1" onClick={onNext}>
+        <button className="btn-primary flex-1" onClick={onNext}>
           Continue
           <ChevronRight className="h-4 w-4" />
         </button>
@@ -311,14 +282,14 @@ function Confirm({
       <div className="grid place-items-center">
         <div className="relative" style={{ width: size, height: size }}>
           <svg width={size} height={size} className="-rotate-90">
-            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#20242e" strokeWidth={8} />
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" className="stroke-ink-700" strokeWidth={6} />
             <circle
               cx={size / 2}
               cy={size / 2}
               r={r}
               fill="none"
-              stroke={APERTURE}
-              strokeWidth={8}
+              className="stroke-brand"
+              strokeWidth={6}
               strokeLinecap="round"
               strokeDasharray={c}
               strokeDashoffset={c * (1 - frac)}
@@ -326,32 +297,32 @@ function Confirm({
             />
           </svg>
           <div className="absolute inset-0 grid place-items-center">
-            <span className="text-3xl font-bold text-fg tabular-nums">{seconds}</span>
+            <span className="text-3xl font-semibold tabular-nums text-fg">{seconds}</span>
           </div>
         </div>
-        <p className="mt-3 text-sm text-fg-muted text-center">
+        <p className="mt-3 text-center text-sm text-fg-muted">
           Applying and restarting Aperture in <span className="text-fg font-medium">{seconds}s</span>
         </p>
       </div>
 
-      <div className="mt-5 rounded-lg bg-ink-850 border border-line p-4 space-y-2 text-sm">
+      <div className="mt-5 space-y-2 rounded-lg border border-line-strong p-4 text-sm">
         <SummaryRow label="Hard-reserved for Aperture" value={formatBytes(alloc)} strong />
         <SummaryRow label="Free for other programs" value={formatBytes(free)} />
         <SummaryRow label="Other data (untouched)" value={formatBytes(disk.otherBytes)} />
-        <div className="border-t border-line pt-2">
+        <div className="border-t border-line-strong pt-2">
           <SummaryRow label="Whole disk" value={formatBytes(disk.totalBytes)} muted />
         </div>
       </div>
-      <p className="text-[11px] text-fg-faint mt-2 text-center">
+      <p className="hint mt-2 text-center">
         The service restarts once to apply — live view and recording resume automatically.
       </p>
 
-      <div className="flex gap-2 mt-5">
-        <button className="btn-ghost h-9" onClick={onBack}>
+      <div className="mt-5 flex gap-2">
+        <button className="btn-ghost" onClick={onBack}>
           <ChevronLeft className="h-4 w-4" />
           Back &amp; change
         </button>
-        <button className="btn-primary h-9 flex-1" onClick={onApplyNow}>
+        <button className="btn-primary flex-1" onClick={onApplyNow}>
           Apply now
         </button>
       </div>
@@ -369,24 +340,12 @@ function Applying({ alloc }: { alloc: number }) {
   );
 }
 
-function Legend({
-  color,
-  label,
-  value,
-  strong,
-  ring,
-}: {
-  color: string;
-  label: string;
-  value: number;
-  strong?: boolean;
-  ring?: boolean;
-}) {
+function Legend({ fill, label, value, strong }: { fill: string; label: string; value: number; strong?: boolean }) {
   return (
     <div className="flex items-center gap-2 text-sm">
-      <Swatch color={color} ring={ring} />
+      <Swatch fill={fill} />
       <span className={`flex-1 ${strong ? "text-fg" : "text-fg-muted"}`}>{label}</span>
-      <span className={`tabular-nums ${strong ? "text-fg font-medium" : "text-fg-muted"}`}>{formatBytes(value)}</span>
+      <span className={`tabular-nums ${strong ? "font-medium text-fg" : "text-fg-muted"}`}>{formatBytes(value)}</span>
     </div>
   );
 }

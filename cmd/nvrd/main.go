@@ -6,15 +6,19 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/TheOriUHD/aperture/internal/ai"
 	"github.com/TheOriUHD/aperture/internal/api"
 	"github.com/TheOriUHD/aperture/internal/audio"
 	"github.com/TheOriUHD/aperture/internal/audit"
@@ -62,7 +66,7 @@ func main() {
 		log.Error("open store", "err", err)
 		os.Exit(1)
 	}
-	defer st.Close()
+	// Closed explicitly, last, at the end of shutdown (below).
 
 	// Storage-credential cipher + backend registry for network storage locations.
 	// The cipher may be nil only if no key could be derived (never, in practice) —
@@ -93,7 +97,6 @@ func main() {
 		}
 		return &storage.Spec{Type: loc.Type, Config: loc.Config, Secret: sec}, nil
 	})
-	defer storageRegistry.Close()
 
 	secureCookies := strings.HasPrefix(cfg.PublicURL, "https://")
 	am := auth.NewManager(cfg.JWTSecret, cfg.StreamSecret, cfg.CLIToken, secureCookies)
@@ -104,9 +107,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Background services share a context cancelled on shutdown.
+	// Background services share a context cancelled on shutdown. The ones in
+	// `waited` are also waited for before nvrd exits (see the end of main).
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
+	waited := &services{ctx: bgCtx}
 
 	// Reconcile go2rtc streams with stored cameras at startup and then on a
 	// fixed interval. go2rtc keeps dynamically-added streams only in memory, so
@@ -144,18 +149,21 @@ func main() {
 	}()
 
 	// Recorder (supervised ffmpeg + segment indexing) and retention janitor.
+	// Waited for on shutdown: its Run returns once every ffmpeg has closed the
+	// segment it was writing.
 	rec := record.New(cfg, st, sm, storageRegistry, log)
-	go rec.Run(bgCtx)
+	waited.run("recorder", rec.Run)
 	janitor := retention.New(cfg, st, storageRegistry, log)
-	go janitor.Run(bgCtx)
+	waited.run("retention", janitor.Run) // a pass in flight finishes before the store closes
 
-	// Motion detection (scene-change ticks -> events with thumbnails).
+	// Motion detection (scene-change ticks -> events with thumbnails). Waited
+	// for so its ffmpeg are reaped by nvrd, not SIGKILLed by systemd after it.
 	det := motion.New(cfg, st, sm, log)
-	go det.Run(bgCtx)
+	waited.run("motion", det.Run)
 
 	// Audio detection (loudness ticks -> "audio" events). Opt-in per camera.
 	audioDet := audio.New(cfg, st, sm, log)
-	go audioDet.Run(bgCtx)
+	waited.run("audio", audioDet.Run)
 
 	// Home Assistant MQTT publisher (outbound auto-discovery + state).
 	siteName := func() string {
@@ -165,7 +173,7 @@ func main() {
 		return "Home NVR"
 	}
 	haPub := ha.New(cfg, st, sm, siteName, log)
-	go haPub.Run(bgCtx)
+	waited.run("home assistant", haPub.Run) // publishes "offline" as it returns
 
 	// Keep a recent JPEG frame cached per camera for instant blurred placeholders.
 	go func() {
@@ -261,7 +269,21 @@ func main() {
 	// Event-gated object detection (opt-in; no-op when mode=off). Runs before
 	// notify/automations so both can filter on the detected labels.
 	detectEng := detect.New(st, sm, cfg.DataDir, log)
+	// Aperture's own object recognition: runtimes and models are downloaded on
+	// request into a folder beside the data dir (not inside it: the retention
+	// janitor counts the data dir against the recordings budget), and run in the
+	// separate apdetect worker.
+	aiMgr := ai.NewManager(filepath.Join(filepath.Dir(cfg.DataDir), "ai"), helperPath("apdetect"), aiThreads(), log)
+	liveSink := detectEng.EnableLocal(aiMgr, func(typ, camera string, data any) {
+		notifyEng.PublishFeed(notify.FeedMessage{Type: typ, TS: time.Now().UnixMilli(), Camera: camera, Data: data})
+	}, det.Reconcile)
+	det.SetFrameSink(liveSink)
+	// A detector starting on (or falling back from) a GPU changes how many frames
+	// are worth decoding for it.
+	aiMgr.SetOnWorker(det.Reconcile)
+	waited.run("object recognition", detectEng.Run)
 	det.SetOnEvent(func(ev *store.Event) {
+		detectEng.EventOpened(ev)
 		detectEng.Enrich(ev)
 		notifyEng.OnEvent(ev)
 		webhookDisp.OnEvent(ev)
@@ -271,7 +293,10 @@ func main() {
 		}
 	})
 	// Change-feed domain emitters (Phase 3): event.closed, detection.created.
-	det.SetOnEventClose(notifyEng.OnEventClose)
+	det.SetOnEventClose(func(id string) {
+		detectEng.EventClosed(id)
+		notifyEng.OnEventClose(id)
+	})
 	detectEng.SetOnDetections(notifyEng.OnDetections)
 	// Audio events flow through the same notify/automation fan-out (minus object
 	// detection, which is video-only).
@@ -281,16 +306,22 @@ func main() {
 		automateEng.OnEvent(ev)
 	})
 	audioDet.SetOnEventClose(notifyEng.OnEventClose) // audio event.closed (Item 3)
+	// Package deliveries and pick-ups are events of their own (detect/packages.go).
+	detectEng.SetEventSink(cfg.RecordingsDir, func(ev *store.Event) {
+		notifyEng.OnEvent(ev)
+		webhookDisp.OnEvent(ev)
+		automateEng.OnEvent(ev)
+	})
 
 	// Environmental context: poll weather into a time-series for "past weather
 	// at the playhead". No-ops until a site location is configured.
 	weatherPoller := weather.New(st, log)
-	go weatherPoller.Run(bgCtx)
+	waited.run("weather", weatherPoller.Run)
 
 	// Watchdog: detect stale recordings (wedged producers) and self-heal.
 	wd := watchdog.New(st, sm, rec, log)
 	wd.SetOnCameraState(notifyEng.OnCameraState)
-	go wd.Run(bgCtx)
+	waited.run("watchdog", wd.Run)
 
 	// ONVIF Profile S provider (external VMS/NVR consumption) — same toggle model
 	// as HomeKit above.
@@ -335,15 +366,7 @@ func main() {
 	srv.SetReconcile(janitor.EnforceNow)
 	srv.SetInterop(onvifSvc, hkSvc) // ONVIF / HomeKit toggles reach the running services
 	srv.StartRateLimitSweeper()
-	httpSrv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           srv,
-		ReadHeaderTimeout: 10 * time.Second, // slowloris guard on headers
-		IdleTimeout:       120 * time.Second,
-		// ReadTimeout and WriteTimeout are deliberately left 0: a write deadline
-		// would kill SSE and long media exports, a read deadline slow large
-		// uploads. Body size is bounded by limitBody (MaxBytesReader) instead.
-	}
+	httpSrv := srv.NewHTTPServer(cfg.HTTPAddr) // ends event streams on Shutdown
 
 	go func() {
 		log.Info("http listening", "addr", cfg.HTTPAddr)
@@ -357,16 +380,44 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 	log.Info("shutting down")
+	began := time.Now()
 
-	// Drain extension children first (SIGTERM → grace window) so they stop cleanly
-	// before the background context cancels the recorder and the rest.
+	// 1. Extension children first, while the API they call is still up: SIGTERM,
+	// SIGKILL after their grace window. StopAll only signals, so wait for them.
 	extSup.StopAll()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := httpSrv.Shutdown(ctx); err != nil {
-		log.Error("graceful shutdown", "err", err)
+	extCtx, extCancel := context.WithTimeout(context.Background(), extSup.StopGrace()+extStopSlack)
+	if !extSup.Wait(extCtx) {
+		log.Warn("shutdown: extensions still running after their stop window")
 	}
+	extCancel()
+	extDone := time.Now()
+
+	// 2. Background services. The recorder has every ffmpeg finish and close the
+	// segment it is writing, so no footage is lost to the restart; the detectors
+	// reap their ffmpeg; Home Assistant is told the NVR is going offline.
+	bgCancel()
+	if pending := waited.wait(bgStopWait); len(pending) > 0 {
+		log.Warn("shutdown: background services did not stop in time", "pending", pending, "after", bgStopWait)
+	}
+	bgDone := time.Now()
+	slowName, slowTook := waited.slowest(extDone)
+
+	// 3. HTTP last, so the web app and live view keep working until the end and the
+	// event streams end just before the next instance starts listening: their
+	// EventSource reconnects straight to it.
+	shutdownHTTP(httpSrv, httpStopWait, log)
+	httpDone := time.Now()
+
+	// 4. Storage last of all, once nothing can use it.
+	storageRegistry.Close()
+	if err := st.Close(); err != nil {
+		log.Warn("shutdown: close store", "err", err)
+	}
+	ms := func(d time.Duration) time.Duration { return d.Round(time.Millisecond) }
+	log.Info("shutdown complete", "took", ms(time.Since(began)),
+		"extensions", ms(extDone.Sub(began)), "background", ms(bgDone.Sub(extDone)),
+		"slowest", slowName, "slowestTook", ms(slowTook),
+		"http", ms(httpDone.Sub(bgDone)), "storage", ms(time.Since(httpDone)))
 }
 
 // seedInterop writes an interop toggle's initial value from its env var the FIRST
@@ -378,4 +429,51 @@ func seedInterop(st *store.Store, key string, envDefault bool) {
 		return // already chosen by the operator
 	}
 	_ = st.SetSettingBool(key, envDefault)
+}
+
+// helperPath finds a helper binary shipped with nvrd: on PATH (the unit adds
+// /usr/lib/aperture/bin), next to nvrd, or in the vendored folder.
+func helperPath(name string) string {
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	if self, err := os.Executable(); err == nil {
+		p := filepath.Join(filepath.Dir(self), name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return filepath.Join("/usr/lib/aperture/bin", name)
+}
+
+// aiThreads is how many CPU threads one inference may use: half the CPUs this
+// process may run on, between 1 and 4, leaving the rest to recording.
+func aiThreads() int {
+	n := runtime.NumCPU() / 2
+	if q := cgroupCPUs(); q > 0 && q/2 < n {
+		n = q / 2
+	}
+	return max(1, min(4, n))
+}
+
+// cgroupCPUs reads the service's CPU quota in whole CPUs (0 when unlimited),
+// from its own cgroup (e.g. CPUQuota= in the systemd unit).
+func cgroupCPUs() int {
+	path := "/sys/fs/cgroup/cpu.max"
+	if b, err := os.ReadFile("/proc/self/cgroup"); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if rel, ok := strings.CutPrefix(line, "0::"); ok {
+				path = filepath.Join("/sys/fs/cgroup", rel, "cpu.max")
+			}
+		}
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	var quota, period int
+	if n, _ := fmt.Sscanf(string(b), "%d %d", &quota, &period); n != 2 || period <= 0 {
+		return 0
+	}
+	return quota / period
 }

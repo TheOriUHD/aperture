@@ -1,0 +1,72 @@
+// Per-core speed of each CPU microarchitecture, relative to an Intel Skylake core
+// at the same clock (1.0). These are rounded, published-benchmark-level IPC ratios;
+// a CPU's score is built from its cores' architecture and clock (see score()), so
+// every catalogue entry is rated by the same rule rather than a number per model.
+export const ARCH = {
+  // Intel big cores
+  sandybridge: { ipc: 0.82, label: "Sandy Bridge" },
+  ivybridge: { ipc: 0.86, label: "Ivy Bridge" },
+  haswell: { ipc: 0.93, label: "Haswell" },
+  broadwell: { ipc: 0.95, label: "Broadwell" },
+  skylake: { ipc: 1.0, label: "Skylake" },
+  sunnycove: { ipc: 1.18, label: "Sunny Cove" },
+  willowcove: { ipc: 1.2, label: "Willow Cove" },
+  cypresscove: { ipc: 1.12, label: "Cypress Cove" },
+  goldencove: { ipc: 1.38, label: "Golden Cove" },
+  raptorcove: { ipc: 1.42, label: "Raptor Cove" },
+  redwoodcove: { ipc: 1.4, label: "Redwood Cove" },
+  lioncove: { ipc: 1.55, label: "Lion Cove" },
+  // Intel efficient / Atom-class cores
+  saltwell: { ipc: 0.25, label: "Saltwell" },
+  silvermont: { ipc: 0.38, label: "Silvermont" },
+  airmont: { ipc: 0.4, label: "Airmont" },
+  goldmont: { ipc: 0.52, label: "Goldmont" },
+  goldmontplus: { ipc: 0.6, label: "Goldmont Plus" },
+  tremont: { ipc: 0.72, label: "Tremont" },
+  gracemont: { ipc: 0.95, label: "Gracemont" },
+  crestmont: { ipc: 1.0, label: "Crestmont" },
+  skymont: { ipc: 1.3, label: "Skymont" },
+  // AMD
+  k10: { ipc: 0.7, label: "K10" },
+  bulldozer: { ipc: 0.55, label: "Bulldozer" },
+  piledriver: { ipc: 0.6, label: "Piledriver" },
+  steamroller: { ipc: 0.64, label: "Steamroller" },
+  excavator: { ipc: 0.67, label: "Excavator" },
+  jaguar: { ipc: 0.48, label: "Jaguar" },
+  zen: { ipc: 0.9, label: "Zen" },
+  zenplus: { ipc: 0.93, label: "Zen+" },
+  zen2: { ipc: 1.05, label: "Zen 2" },
+  zen3: { ipc: 1.22, label: "Zen 3" },
+  zen4: { ipc: 1.33, label: "Zen 4" },
+  zen4c: { ipc: 1.3, label: "Zen 4c" },
+  zen5: { ipc: 1.45, label: "Zen 5" },
+  zen5c: { ipc: 1.4, label: "Zen 5c" },
+  // Arm
+  a7: { ipc: 0.18, label: "Cortex-A7" },
+  a9: { ipc: 0.25, label: "Cortex-A9" },
+  a15: { ipc: 0.33, label: "Cortex-A15" },
+  a53: { ipc: 0.3, label: "Cortex-A53" },
+  a55: { ipc: 0.35, label: "Cortex-A55" },
+  a57: { ipc: 0.45, label: "Cortex-A57" },
+  a72: { ipc: 0.52, label: "Cortex-A72" },
+  a73: { ipc: 0.55, label: "Cortex-A73" },
+  a76: { ipc: 0.78, label: "Cortex-A76" },
+  a78: { ipc: 0.88, label: "Cortex-A78" },
+  carmel: { ipc: 0.68, label: "NVIDIA Carmel" },
+  n1: { ipc: 0.82, label: "Neoverse N1" },
+  v1: { ipc: 0.98, label: "Neoverse V1" },
+  v2: { ipc: 1.08, label: "Neoverse V2" },
+  oryon: { ipc: 1.4, label: "Qualcomm Oryon" },
+  ampereone: { ipc: 0.9, label: "AmpereOne" },
+  // Apple
+  firestorm: { ipc: 1.45, label: "Apple Firestorm" },
+  icestorm: { ipc: 0.55, label: "Apple Icestorm" },
+  avalanche: { ipc: 1.5, label: "Apple Avalanche" },
+  blizzard: { ipc: 0.6, label: "Apple Blizzard" },
+  everest: { ipc: 1.6, label: "Apple M3 performance" },
+  sawtooth: { ipc: 0.65, label: "Apple M3 efficiency" },
+  m4p: { ipc: 1.8, label: "Apple M4 performance" },
+  m4e: { ipc: 0.75, label: "Apple M4 efficiency" },
+} as const;
+
+export type ArchId = keyof typeof ARCH;

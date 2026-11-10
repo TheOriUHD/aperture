@@ -149,9 +149,10 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger) (*Bridge, error)
 	})
 	children = append(children, b.sec.A)
 
-	// One MotionSensor per enabled camera.
+	// One MotionSensor per enabled camera that isn't kept out of HomeKit. The
+	// accessory list is fixed when the bridge starts, so a change applies on restart.
 	for _, cam := range cams {
-		if !cam.Enabled {
+		if !cam.Enabled || cam.HAHidden {
 			continue
 		}
 		ms := accessory.NewMotionSensor(accessory.Info{

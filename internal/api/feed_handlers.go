@@ -113,6 +113,8 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-s.streams.done(): // server shutting down: the client resumes from Last-Event-ID
+			return
 		case <-revoke.C:
 			// A token deleted/expired mid-stream is caught within ≤60s. Sessions
 			// and the CLI token carry standing authority and are not re-resolved.

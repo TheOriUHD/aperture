@@ -217,6 +217,30 @@ func (s *Supervisor) StopAll() {
 	}
 }
 
+// Wait blocks until every child has exited or ctx ends, and reports whether all
+// exited. StopAll only signals: without this, nvrd exiting straight after it
+// left each extension to the service manager's SIGKILL instead of its own
+// SIGTERM window. A stopped child exits within stopGrace (then it is killed).
+func (s *Supervisor) Wait(ctx context.Context) bool {
+	s.mu.Lock()
+	cs := make([]*child, 0, len(s.children))
+	for _, c := range s.children {
+		cs = append(cs, c)
+	}
+	s.mu.Unlock()
+	for _, c := range cs {
+		select {
+		case <-c.done:
+		case <-ctx.Done():
+			return false
+		}
+	}
+	return true
+}
+
+// StopGrace is how long a stopped child gets between SIGTERM and SIGKILL.
+func (s *Supervisor) StopGrace() time.Duration { return s.stopGrace }
+
 // Status reports an extension's current state and, if failed, why.
 func (s *Supervisor) Status(id string) (State, string) {
 	s.mu.Lock()

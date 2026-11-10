@@ -117,6 +117,7 @@ func (p *Publisher) publishControlState() {
 	if err != nil {
 		return
 	}
+	cams = haCameras(cams)
 	for _, c := range cams {
 		p.pub(stateTopicBase+"/"+c.ID+"/record_mode", true, c.RecordMode)
 	}

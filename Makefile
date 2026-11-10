@@ -55,6 +55,7 @@ build-native: build-web
 	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrd ./cmd/nvrd
 	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o bin/nvrctl ./cmd/nvrctl
 	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o bin/apdiscovery ./cmd/apdiscovery
+	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o bin/apdetect ./cmd/apdetect
 
 ## Install the nvrctl admin console natively to ~/.local/bin (on PATH)
 install-cli:

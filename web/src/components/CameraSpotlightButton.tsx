@@ -55,7 +55,7 @@ export function CameraSpotlightButton({ cameraId, VidBtn }: {
       {refusal && (
         <span
           role="alert"
-          className="absolute right-0 top-full z-20 mt-2 w-64 rounded-md border border-rec/40 bg-black/85 px-2.5 py-2 text-left text-[11px] leading-snug text-white backdrop-blur-sm"
+          className="osd-panel absolute right-0 top-full z-20 mt-2 w-64 border-danger/40 px-3 py-2 text-left text-xs leading-snug text-white"
         >
           {refusal}
         </span>

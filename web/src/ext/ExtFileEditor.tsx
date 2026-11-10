@@ -248,7 +248,7 @@ export default function ExtFileEditor({
   const footer = (
     <>
       {saveError && (
-        <span className="mr-auto self-center truncate text-sm text-rec" title={saveError}>
+        <span className="mr-auto self-center truncate text-sm text-danger" title={saveError}>
           {saveError}
         </span>
       )}
@@ -263,15 +263,15 @@ export default function ExtFileEditor({
 
   return (
     <Modal open onClose={onClose} title={`Edit — ${extName}`} footer={footer} size="xl">
-      <div className="flex h-[70vh] min-h-[320px] gap-3">
+      <div className="flex h-[70vh] min-h-[320px] flex-col gap-3 sm:flex-row">
         {/* File tree — grouped by folder, monospace, click to open. */}
-        <div className="w-40 shrink-0 overflow-y-auto rounded-md border border-line bg-ink-850 p-1 font-mono text-xs">
+        <div className="max-h-36 w-full shrink-0 overflow-y-auto rounded-md border border-line bg-ink-900 p-1 font-mono text-xs sm:max-h-none sm:w-44">
           {listLoading ? (
             <div className="grid h-full place-items-center">
               <Spinner />
             </div>
           ) : listError ? (
-            <div className="p-2 text-sm text-rec">{listError}</div>
+            <div className="p-2 text-sm text-danger">{listError}</div>
           ) : files.length === 0 ? (
             <div className="p-2 text-fg-faint">No files.</div>
           ) : (
@@ -279,7 +279,7 @@ export default function ExtFileEditor({
               <div key={g.folder || "/"} className="mb-1">
                 {g.folder && (
                   <div
-                    className="truncate px-2 py-1 text-[10px] uppercase tracking-wide text-fg-faint"
+                    className="truncate px-2 pb-1 pt-2 text-[11px] font-semibold text-fg-muted"
                     title={g.folder}
                   >
                     {g.folder}
@@ -295,9 +295,9 @@ export default function ExtFileEditor({
                       onClick={() => void openFile(f.path)}
                       title={f.path}
                       className={clsx(
-                        "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left",
+                        "flex h-7 w-full items-center gap-1.5 rounded px-2 text-left transition-colors",
                         g.folder && "pl-3",
-                        active ? "bg-brand/15 text-fg" : "text-fg-muted hover:bg-ink-700 hover:text-fg",
+                        active ? "bg-ink-700 text-brand" : "text-fg-muted hover:bg-white/[0.04] hover:text-fg",
                       )}
                     >
                       <span className="truncate">{f.name}</span>
@@ -313,7 +313,7 @@ export default function ExtFileEditor({
         </div>
 
         {/* Editor pane. */}
-        <div className="relative min-w-0 flex-1 overflow-hidden rounded-md border border-line bg-ink-850">
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-md border border-line bg-ink-900">
           {(() => {
             if (!activePath && listLoading) {
               return (
@@ -323,7 +323,7 @@ export default function ExtFileEditor({
               );
             }
             if (fileError && !activeEntry) {
-              return <div className="grid h-full place-items-center p-4 text-sm text-rec">{fileError}</div>;
+              return <div className="grid h-full place-items-center p-4 text-sm text-danger">{fileError}</div>;
             }
             if (activeEntry?.binary) {
               return (
@@ -358,7 +358,7 @@ export default function ExtFileEditor({
             return <div className="grid h-full place-items-center p-4 text-sm text-fg-faint">No file open.</div>;
           })()}
           {fileLoading && (
-            <div className="absolute right-2 top-2 rounded bg-ink-900/80 px-2 py-1">
+            <div className="absolute right-2 top-2 rounded-md bg-ink-800/90 px-2 py-1">
               <Spinner />
             </div>
           )}

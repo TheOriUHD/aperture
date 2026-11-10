@@ -21,51 +21,65 @@ export function CameraRail({
   const filtered = base.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()));
 
   return (
-    <div className="w-[200px] shrink-0 border-r border-line flex flex-col bg-ink-900">
-      <div className="p-2.5 border-b border-line">
+    <div className="frame flex w-[212px] shrink-0 flex-col overflow-hidden">
+      <div className="px-3 pb-2 pt-3">
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-fg-faint" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-faint" />
           <input
-            className="input h-8 pl-8 text-xs"
+            className="input pl-8"
             placeholder="Search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
       </div>
-      <div className="flex-1 overflow-auto p-2 space-y-2">
+      <div className="flex-1 space-y-1 overflow-auto px-3 pb-3">
         {filtered.map((c) => {
           const active = c.id === selectedId;
+          // The selected camera sits on a raised tile with its name in a blue
+          // label; in multi-view every camera in the grid reads as selected.
+          const marked = multi || active;
           return (
             <button
               key={c.id}
               onClick={() => {
                 if (!multi) onSelect(c.id);
               }}
-              className={`block w-full overflow-hidden rounded-lg border transition-colors ${
-                multi
-                  ? "cursor-default border-brand/50"
-                  : active
-                    ? "border-brand ring-1 ring-brand"
-                    : "border-line hover:border-line-strong"
+              aria-pressed={marked}
+              className={`group block w-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 ${
+                multi ? "cursor-default" : ""
               }`}
             >
-              <SnapshotThumb cameraId={c.id} enabled={c.enabled} />
-              {multi ? (
-                <div className="flex justify-center px-2 py-1.5">
-                  <span className="rounded-md bg-brand px-2 py-0.5 text-xs font-medium text-white">{c.name}</span>
+              <div
+                className={`rounded-lg p-1 transition-colors ${
+                  marked ? "bg-ink-650" : "group-hover:bg-white/[0.05]"
+                }`}
+              >
+                <div className="overflow-hidden rounded-md">
+                  <SnapshotThumb cameraId={c.id} enabled={c.enabled} />
                 </div>
-              ) : (
-                <div className="flex items-center gap-1.5 px-2 py-1.5">
-                  <Lock className="h-3 w-3 shrink-0 text-fg-faint" />
-                  <span className={`truncate text-xs ${active ? "font-medium text-brand" : "text-fg-muted"}`}>
-                    {c.name}
+              </div>
+              <div className="flex justify-center px-1 pb-1.5 pt-1">
+                {marked ? (
+                  <span className="inline-flex max-w-full items-center gap-1 rounded-md bg-brand px-1.5 py-[3px] text-xs font-medium text-white">
+                    <Lock className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{c.name}</span>
                   </span>
-                </div>
-              )}
+                ) : (
+                  <span className="inline-flex max-w-full items-center gap-1 px-1.5 py-[3px] text-xs text-fg group-hover:text-fg">
+                    <Lock className="h-3 w-3 shrink-0 text-fg-muted" />
+                    <span className="truncate">{c.name}</span>
+                  </span>
+                )}
+              </div>
             </button>
           );
         })}
+        {filtered.length === 0 && (
+          <p className="px-1 py-6 text-center text-xs text-fg-faint">
+            {q ? `No cameras match “${q}”` : "No cameras"}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -81,7 +95,7 @@ function SnapshotThumb({ cameraId, enabled }: { cameraId: string; enabled: boole
   }, [enabled]);
 
   return (
-    <div className="relative aspect-video bg-ink-800">
+    <div className="relative aspect-video bg-ink-950">
       {enabled && ok ? (
         <img
           src={`/api/v1/cameras/${cameraId}/snapshot.jpg?t=${tick}`}

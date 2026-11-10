@@ -1,5 +1,8 @@
 import { useState } from "react";
 import { Cast, Eye, EyeOff, Copy, Check, RefreshCw, AlertTriangle } from "lucide-react";
+import { SettingsRow } from "./ui/Layout";
+import { Spinner } from "./ui/Spinner";
+import { Callout, CodeValue, CopyIconButton, IntegrationHeader, SectionTitle } from "./IntegrationParts";
 import { useLiveKey, useRollLiveKey, type LiveKeyCamera } from "../hooks/useSystem";
 
 const MASK = "aplv_" + "•".repeat(24);
@@ -37,132 +40,136 @@ export function LiveViewCard() {
     ].join("\n");
 
   return (
-    <div className="panel">
-      <div className="flex items-center gap-2 mb-3">
-        <Cast className="h-4 w-4 text-fg-muted" />
-        <h2 className="text-sm font-medium text-fg">Live View Card</h2>
-      </div>
-      <p className="text-xs text-fg-faint mb-4 leading-relaxed">
+    <div>
+      <IntegrationHeader icon={Cast} title="Live View Card">
         Instant WebRTC live view on a Home Assistant dashboard. Drop the key and a camera&apos;s handle
         into the card config — no token to build, no cameras to pick. Add the{" "}
-        <code className="text-fg-muted">aperture-live-card.js</code> resource to HA, then use the config
+        <code className="text-fg">aperture-live-card.js</code> resource to HA, then use the config
         below.
-      </p>
+      </IntegrationHeader>
 
       {isLoading ? (
-        <p className="text-xs text-fg-faint">Loading…</p>
+        <div className="py-6">
+          <Spinner label="Loading…" />
+        </div>
       ) : (
-        <div className="space-y-5">
+        <>
           {/* Managed live key */}
-          <div>
-            <label className="label">Live key</label>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 truncate rounded-md bg-ink-850 border border-line px-3 py-2 font-mono text-xs text-fg">
-                {revealed ? data?.key : MASK}
-              </code>
-              <button
-                className="btn-icon h-9 w-9"
-                onClick={() => setRevealed((v) => !v)}
-                aria-label={revealed ? "Hide key" : "Reveal key"}
-                title={revealed ? "Hide" : "Reveal"}
-              >
-                {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-              <button
-                className="btn-icon h-9 w-9"
-                onClick={() => data && copy(data.key, "key")}
-                aria-label="Copy key"
-                title="Copy"
-              >
-                {copied === "key" ? <Check className="h-4 w-4 text-online" /> : <Copy className="h-4 w-4" />}
-              </button>
-            </div>
-
-            <div className="mt-2 flex items-start gap-2 rounded-md border border-[#e6b45a]/30 bg-[#e6b45a]/10 p-2.5">
-              <AlertTriangle className="h-3.5 w-3.5 text-[#e6b45a] mt-0.5 shrink-0" />
-              <p className="text-[11px] text-fg-muted leading-relaxed">
-                This one key lets the card watch <strong className="text-fg">any</strong> camera live, and it
-                lives in the dashboard&apos;s card config — so anyone who can view that dashboard can read it.
-                For a household that&apos;s usually fine; reroll to invalidate it everywhere at once.
-              </p>
-            </div>
-
-            <div className="mt-2">
-              {confirming ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-fg-muted">Reroll now? Existing cards stop working until updated.</span>
+          <div className="divide-y divide-line">
+            <SettingsRow label="Live key" align="start">
+              <div className="max-w-xl space-y-2.5">
+                <div className="flex items-center gap-1">
+                  <CodeValue className="flex-1 text-fg">{revealed ? data?.key : MASK}</CodeValue>
                   <button
-                    className="btn-danger h-7 text-xs"
-                    disabled={roll.isPending}
-                    onClick={async () => {
-                      await roll.mutateAsync();
-                      setConfirming(false);
-                      setRevealed(true);
-                    }}
+                    className="btn-icon"
+                    onClick={() => setRevealed((v) => !v)}
+                    aria-label={revealed ? "Hide key" : "Reveal key"}
+                    title={revealed ? "Hide" : "Reveal"}
                   >
-                    {roll.isPending ? "Rerolling…" : "Reroll"}
+                    {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
-                  <button className="btn-ghost h-7 text-xs" onClick={() => setConfirming(false)}>
-                    Cancel
+                  <button
+                    className="btn-icon"
+                    onClick={() => data && copy(data.key, "key")}
+                    aria-label="Copy key"
+                    title="Copy"
+                  >
+                    {copied === "key" ? <Check className="h-4 w-4 text-online" /> : <Copy className="h-4 w-4" />}
                   </button>
                 </div>
-              ) : (
-                <button className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg" onClick={() => setConfirming(true)}>
-                  <RefreshCw className="h-3.5 w-3.5" /> Reroll key
-                </button>
-              )}
-            </div>
+
+                <Callout tone="warn" icon={AlertTriangle}>
+                  This one key lets the card watch <strong className="text-fg">any</strong> camera live, and it
+                  lives in the dashboard&apos;s card config — so anyone who can view that dashboard can read it.
+                  For a household that&apos;s usually fine; reroll to invalidate it everywhere at once.
+                </Callout>
+
+                {confirming ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-fg-muted">Reroll now? Existing cards stop working until updated.</span>
+                    <button
+                      className="btn-danger h-7 px-3 text-xs"
+                      disabled={roll.isPending}
+                      onClick={async () => {
+                        await roll.mutateAsync();
+                        setConfirming(false);
+                        setRevealed(true);
+                      }}
+                    >
+                      {roll.isPending ? "Rerolling…" : "Reroll"}
+                    </button>
+                    <button className="btn-ghost h-7 px-3 text-xs" onClick={() => setConfirming(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button className="btn-link text-xs" onClick={() => setConfirming(true)}>
+                    <RefreshCw className="h-3.5 w-3.5" /> Reroll key
+                  </button>
+                )}
+              </div>
+            </SettingsRow>
           </div>
 
           {/* Camera slugs */}
           {cams.length > 0 && (
-            <div>
-              <label className="label">Cameras</label>
-              <p className="text-[11px] text-fg-faint mb-2">
-                Use a camera&apos;s handle as the <code className="text-fg-muted">camera:</code> value.
-              </p>
-              <div className="space-y-1">
-                {cams.map((c) => (
-                  <div key={c.id} className="flex items-center gap-2 text-xs">
-                    <span className="w-32 truncate text-fg">{c.name}</span>
-                    <code className="flex-1 truncate rounded bg-ink-850 px-2 py-1 font-mono text-fg-muted">{c.slug}</code>
-                    <button
-                      className="btn-icon h-7 w-7"
-                      onClick={() => copy(c.slug, "slug-" + c.id)}
-                      aria-label={`Copy ${c.name} handle`}
-                    >
-                      {copied === "slug-" + c.id ? (
-                        <Check className="h-3.5 w-3.5 text-online" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                  </div>
-                ))}
+            <>
+              <SectionTitle
+                description={
+                  <>
+                    Use a camera&apos;s handle as the <code className="text-fg-muted">camera:</code> value.
+                  </>
+                }
+              >
+                Cameras
+              </SectionTitle>
+              <div className="overflow-x-auto">
+                <table className="tbl table-fixed">
+                  <thead>
+                    <tr>
+                      <th className="w-40 sm:w-56">Camera</th>
+                      <th>Handle</th>
+                      <th className="w-12" aria-label="Copy" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cams.map((c) => (
+                      <tr key={c.id}>
+                        <td className="truncate">
+                          <span className="text-fg">{c.name}</span>
+                        </td>
+                        <td className="truncate font-mono text-xs">{c.slug}</td>
+                        <td className="!px-1 text-right">
+                          <CopyIconButton
+                            copied={copied === "slug-" + c.id}
+                            onClick={() => copy(c.slug, "slug-" + c.id)}
+                            label={`Copy ${c.name} handle`}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
+            </>
           )}
 
           {/* Ready-to-paste config */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="label mb-0">Card config</label>
-              <button
-                className="inline-flex items-center gap-1.5 text-xs text-brand hover:underline"
-                onClick={() => data && copy(configYaml(data.key), "yaml")}
-              >
-                {copied === "yaml" ? <Check className="h-3.5 w-3.5 text-online" /> : <Copy className="h-3.5 w-3.5" />}
+          <SectionTitle
+            description="Copy config puts the real key on your clipboard even while it's hidden here."
+            action={
+              <button className="btn-outline" onClick={() => data && copy(configYaml(data.key), "yaml")}>
+                {copied === "yaml" ? <Check className="h-4 w-4 text-online" /> : <Copy className="h-4 w-4" />}
                 Copy config
               </button>
-            </div>
-            <pre className="overflow-x-auto rounded-md bg-ink-850 border border-line p-3 font-mono text-[11px] leading-relaxed text-fg-muted">
-              {configYaml(revealed ? (data?.key ?? "") : MASK)}
-            </pre>
-            <p className="text-[11px] text-fg-faint mt-1.5">
-              Copy config puts the real key on your clipboard even while it&apos;s hidden here.
-            </p>
-          </div>
-        </div>
+            }
+          >
+            Card config
+          </SectionTitle>
+          <pre className="overflow-x-auto rounded-lg border border-line bg-ink-850 p-4 font-mono text-xs leading-relaxed text-fg/85">
+            {configYaml(revealed ? (data?.key ?? "") : MASK)}
+          </pre>
+        </>
       )}
     </div>
   );

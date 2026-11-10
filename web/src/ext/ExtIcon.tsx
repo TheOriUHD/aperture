@@ -1,3 +1,5 @@
+import clsx from "clsx";
+
 // ExtIcon — the one consistent icon treatment for an extension across the manager
 // row and the marketplace grid: the extension's own PNG (served as an <img> from
 // its CSP'd asset route — never inlined markup), or a neutral monogram fallback so
@@ -7,7 +9,10 @@ export function ExtIcon({ icon, name, size = 40 }: { icon?: string; name: string
   const letter = (name.trim()[0] || "?").toUpperCase();
   return (
     <div
-      className="grid shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-ink-700"
+      className={clsx(
+        "grid shrink-0 place-items-center overflow-hidden border border-line bg-ink-700",
+        size <= 32 ? "rounded-md" : "rounded-lg",
+      )}
       style={{ width: size, height: size }}
     >
       {icon ? (

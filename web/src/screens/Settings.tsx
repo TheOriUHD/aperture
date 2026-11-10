@@ -1,36 +1,62 @@
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { ExtensionSlot } from "../ext/ExtensionSlot";
 import { ExtensionsManager } from "../ext/ExtensionsManager";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, UserPlus, Shield, User as UserIcon } from "lucide-react";
+import clsx from "clsx";
+import {
+  Bell,
+  Blocks,
+  Cpu,
+  ChevronRight,
+  Cctv,
+  CloudSun,
+  HardDrive,
+  LayoutGrid,
+  Plug,
+  ScanEye,
+  ScrollText,
+  Server,
+  ShieldCheck,
+  SlidersHorizontal,
+  Users,
+  Workflow,
+  type LucideIcon,
+} from "lucide-react";
 import { TopBar } from "../components/TopBar";
-import { UserModal } from "../components/UserModal";
 import { StorageManager } from "../components/StorageManager";
-import { EufyBridge } from "../components/EufyBridge";
-import { HomeAssistant } from "../components/HomeAssistant";
-import { LiveViewCard } from "../components/LiveViewCard";
-import { Interop } from "../components/Interop";
 import { LocationWeather } from "../components/LocationWeather";
 import { SystemHealth } from "../components/SystemHealth";
-import { OidcSettings } from "../components/OidcSettings";
 import { PreferencesSettings } from "../components/PreferencesSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { NotificationsSettings } from "../components/NotificationsSettings";
 import { DetectionSettings } from "../components/DetectionSettings";
-import { CamerasManager } from "./Cameras";
-import { ApiTokens } from "../components/ApiTokens";
-import { Webhooks } from "../components/Webhooks";
-import { Automations } from "../components/Automations";
-import { InteropEgress } from "../components/InteropEgress";
-import { AuditLog } from "../components/AuditLog";
+import { CameraGroupsManager } from "../components/CameraGroupsManager";
+import { HardwareSettings } from "../components/HardwareSettings";
+import { SettingsHeading, SettingsRow } from "../components/ui/Layout";
+import { Switch } from "../components/ui/Switch";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { useUsers, type ManagedUser } from "../hooks/useUsers";
 import { useSiteName, useSetSiteName, useSetSettings, useHA, useHASensors } from "../hooks/useSystem";
-import { Switch } from "../components/ui/Switch";
-import { CameraGroupsManager } from "../components/CameraGroupsManager";
+
+interface Section {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  admin: boolean;
+  group: "account" | "cameras" | "system";
+}
+
+// Sections that used to be settings tabs and are pages of their own now. Old
+// links (?tab=...) still land in the right place.
+const MOVED: Record<string, string> = {
+  cameras: "/cameras",
+  automations: "/automations",
+  integrations: "/integrations",
+  activity: "/logs",
+  users: "/users",
+};
 
 export function Settings() {
   const { t } = useTranslation();
@@ -41,111 +67,150 @@ export function Settings() {
     queryFn: () => api.get<{ version: string; commit: string }>("/api/system/version"),
   });
 
-  const tabs = [
-    { id: "general", label: t("settings.tabGeneral", "General"), admin: false },
-    { id: "security", label: t("settings.tabSecurity", "Security"), admin: false },
-    { id: "notifications", label: t("settings.tabNotifications", "Notifications"), admin: false },
-    { id: "cameras", label: t("settings.tabCameras", "Cameras"), admin: true },
-    { id: "groups", label: t("settings.tabGroups", "Camera Groups"), admin: true },
-    { id: "system", label: t("settings.tabSystem", "System"), admin: true },
-    { id: "environment", label: t("settings.tabEnvironment", "Environment"), admin: true },
-    { id: "detection", label: t("settings.tabDetection", "Detection"), admin: true },
-    { id: "automations", label: t("settings.tabAutomations", "Automations"), admin: true },
-    { id: "integrations", label: t("settings.tabIntegrations", "Integrations"), admin: true },
-    { id: "extensions", label: t("settings.tabExtensions", "Extensions"), admin: true },
-    { id: "activity", label: t("settings.tabActivity", "Activity"), admin: true },
-  ].filter((tb) => !tb.admin || isAdmin);
+  const sections: Section[] = (
+    [
+      { id: "general", label: t("settings.tabGeneral", "General"), icon: SlidersHorizontal, admin: false, group: "account" },
+      { id: "security", label: t("settings.tabSecurity", "Security"), icon: ShieldCheck, admin: false, group: "account" },
+      { id: "notifications", label: t("settings.tabNotifications", "Notifications"), icon: Bell, admin: false, group: "account" },
+      { id: "groups", label: t("settings.tabGroups", "Camera Groups"), icon: LayoutGrid, admin: true, group: "cameras" },
+      { id: "detection", label: t("settings.tabDetection", "Detection"), icon: ScanEye, admin: true, group: "cameras" },
+      { id: "environment", label: t("settings.tabEnvironment", "Environment"), icon: CloudSun, admin: true, group: "cameras" },
+      { id: "storage", label: t("settings.tabStorage", "Recording & Storage"), icon: HardDrive, admin: true, group: "system" },
+      { id: "system", label: t("settings.tabSystem", "System"), icon: Server, admin: true, group: "system" },
+      { id: "hardware", label: t("settings.tabHardware", "Hardware"), icon: Cpu, admin: true, group: "system" },
+      { id: "extensions", label: t("settings.tabExtensions", "Extensions"), icon: Blocks, admin: true, group: "system" },
+    ] as Section[]
+  ).filter((s) => !s.admin || isAdmin);
 
-  const [params] = useSearchParams();
-  const [tab, setTab] = useState(params.get("tab") || "general");
-  const active = tabs.some((tb) => tb.id === tab) ? tab : "general";
+  const [params, setParams] = useSearchParams();
+  const requested = params.get("tab") || "general";
+  const [tab, setTabState] = useState(requested);
+  useEffect(() => setTabState(requested), [requested]);
+  const stripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    stripRef.current?.querySelector<HTMLElement>("[data-active]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [tab]);
+  const setTab = (id: string) => {
+    setTabState(id);
+    setParams({ tab: id }, { replace: true });
+  };
+
+  if (MOVED[requested]) return <Navigate to={MOVED[requested]} replace />;
+  const active = sections.some((s) => s.id === tab) ? tab : "general";
+  const current = sections.find((s) => s.id === active)!;
+  const groups: { id: Section["group"]; label?: string }[] = [
+    { id: "account" },
+    { id: "cameras", label: t("settings.groupCameras", "Cameras") },
+    { id: "system", label: t("settings.groupSystem", "System") },
+  ];
 
   return (
     <>
       <TopBar title={t("settings.title", "Settings")} />
-      <div className="flex-1 overflow-auto">
-        {/* Tab bar */}
-        <div className="sticky top-0 z-10 border-b border-line bg-ink-900/95 backdrop-blur">
-          <div className="max-w-2xl mx-auto flex gap-1 overflow-x-auto px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden lg:max-w-none lg:justify-center lg:gap-2 lg:px-8">
-            {tabs.map((tb) => (
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        {/* Section navigation: a side list on desktop, a scrolling strip on a phone. */}
+        <nav className="hidden w-[248px] shrink-0 flex-col overflow-y-auto border-r border-line px-3 py-4 lg:flex">
+          {groups.map((g) => {
+            const items = sections.filter((s) => s.group === g.id);
+            if (items.length === 0) return null;
+            return (
+              <div key={g.id} className={clsx(g.label && "mt-4 border-t border-line pt-4")}>
+                {g.label && <p className="mb-1.5 px-3 text-xs font-semibold text-fg">{g.label}</p>}
+                <div className="space-y-0.5">
+                  {items.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => setTab(s.id)}
+                      className={clsx("side-item", active === s.id && "side-item-active")}
+                    >
+                      <s.icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          <p className="mt-auto px-3 pt-6 text-xs text-fg-faint">Aperture {ver?.version ?? ""}</p>
+        </nav>
+        <div className="shrink-0 border-b border-line lg:hidden">
+          <div
+            ref={stripRef}
+            className="flex gap-1 overflow-x-auto px-3 py-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {sections.map((s) => (
               <button
-                key={tb.id}
-                onClick={() => setTab(tb.id)}
-                className={`shrink-0 px-3 py-2.5 text-sm border-b-2 transition-colors lg:px-4 ${
-                  active === tb.id
-                    ? "border-brand text-fg"
-                    : "border-transparent text-fg-muted hover:text-fg"
-                }`}
+                key={s.id}
+                data-active={active === s.id ? "" : undefined}
+                onClick={() => setTab(s.id)}
+                className={clsx(
+                  "flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-sm",
+                  active === s.id ? "bg-ink-700 text-brand" : "text-fg-muted",
+                )}
               >
-                {tb.label}
+                <s.icon className="h-4 w-4" />
+                {s.label}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="p-4">
-          <div className="max-w-2xl mx-auto space-y-4">
-            {active === "general" && (
-              <>
-                <Section title={t("settings.account", "Account")}>
-                  <Row label={t("settings.name", "Name")} value={user?.name || "—"} />
-                  <Row label={t("settings.email", "Email")} value={user?.email || "—"} />
-                  <Row label={t("settings.role", "Role")} value={user?.role || "—"} className="capitalize" />
-                </Section>
-                <PreferencesSettings />
-                {isAdmin && <SiteSection />}
-                <Section title={t("settings.about", "About")}>
-                  <Row label={t("settings.application", "Application")} value="Aperture NVR" />
-                  <Row label={t("settings.version", "Version")} value={ver ? `${ver.version} (${ver.commit})` : "…"} />
-                </Section>
-              </>
-            )}
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <div className="max-w-[1080px] px-4 py-5 lg:px-8 lg:py-6">
+            <h1 className="mb-4 text-base font-semibold text-fg lg:hidden">{current.label}</h1>
+            <div className="space-y-4">
+              {active === "general" && (
+                <>
+                  <SettingsHeading>{t("settings.account", "Account")}</SettingsHeading>
+                  <div className="divide-y divide-line">
+                    <SettingsRow label={t("settings.name", "Name")}>
+                      <span className="text-sm text-fg">{user?.name || "—"}</span>
+                    </SettingsRow>
+                    <SettingsRow label={t("settings.email", "Email")}>
+                      <span className="text-sm text-fg">{user?.email || "—"}</span>
+                    </SettingsRow>
+                    <SettingsRow label={t("settings.role", "Role")}>
+                      <span className="pill-gray capitalize">{user?.role || "—"}</span>
+                    </SettingsRow>
+                  </div>
+                  <PreferencesSettings />
+                  {isAdmin && <SiteSection />}
+                  <SettingsHeading>{t("settings.about", "About")}</SettingsHeading>
+                  <div className="divide-y divide-line">
+                    <SettingsRow label={t("settings.application", "Application")}>
+                      <span className="text-sm text-fg">Aperture NVR</span>
+                    </SettingsRow>
+                    <SettingsRow label={t("settings.version", "Version")}>
+                      <span className="font-mono text-xs text-fg/85">{ver ? `${ver.version} (${ver.commit})` : "…"}</span>
+                    </SettingsRow>
+                  </div>
+                </>
+              )}
 
-            {active === "security" && (
-              <>
-                <SecuritySettings />
-                {isAdmin && <UsersSection currentUserId={user?.id} />}
-              </>
-            )}
+              {active === "security" && <SecuritySettings />}
 
-            {active === "notifications" && <NotificationsSettings />}
+              {active === "notifications" && <NotificationsSettings />}
 
-            {active === "cameras" && isAdmin && <CamerasManager />}
+              {active === "groups" && isAdmin && <CameraGroupsManager />}
 
-            {active === "groups" && isAdmin && <CameraGroupsManager />}
+              {active === "detection" && isAdmin && <DetectionSettings />}
 
-            {active === "system" && isAdmin && (
-              <>
-                <SystemHealth />
-                <StorageManager />
-              </>
-            )}
+              {active === "environment" && isAdmin && <LocationWeather />}
 
-            {active === "environment" && isAdmin && <LocationWeather />}
+              {active === "storage" && isAdmin && <StorageManager />}
 
-            {active === "detection" && isAdmin && <DetectionSettings />}
+              {active === "system" && isAdmin && <SystemHealth />}
 
-            {active === "automations" && isAdmin && <Automations />}
+              {active === "hardware" && isAdmin && <HardwareSettings />}
 
-            {active === "integrations" && isAdmin && (
-              <>
-                <HomeAssistant />
-                <EufyBridge />
-                <LiveViewCard />
-                <Interop />
-                <Webhooks />
-                <ApiTokens />
-                <InteropEgress />
-                <OidcSettings />
-              </>
-            )}
+              {active === "extensions" && isAdmin && <ExtensionsManager />}
 
-            {active === "extensions" && isAdmin && <ExtensionsManager />}
+              {/* Extension-contributed settings panels (append-only; nothing when none). */}
+              <ExtensionSlot slot="settings" />
 
-            {active === "activity" && isAdmin && <AuditLog />}
-
-            {/* Extension-contributed settings panels (append-only; nothing when none). */}
-            <ExtensionSlot slot="settings" />
+              {/* On a phone there is no rail: the pages that left Settings are linked here. */}
+              {isAdmin && active === "general" && <MoreLinks />}
+            </div>
           </div>
         </div>
       </div>
@@ -153,68 +218,26 @@ export function Settings() {
   );
 }
 
-function UsersSection({ currentUserId }: { currentUserId?: string }) {
-  const { data: users } = useUsers();
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<ManagedUser | null>(null);
-
+function MoreLinks() {
+  const links: { to: string; label: string; icon: LucideIcon }[] = [
+    { to: "/cameras", label: "Devices", icon: Cctv },
+    { to: "/users", label: "Users", icon: Users },
+    { to: "/integrations", label: "Integrations", icon: Plug },
+    { to: "/automations", label: "Automations", icon: Workflow },
+    { to: "/logs", label: "Activity Log", icon: ScrollText },
+  ];
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-medium text-fg">Users &amp; roles</h2>
-        <button
-          className="btn-subtle h-8"
-          onClick={() => {
-            setEditing(null);
-            setOpen(true);
-          }}
-        >
-          <Plus className="h-4 w-4" />
-          Add user
-        </button>
-      </div>
-      <div className="space-y-1.5">
-        {(users ?? []).map((u) => (
-          <button
-            key={u.id}
-            onClick={() => {
-              setEditing(u);
-              setOpen(true);
-            }}
-            className="w-full text-left flex items-center gap-3 rounded-md px-2.5 py-2 hover:bg-ink-700"
-          >
-            <div className="h-8 w-8 rounded-full bg-ink-700 grid place-items-center shrink-0">
-              {u.role === "admin" ? (
-                <Shield className="h-4 w-4 text-brand" />
-              ) : (
-                <UserIcon className="h-4 w-4 text-fg-muted" />
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-fg truncate">
-                {u.name || u.email}
-                {u.id === currentUserId && <span className="text-fg-faint"> (you)</span>}
-              </p>
-              <p className="text-xs text-fg-faint truncate">{u.email}</p>
-            </div>
-            {u.disabled && <span className="pill bg-ink-700 text-fg-faint">Disabled</span>}
-            <span className="pill bg-ink-700 text-fg-muted capitalize">{u.role}</span>
-            {u.role === "viewer" && (
-              <span className="text-xs text-fg-faint w-16 text-right">
-                {u.cameraIds.length} {u.cameraIds.length === 1 ? "camera" : "cameras"}
-              </span>
-            )}
-          </button>
+    <div className="lg:hidden">
+      <SettingsHeading>Administration</SettingsHeading>
+      <div className="mt-2 divide-y divide-line overflow-hidden rounded-lg border border-line">
+        {links.map((l) => (
+          <Link key={l.to} to={l.to} className="flex h-12 items-center gap-3 px-4 text-sm text-fg hover:bg-white/[0.03]">
+            <l.icon className="h-[18px] w-[18px] text-fg-muted" />
+            <span className="flex-1">{l.label}</span>
+            <ChevronRight className="h-4 w-4 text-fg-faint" />
+          </Link>
         ))}
-        {(users ?? []).length === 0 && (
-          <div className="flex flex-col items-center gap-1.5 py-6 text-fg-faint">
-            <UserPlus className="h-5 w-5" />
-            <span className="text-xs">No users yet</span>
-          </div>
-        )}
       </div>
-
-      <UserModal open={open} user={editing} currentUserId={currentUserId} onClose={() => setOpen(false)} />
     </div>
   );
 }
@@ -240,112 +263,99 @@ function SiteSection() {
   }, [site]);
 
   return (
-    <div className="panel">
-      <h2 className="text-sm font-medium text-fg mb-3">System</h2>
-      <label className="label">Site name</label>
-      <div className="flex gap-2">
-        <input
-          className="input"
-          value={name}
-          placeholder="Home NVR"
-          onChange={(e) => {
-            setName(e.target.value);
-            setSaved(false);
-          }}
-        />
-        <button
-          className="btn-primary shrink-0"
-          disabled={setSite.isPending || !name.trim()}
-          onClick={async () => {
-            await setSite.mutateAsync(name.trim());
-            setSaved(true);
-          }}
+    <>
+      <SettingsHeading>System</SettingsHeading>
+      <div className="divide-y divide-line">
+        <SettingsRow label="Site name" hint="Shown in the header and on notifications.">
+          <div className="flex max-w-md gap-2">
+            <input
+              className="input"
+              value={name}
+              placeholder="Home NVR"
+              onChange={(e) => {
+                setName(e.target.value);
+                setSaved(false);
+              }}
+            />
+            <button
+              className="btn-primary shrink-0"
+              disabled={setSite.isPending || !name.trim() || name.trim() === site?.siteName}
+              onClick={async () => {
+                await setSite.mutateAsync(name.trim());
+                setSaved(true);
+              }}
+            >
+              {setSite.isPending ? "Saving…" : saved ? "Saved" : "Save"}
+            </button>
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          label="Overview temperature"
+          align="start"
+          hint={
+            <>
+              Shown on the dashboard. Defaults to your location&apos;s weather; pick a Home Assistant sensor to use its
+              reading instead.{!ha?.enabled && " Connect Home Assistant to use a sensor."}
+            </>
+          }
         >
-          {setSite.isPending ? "Saving…" : "Save"}
-        </button>
-      </div>
-      {saved && <p className="text-xs text-online mt-2">Saved.</p>}
+          <select
+            className="input max-w-md"
+            value={tempSensor}
+            onChange={(e) => {
+              setTempSensor(e.target.value);
+              setSettings.mutate({ overviewTempSensor: e.target.value });
+            }}
+          >
+            <option value="">Outdoor weather (default)</option>
+            {tempSensor && !sensors?.some((s) => s.entityId === tempSensor) && (
+              <option value={tempSensor}>{tempSensor} (waiting for reading…)</option>
+            )}
+            {sensors?.map((s) => (
+              <option key={s.entityId} value={s.entityId}>
+                {(s.name || s.entityId) + (s.unit ? ` — ${s.value} ${s.unit}` : ` — ${s.value}`)}
+              </option>
+            ))}
+          </select>
+        </SettingsRow>
 
-      <div className="mt-4 border-t border-line pt-4">
-        <label className="label">Overview temperature</label>
-        <select
-          className="input"
-          value={tempSensor}
-          onChange={(e) => {
-            setTempSensor(e.target.value);
-            setSettings.mutate({ overviewTempSensor: e.target.value });
-          }}
+        <SettingsRow
+          label="Recording quality"
+          align="start"
+          hint={
+            <>
+              Which stream cameras record to disk. <span className="text-fg-muted">Prefer low</span> uses each camera&apos;s
+              sub stream where it has one; cameras without a sub keep recording their main stream. Live view is unaffected.
+              Applies in a few seconds — recorders restart.
+            </>
+          }
         >
-          <option value="">Outdoor weather (default)</option>
-          {tempSensor && !sensors?.some((s) => s.entityId === tempSensor) && (
-            <option value={tempSensor}>{tempSensor} (waiting for reading…)</option>
-          )}
-          {sensors?.map((s) => (
-            <option key={s.entityId} value={s.entityId}>
-              {(s.name || s.entityId) + (s.unit ? ` — ${s.value} ${s.unit}` : ` — ${s.value}`)}
-            </option>
-          ))}
-        </select>
-        <p className="text-[11px] text-fg-faint mt-1.5">
-          Shown on the dashboard. Defaults to your location&apos;s weather; pick a Home Assistant sensor to use its
-          reading instead.
-        </p>
-        {!ha?.enabled && <p className="text-[11px] text-fg-faint mt-1">Connect Home Assistant to use a sensor.</p>}
+          <select
+            className="input max-w-md"
+            value={recordQuality}
+            onChange={(e) => {
+              const v = e.target.value as "high" | "low";
+              setRecordQuality(v);
+              setSettings.mutate({ recordQuality: v });
+            }}
+          >
+            <option value="high">Prefer high quality — main stream</option>
+            <option value="low">Prefer low quality — sub stream (saves space)</option>
+          </select>
+        </SettingsRow>
+
+        <SettingsRow label="Spotlights card" hint="Show the Spotlights panel in the dashboard overview.">
+          <Switch
+            checked={spotlights}
+            onChange={(v) => {
+              setSpotlights(v);
+              setSettings.mutate({ spotlightsEnabled: v });
+            }}
+            label="Spotlights card"
+          />
+        </SettingsRow>
       </div>
-
-      <div className="mt-4 border-t border-line pt-4">
-        <label className="label">Recording quality</label>
-        <select
-          className="input"
-          value={recordQuality}
-          onChange={(e) => {
-            const v = e.target.value as "high" | "low";
-            setRecordQuality(v);
-            setSettings.mutate({ recordQuality: v });
-          }}
-        >
-          <option value="high">Prefer high quality — main stream</option>
-          <option value="low">Prefer low quality — sub stream (saves space)</option>
-        </select>
-        <p className="text-[11px] text-fg-faint mt-1.5">
-          Which stream cameras record to disk. <span className="text-fg-muted">Prefer low</span> uses each camera&apos;s sub
-          stream where it has one; cameras without a sub keep recording their main stream. Live view is unaffected. Applies in
-          a few seconds — recorders restart.
-        </p>
-      </div>
-
-      <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
-        <div>
-          <p className="text-sm text-fg">Spotlights card</p>
-          <p className="text-[11px] text-fg-faint">Show the Spotlights panel on the dashboard sidebar.</p>
-        </div>
-        <Switch
-          checked={spotlights}
-          onChange={(v) => {
-            setSpotlights(v);
-            setSettings.mutate({ spotlightsEnabled: v });
-          }}
-          label="Spotlights card"
-        />
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="panel">
-      <h2 className="text-sm font-medium text-fg mb-3">{title}</h2>
-      <div className="space-y-2.5">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, value, className }: { label: string; value: string; className?: string }) {
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-fg-muted">{label}</span>
-      <span className={`text-fg ${className ?? ""}`}>{value}</span>
-    </div>
+    </>
   );
 }

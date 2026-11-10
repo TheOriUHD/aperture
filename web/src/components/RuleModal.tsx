@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Check } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Switch } from "./ui/Switch";
 import { useSaveRule, type Rule, type Channel } from "../hooks/useNotify";
@@ -30,12 +31,15 @@ function Chips({
           <button
             key={o.id}
             onClick={() => onToggle(o.id)}
-            className={`h-7 px-2.5 rounded-md text-xs border ${
+            type="button"
+            aria-pressed={on}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors ${
               on
-                ? "bg-brand/15 text-brand border-brand/40"
-                : "bg-ink-800 text-fg-muted border-line-strong hover:bg-ink-700"
+                ? "border-brand/60 bg-brand/10 text-brand"
+                : "border-line-strong text-fg-muted hover:border-[#3a3e43] hover:text-fg"
             }`}
           >
+            {on && <Check className="h-3 w-3" />}
             {o.label}
           </button>
         );
@@ -78,7 +82,7 @@ export function RuleModal({
       title={rule ? "Edit rule" : "New notification rule"}
       footer={
         <>
-          <button className="btn-subtle" onClick={onClose}>
+          <button className="btn-ghost" onClick={onClose}>
             Cancel
           </button>
           <button
@@ -113,15 +117,21 @@ export function RuleModal({
         </>
       }
     >
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <input
-            className="input flex-1"
-            placeholder="e.g. Person at the front door"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <Switch checked={enabled} onChange={setEnabled} label="Enabled" />
+      <div className="space-y-5">
+        <div>
+          <label className="label">Name</label>
+          <div className="flex items-center gap-3">
+            <input
+              className="input flex-1"
+              placeholder="e.g. Person at the front door"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <label className="flex shrink-0 items-center gap-2 text-sm text-fg-muted">
+              <Switch checked={enabled} onChange={setEnabled} label="Enabled" />
+              Enabled
+            </label>
+          </div>
         </div>
 
         <div>
@@ -131,7 +141,7 @@ export function RuleModal({
             selected={cams}
             onToggle={(id) => toggle(cams, setCams, id)}
           />
-          <p className="text-xs text-fg-faint mt-1.5">
+          <p className="hint mt-1.5">
             {cams.length === 0 ? "All cameras you can access." : `${cams.length} selected.`}
           </p>
         </div>
@@ -139,7 +149,7 @@ export function RuleModal({
         <div>
           <label className="label">Notify via</label>
           {channels.length === 0 ? (
-            <p className="text-xs text-fg-faint">Add a channel first.</p>
+            <p className="hint">Add a channel first.</p>
           ) : (
             <Chips
               options={channels.map((c) => ({ id: c.id, label: c.name }))}
@@ -164,8 +174,8 @@ export function RuleModal({
               <option value={900}>15 minutes</option>
             </select>
           </div>
-          <div className="flex items-end pb-0.5">
-            <label className="flex items-center gap-2 text-sm text-fg">
+          <div className="flex items-end">
+            <label className="flex h-8 cursor-pointer items-center gap-2 text-sm text-fg">
               <input type="checkbox" checked={quiet} onChange={(e) => setQuiet(e.target.checked)} />
               Quiet hours
             </label>
@@ -190,40 +200,42 @@ export function RuleModal({
           </div>
         )}
 
-        <div className="border-t border-line pt-4">
-          <label className="label">Only notify when…</label>
+        <div className="border-t border-line pt-5">
+          <p className="mb-3 text-[13px] font-semibold text-fg">Only notify when…</p>
           <div className="grid grid-cols-2 gap-3">
             <select
               className="input"
               value={timeOfDay}
               onChange={(e) => setTimeOfDay(e.target.value as "" | "day" | "night")}
+              aria-label="Time of day"
             >
               <option value="">Any time of day</option>
               <option value="day">Daytime only</option>
               <option value="night">Nighttime only</option>
             </select>
-            <label className="flex items-center gap-2 text-sm text-fg">
+            <label className="flex h-8 cursor-pointer items-center gap-2 text-sm text-fg">
               <input type="checkbox" checked={onlyPrecip} onChange={(e) => setOnlyPrecip(e.target.checked)} />
               Only when raining
             </label>
           </div>
-          <p className="text-xs text-fg-faint mt-1.5">
+          <p className="hint mt-1.5">
             Time of day and rain use your site’s sun times and recorded weather — ignored until a location is set
-            in Settings → Location &amp; weather.
+            in Settings → Environment.
           </p>
           <input
-            className="input mt-3"
+            className="input mt-4"
             value={objects.join(", ")}
             onChange={(e) => setObjects(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
             placeholder="Only these objects, e.g. person, car (optional)"
+            aria-label="Object filter"
           />
-          <p className="text-xs text-fg-faint mt-1.5">
+          <p className="hint mt-1.5">
             Object filter: notify only when the detector tagged one of these labels (comma-separated). Needs object
             detection enabled.
           </p>
         </div>
 
-        {err && <p className="text-xs text-rec">{err}</p>}
+        {err && <p className="text-xs text-danger">{err}</p>}
       </div>
     </Modal>
   );

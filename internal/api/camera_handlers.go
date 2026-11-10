@@ -12,6 +12,7 @@ import (
 
 	"github.com/TheOriUHD/aperture/internal/auth"
 	"github.com/TheOriUHD/aperture/internal/store"
+	"github.com/TheOriUHD/aperture/internal/stream"
 	"github.com/TheOriUHD/aperture/internal/urlcred"
 )
 
@@ -61,6 +62,7 @@ func (s *Server) handleTestCamera(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	src = stream.NormalizeSource(src)
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 	jpeg, err := s.sm.TestStream(ctx, src)
@@ -171,14 +173,17 @@ type cameraReq struct {
 	RecordHeight      *int     `json:"recordHeight"` // recording quality; 0 = as the camera sends it
 	RecordFPS         *int     `json:"recordFps"`
 	RecordKbps        *int     `json:"recordKbps"`
+	HAPublish         *bool    `json:"haPublish"`
 }
 
 // validDetectMethod clamps a per-camera object-detection override to a known
 // value; "" means inherit the global Settings backend.
 func validDetectMethod(m string) string {
 	switch m {
-	case "off", "bridge", "onnx":
+	case "off", "bridge", "local":
 		return m
+	case "onnx": // the older name for local
+		return "local"
 	default:
 		return ""
 	}
@@ -202,16 +207,32 @@ func (s *Server) handleCreateCamera(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, newCameraMaskMsg)
 		return
 	}
+	mainURL := stream.NormalizeSource(req.RTSPMainURL)
+	// A UniFi Protect camera is live view only unless asked otherwise: Protect does
+	// the recording and the motion detection, and Home Assistant usually has the
+	// camera already, through its own Protect integration.
+	protect := stream.IsProtectSource(mainURL)
+	mode, motion, haHidden := store.ModeContinuous, !protect, protect
+	if protect {
+		mode = store.ModeNever
+	}
+	if req.MotionDetection != nil {
+		motion = *req.MotionDetection
+	}
+	if req.HAPublish != nil {
+		haHidden = !*req.HAPublish
+	}
 	c := &store.Camera{
 		Name:              req.Name,
-		RTSPMainURL:       req.RTSPMainURL,
-		RTSPSubURL:        derefStr(req.RTSPSubURL, ""),
+		RTSPMainURL:       mainURL,
+		RTSPSubURL:        stream.NormalizeSource(derefStr(req.RTSPSubURL, "")),
 		Enabled:           req.Enabled == nil || *req.Enabled,
-		RecordMode:        defaultStr(req.RecordMode, store.ModeContinuous),
+		RecordMode:        defaultStr(req.RecordMode, mode),
+		HAHidden:          haHidden,
 		RetentionDays:     derefInt(req.RetentionDays, 7),
 		StorageQuotaBytes: derefInt64(req.StorageQuotaBytes, 0),
 		MotionThreshold:   derefFloat(req.MotionThreshold, 0.02),
-		MotionDetection:   req.MotionDetection == nil || *req.MotionDetection,
+		MotionDetection:   motion,
 		AudioDetection:    req.AudioDetection != nil && *req.AudioDetection,
 		AudioThreshold:    derefFloat(req.AudioThreshold, 0),
 		LocationID:        s.resolveLocationID(derefStr(req.LocationID, "")),
@@ -289,14 +310,14 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	// "keep the saved login" and is filled in again, but only for the host it was
 	// saved for (urlcred.Merge); anything else is taken as typed. A client that
 	// leaves a link out keeps it untouched.
-	oldMain, oldSub := c.RTSPMainURL, c.RTSPSubURL
+	oldMain, oldSub, haBefore := c.RTSPMainURL, c.RTSPSubURL, c.HAHidden
 	if req.RTSPMainURL != "" {
 		u, err := urlcred.Merge(req.RTSPMainURL, oldMain, oldSub)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, linkErrMsg("Main stream", err))
 			return
 		}
-		c.RTSPMainURL = u
+		c.RTSPMainURL = stream.NormalizeSource(u)
 	}
 	if req.RTSPSubURL != nil {
 		u, err := urlcred.Merge(*req.RTSPSubURL, oldSub, oldMain)
@@ -304,12 +325,15 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, linkErrMsg("Sub stream", err))
 			return
 		}
-		c.RTSPSubURL = u
+		c.RTSPSubURL = stream.NormalizeSource(u)
 	}
 	c.RTSPSubURL = urlcred.Follow(c.RTSPSubURL, oldMain, c.RTSPMainURL)
 	loginChanged := !urlcred.SameLogin(oldMain, c.RTSPMainURL) || !urlcred.SameLogin(oldSub, c.RTSPSubURL)
 	if req.Enabled != nil {
 		c.Enabled = *req.Enabled
+	}
+	if req.HAPublish != nil {
+		c.HAHidden = !*req.HAPublish
 	}
 	if req.RecordMode != "" {
 		c.RecordMode = req.RecordMode
@@ -391,6 +415,13 @@ func (s *Server) handleUpdateCamera(w http.ResponseWriter, r *http.Request) {
 	if loginChanged {
 		detail += " login=changed" // that it changed, never what to
 	}
+	if c.HAHidden != haBefore && s.ha != nil {
+		if c.HAHidden {
+			s.ha.ForgetCamera(c.ID)
+		} else {
+			s.ha.Republish()
+		}
+	}
 	s.logAudit(r, "camera.update", c.Name, detail)
 	v := cameraView(c, true)
 	setETag(w, v)
@@ -443,6 +474,9 @@ func (s *Server) syncStreams() {
 		}
 		// Pick up recording-mode / enabled changes promptly.
 		s.rec.Reconcile()
+		// Which cameras use object recognition may have changed with them; this
+		// also reconciles motion detection.
+		s.detect.ApplyConfig()
 		s.det.Reconcile()
 	}()
 }
@@ -482,6 +516,7 @@ func cameraView(c *store.Camera, links bool) map[string]any {
 		"recordHeight":      c.RecordHeight,
 		"recordFps":         c.RecordFPS,
 		"recordKbps":        c.RecordKbps,
+		"haPublish":         !c.HAHidden,
 		"createdAtMs":       msFromSec(c.CreatedAt), // stored in seconds; wire is ms (DD-WIRE-TIME)
 		"updatedAtMs":       msFromSec(c.UpdatedAt),
 	}
