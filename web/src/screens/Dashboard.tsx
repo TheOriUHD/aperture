@@ -36,6 +36,8 @@ const SIDEBAR_KEY = "aperture.dashboard.sidebar";
 const GROUP_KEY = "aperture.dashboard.group";
 // The hand-picked cameras of the custom view: a JSON list of ids, in wall order.
 const CUSTOM_KEY = "aperture.dashboard.custom";
+// How close to the bottom of the wall (px) the pointer brings up the view bar.
+const BAR_ZONE = 120;
 
 function readLS(key: string, fallback: string): string {
   try {
@@ -157,6 +159,16 @@ function DesktopDashboard({
     else void wallRef.current?.requestFullscreen?.();
   };
 
+  // The view bar shows only while the pointer is down by it, at the bottom of
+  // the wall, like the controls on a tile show only while it's hovered. A
+  // pointer resting anywhere else on the wall leaves the cameras clear.
+  const [nearBar, setNearBar] = useState(false);
+  const trackBar = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "touch") return;
+    const r = e.currentTarget.getBoundingClientRect();
+    setNearBar(r.bottom - e.clientY <= BAR_ZONE);
+  };
+
   // The camera picker previews the wall at its current size, so the layout it
   // shows is the one the wall will take on this screen.
   const tileBox = useRef({ w: 0, h: 0 });
@@ -207,9 +219,8 @@ function DesktopDashboard({
           <OverviewSidebar cameras={list} allCameras={all} />
         </aside>
       )}
-      {/* The main area. Hovering anywhere on it, tiles or the empty space around
-          them, brings up the view bar. */}
-      <div className="group/wall relative flex min-w-0 flex-1 flex-col">
+      {/* The main area. */}
+      <div className="relative flex min-w-0 flex-1 flex-col">
         <button
           onClick={toggleSidebar}
           title={sidebar ? "Hide overview" : "Show overview"}
@@ -218,7 +229,12 @@ function DesktopDashboard({
         >
           {sidebar ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelLeftOpen className="h-3.5 w-3.5" />}
         </button>
-        <div ref={wallRef} className={clsx("relative min-h-0 flex-1", fullscreen && "bg-black")}>
+        <div
+          ref={wallRef}
+          onPointerMove={trackBar}
+          onPointerLeave={() => setNearBar(false)}
+          className={clsx("relative min-h-0 flex-1", fullscreen && "bg-black")}
+        >
           {list.length === 0 ? (
             empty
           ) : shown.length === 0 ? (
@@ -248,6 +264,7 @@ function DesktopDashboard({
             >
               <ViewBar
                 always={shown.length === 0}
+                near={nearBar}
                 views={views}
                 current={view.id}
                 onView={pickView}
@@ -402,12 +419,13 @@ function WallPreview({ cameras, box, bare }: { cameras: Camera[]; box: { w: numb
   );
 }
 
-// ViewBar floats over the bottom of the main area while the pointer is on it:
-// which cameras are shown (all, a group or a hand-picked set) and a fullscreen
-// toggle. It stays up while its menu is open, and always on a touch screen,
-// which cannot hover.
+// ViewBar floats over the bottom of the wall while the pointer is down by it:
+// which cameras are shown (all, a group or a hand-picked set), the object-box
+// toggle and fullscreen. It stays up while its menu is open, while a key moves
+// focus into it, and always on a touch screen, which cannot hover.
 function ViewBar({
   always,
+  near,
   views,
   current,
   onView,
@@ -416,6 +434,7 @@ function ViewBar({
   onFullscreen,
 }: {
   always?: boolean;
+  near?: boolean;
   views: { id: string; name: string; n: number }[];
   current: string;
   onView: (id: string) => void;
@@ -433,9 +452,9 @@ function ViewBar({
       ref={ref}
       className={clsx(
         "pointer-events-auto relative flex items-center gap-1.5 transition-opacity duration-150",
-        always || open
+        always || open || near
           ? "opacity-100"
-          : "opacity-0 focus-within:opacity-100 group-hover/wall:opacity-100 [@media(hover:none)]:opacity-100",
+          : "opacity-0 has-[:focus-visible]:opacity-100 [@media(hover:none)]:opacity-100",
       )}
     >
       <button
