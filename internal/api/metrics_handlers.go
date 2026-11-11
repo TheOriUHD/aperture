@@ -69,10 +69,14 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	for _, c := range cams {
 		fmt.Fprintf(&b, "aperture_camera_recording_expected{camera_id=%q,name=%q} %g\n", c.ID, c.Name, b2f(s.recordingDue(c)))
 	}
-	decl("aperture_camera_live_ok", "1 if the camera's go2rtc stream is registered.", "gauge")
+	decl("aperture_camera_online", "1 if the camera delivers video (0 once it has sent nothing for 30 s, or doesn't answer).", "gauge")
+	for _, c := range cams {
+		fmt.Fprintf(&b, "aperture_camera_online{camera_id=%q,name=%q} %g\n", c.ID, c.Name, b2f(s.cameraOnline(c.ID)))
+	}
+	decl("aperture_camera_live_ok", "1 if live view can work: go2rtc holds the stream and the camera delivers.", "gauge")
 	for _, c := range cams {
 		_, reg := health.Registered[stream.StreamName(c.ID)]
-		fmt.Fprintf(&b, "aperture_camera_live_ok{camera_id=%q,name=%q} %g\n", c.ID, c.Name, b2f(health.Reachable && reg))
+		fmt.Fprintf(&b, "aperture_camera_live_ok{camera_id=%q,name=%q} %g\n", c.ID, c.Name, b2f(health.Reachable && reg && s.cameraOnline(c.ID)))
 	}
 
 	// Deprecated /api (non-v1) alias usage — the 5.4-retirement precondition.

@@ -55,9 +55,12 @@ func staleCamera(t *testing.T, rec Recorder, c *calls) (*Watchdog, *store.Store)
 		EndTS: start + 10_000, DurationMS: 10_000, SizeBytes: 1}); err != nil {
 		t.Fatal(err)
 	}
-	go2rtc := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	go2rtc := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
 			c.add("stream")
+		}
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(rw, "{}")
 		}
 	}))
 	t.Cleanup(go2rtc.Close)
@@ -103,6 +106,7 @@ func TestOutsideItsScheduleACameraIsNotStale(t *testing.T) {
 	w, _ := staleCamera(t, &fakeRecorder{due: false, stalled: true, calls: c}, c)
 	states := make(chan bool, 1)
 	w.SetOnCameraState(func(_ string, online bool) { states <- online })
+	w.probe = func(context.Context, string) error { return nil } // nothing reads it; it answers
 
 	w.tick(context.Background())
 

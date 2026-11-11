@@ -96,6 +96,9 @@ func (s *Server) handleListCameras(w http.ResponseWriter, r *http.Request) {
 		}
 		v := cameraView(c, links)
 		v["recordingNow"] = s.recordingNow(c)
+		if c.Enabled {
+			v["online"] = s.cameraOnline(c.ID)
+		}
 		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -126,6 +129,9 @@ func (s *Server) handleGetCamera(w http.ResponseWriter, r *http.Request) {
 	v := cameraView(c, seesCameraLinks(r))
 	setETag(w, v)
 	v["recordingNow"] = s.recordingNow(c) // after the ETag: it flips with the schedule
+	if c.Enabled {
+		v["online"] = s.cameraOnline(c.ID) // so does this, with the camera
+	}
 	writeJSON(w, http.StatusOK, v)
 }
 

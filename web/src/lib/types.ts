@@ -67,6 +67,7 @@ export interface Camera {
   recordFps: number;
   recordKbps: number;
   recordingNow?: boolean; // meant to be recording right now; a schedule makes this flip
+  online?: boolean; // the server sees video arriving from it (absent: disabled, or not known yet)
   haPublish?: boolean; // shown in Home Assistant and HomeKit
 }
 

@@ -68,7 +68,8 @@ export interface CameraHealth {
   recordingOk: boolean;
   recordingState: RecordingState;
   lastSegmentTs: number;
-  liveOk: boolean;
+  liveOk: boolean; // go2rtc holds the stream and the camera delivers
+  online?: boolean; // video arrives from the camera
   watchdogStale?: boolean;
   restartsToday?: number;
   watchdogLastSeen?: number;

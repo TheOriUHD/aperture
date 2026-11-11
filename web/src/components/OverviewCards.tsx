@@ -133,7 +133,9 @@ function SystemBody({ cameras }: { cameras: Camera[] }) {
   const cap = useCapacity();
   const { user } = useAuth();
 
-  const online = cameras.filter((c) => c.enabled).length;
+  // Online means video arrives from it, as the server sees it; a disabled
+  // camera isn't.
+  const online = cameras.filter((c) => c.enabled && c.online !== false).length;
   const oldestList = storage?.cameras.filter((c) => c.oldestTs > 0).map((c) => c.oldestTs) ?? [];
   const oldest = oldestList.length ? Math.min(...oldestList) : 0;
   const used = storage?.usedBytes ?? 0;

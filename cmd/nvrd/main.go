@@ -326,9 +326,11 @@ func main() {
 	weatherPoller := weather.New(st, log)
 	waited.run("weather", weatherPoller.Run)
 
-	// Watchdog: detect stale recordings (wedged producers) and self-heal.
+	// Watchdog: detect stale recordings (wedged producers) and self-heal, and
+	// tell which cameras actually deliver video.
 	wd := watchdog.New(st, sm, rec, log)
 	wd.SetOnCameraState(notifyEng.OnCameraState)
+	wd.SetWatching(det.Watching)
 	waited.run("watchdog", wd.Run)
 
 	// ONVIF Profile S provider (external VMS/NVR consumption) — same toggle model

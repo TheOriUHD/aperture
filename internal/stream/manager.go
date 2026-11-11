@@ -5,10 +5,12 @@
 package stream
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -270,39 +272,81 @@ func sameSources(raw json.RawMessage, srcs []string) bool {
 }
 
 // StreamHealth is a snapshot of go2rtc's reachability and the camera streams it
-// currently holds (name -> has at least one producer source).
+// currently holds (name -> has at least one producer source). Registered says
+// nothing about the camera itself: go2rtc keeps a stream whose camera is gone.
+// Recv is what a stream's live connections to its camera have received so far
+// (absent while none is connected); Consumers counts its readers.
 type StreamHealth struct {
 	Reachable  bool
 	Registered map[string]bool
+	Recv       map[string]int64
+	Consumers  map[string]int
 }
 
 // Health probes go2rtc for the live-view health signal that a silent stream
 // drop (e.g. after a go2rtc restart) would otherwise hide.
 func (m *Manager) Health(ctx context.Context) StreamHealth {
+	h := StreamHealth{Registered: map[string]bool{}, Recv: map[string]int64{}, Consumers: map[string]int{}}
 	raw, err := m.streams(ctx)
 	if err != nil {
-		return StreamHealth{Reachable: false, Registered: map[string]bool{}}
+		return h
 	}
-	h := StreamHealth{Reachable: true, Registered: make(map[string]bool, len(raw))}
+	h.Reachable = true
 	for name, def := range raw {
 		var d struct {
-			Producers []json.RawMessage `json:"producers"`
+			Producers []struct {
+				Remote string `json:"remote_addr"`
+				Recv   int64  `json:"bytes_recv"`
+			} `json:"producers"`
+			Consumers []json.RawMessage `json:"consumers"`
 		}
 		_ = json.Unmarshal(def, &d)
 		h.Registered[name] = len(d.Producers) > 0
+		for _, p := range d.Producers {
+			if p.Remote != "" || p.Recv > 0 {
+				h.Recv[name] += p.Recv
+			}
+		}
+		h.Consumers[name] = len(d.Consumers)
 	}
 	return h
 }
 
-// Online reports whether go2rtc currently has a producer for the camera (a
-// best-effort health signal for the UI).
-func (m *Manager) Online(ctx context.Context, cameraID string) bool {
-	streams, err := m.streams(ctx)
+// Probe asks go2rtc for the camera's stream over RTSP (DESCRIBE; nothing is
+// played). go2rtc connects to the camera to answer, so an error means the camera
+// can't be reached or doesn't serve the stream. Meant for cameras nothing reads
+// from; for the others, what they receive tells more.
+func (m *Manager) Probe(ctx context.Context, cameraID string) error {
+	u, err := url.Parse(m.RTSPURL(cameraID))
 	if err != nil {
-		return false
+		return err
 	}
-	_, ok := streams[StreamName(cameraID)]
-	return ok
+	host := u.Host
+	if u.Port() == "" {
+		host = net.JoinHostPort(u.Hostname(), "554")
+	}
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", host)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if dl, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(dl)
+	}
+	u.User = nil // never on the request line
+	req := "DESCRIBE " + u.String() + " RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\nUser-Agent: aperture\r\n\r\n"
+	if _, err := io.WriteString(conn, req); err != nil {
+		return err
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return err
+	}
+	if f := strings.Fields(line); len(f) < 2 || f[1] != "200" {
+		return fmt.Errorf("go2rtc answered %q", strings.TrimSpace(line))
+	}
+	return nil
 }
 
 // Snapshot fetches a single JPEG frame for a camera from go2rtc and caches it.

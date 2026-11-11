@@ -96,7 +96,10 @@ func (s *Server) buildStatus(ctx context.Context, includeDisabled bool) map[stri
 		}
 		recordingExpected := s.recordingDue(c)
 		recordingOk := newest > 0 && now-newest < store.RecordingGraceMs
-		liveOk := health.Reachable && registered
+		// Registered only says go2rtc holds the stream; it keeps one whose camera
+		// is gone. Online says video actually arrives.
+		online := s.cameraOnline(c.ID)
+		liveOk := health.Reachable && registered && online
 
 		if c.Enabled && !liveOk {
 			liveDown++
@@ -115,6 +118,7 @@ func (s *Server) buildStatus(ctx context.Context, includeDisabled bool) map[stri
 			"recordingState":    recordingState(c, recordingExpected, recordingOk),
 			"lastSegmentTs":     newest,
 			"liveOk":            liveOk,
+			"online":            online,
 		}
 		// Watchdog self-heal stats.
 		if s.watchdog != nil {
@@ -163,4 +167,10 @@ func (s *Server) buildStatus(ctx context.Context, includeDisabled bool) map[stri
 		"weather":       s.weather.Status(),
 		"cameras":       camStatus,
 	}
+}
+
+// cameraOnline reports whether the camera delivers video, as the watchdog sees
+// it (true without a watchdog, or until it knows).
+func (s *Server) cameraOnline(id string) bool {
+	return s.watchdog == nil || s.watchdog.Online(id)
 }

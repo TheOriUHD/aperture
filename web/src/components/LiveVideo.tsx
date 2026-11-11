@@ -220,6 +220,17 @@ export function LiveVideo({
           ) : null}
         </div>
       </div>
+
+      {/* The server sees nothing arriving from the camera: whatever the player
+          still shows (a frozen frame, the last snapshot) isn't live. */}
+      {camera.online === false && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black/60">
+          <div className="flex flex-col items-center gap-1.5 text-white/80">
+            <VideoOff className="h-6 w-6" />
+            <span className="text-xs font-medium">Offline</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

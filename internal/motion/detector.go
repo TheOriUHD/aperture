@@ -126,6 +126,15 @@ func (d *Detector) SetFrameSink(s FrameSink) {
 	d.mu.Unlock()
 }
 
+// Watching reports whether motion detection (and with it recognition) reads the
+// camera.
+func (d *Detector) Watching(cameraID string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, ok := d.active[cameraID]
+	return ok
+}
+
 func (d *Detector) frameSink() FrameSink {
 	d.mu.Lock()
 	defer d.mu.Unlock()
